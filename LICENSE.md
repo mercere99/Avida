@@ -1,6 +1,8 @@
-MIT License
+# The MIT License (MIT)
 
-Copyright (c) 2019 Charles Ofria
+Copyright (c) 2025 Michigan State University Digital Evolution Laboratory
+
+Contributors: Charles Ofria
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
