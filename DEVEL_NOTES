@@ -202,13 +202,13 @@ Sort     : Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X,Y if X>Y else Y,X
 TestLess : Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X < Y
 TestEqu  : Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X == Y
 
-Nand     : Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] ~(X&Y)
-Xor      : Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X ^ Y
+Nand     : Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] ~(X&Y)  (bitwise)
+Xor      : Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X ^ Y   (bitwise)
 
+If         : Pop[Nop-A]:X ; if X == 0, skip next instruction
 Scope      : Change current Scope to [Nop-A]. If current Scope <= previous, end prev Scope.
-BreakIf    : Pop[Nop-A]:X ; if X != 0, advance to end of Scope [Current]
-Continue   : Restart [Current] Scope
-ContinueIf : Pop[Nop-A]:X ; if X != 0, restart Scope [Current]
+Break      : Advance to end of Scope [Current]
+Continue   : Restart Scope [Current]
 
 StackPop  : Discard top entry from [Nop-A] X
 StackDup  : Pop[Nop-A]:X and push two copies, one on [Arg1] and the other on [Arg1]
@@ -217,15 +217,10 @@ StackMove : Pop[Nop-A]:X and Push[Arg1+1] X
 
 Copy       : Copy the value from Head [Nop-B] to Head [Arg1+1], advancing both
 Load       : Read value at Head [Nop-D]:X ; Push X onto stack [Nop-A] ; advance Head.
-Store      : Pop[Nop-A] and write the value into Head [NopE]
+Store      : Pop[Nop-A] and write the value into Head [NopE] ; advance Head.
 DivideCell : Split off allocated space.
 
 HeadPos    : Push the position of Head[Nop-F] onto stack [Nop-A]
 SetHead    : Pop stack [Nop-A] and move head[Nop-F] to that position.
 JumpHead   : Jump head [Nop-A] to head[Nop-F]
 OffsetHead : Move head [Nop-F] by the amount of steps popped off of [Nop-A]
-
-
-
-And      : Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X & Y
-Or       : Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X | Y
