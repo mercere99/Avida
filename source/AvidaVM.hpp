@@ -17,12 +17,19 @@
 /// Default Avida Virtual Machine for use in Avida 5
 class AvidaVM {
 private:
-  using data_t = int;  // What type of data does this VM use?
-  using inst_fun_t = void (AvidaVM::*)(); // Type for functions to be called.
+  // Configured values.
   static constexpr size_t NUM_NOPS = 6;
   static constexpr size_t STACK_DEPTH = 16;
   static constexpr size_t MEM_SIZE = 64;    // How much physical memory is available?
   static constexpr size_t MAX_INSTS = 256;  // Maximum number of distinct instructions.
+
+  // Configured types.
+  using data_t = int;  // What type of data does this VM use?
+  using mem_t = emp::array<data_t, MEM_SIZE>;
+  using genome_t = StateGenome<MAX_INSTS>;
+  using inst_fun_t = void (AvidaVM::*)(); // Type for functions to be called.
+
+  // Calculated values.
   static constexpr size_t DATA_BITS = sizeof(data_t)*8; // Number of bits in data_t;
 
   struct Head {
@@ -79,8 +86,8 @@ private:
 
   // === Hardware ===
 
-  StateGenome<MAX_INSTS> genome;
-  emp::array<data_t, MEM_SIZE> memory;
+  genome_t genome;
+  mem_t memory;
   emp::array<inst_fun_t, MAX_INSTS> inst_set;
   size_t num_insts = 0; // Number of instructions that are active.
 
@@ -159,101 +166,134 @@ public:
   // AvidaVM & operator=(AvidaVM &&) = default;
 
 
-  // Instructions
-  void Inst_Const() {  // Push value [Nop-A] onto Stack [Nop-A]
+  // === Instructions ===
+
+  // Inst: Push value [Nop-A] onto Stack [Nop-A]
+  void Inst_Const() {
     static constexpr data_t const_vals[]{ 1, 2, 4, 16, 256, -1, 65536, 0, -2, 0, 0, 0};
     const data_t value = const_vals[GetArg(Nop::A)];
     GetStackArg(Nop::A).Push(value);
   }
 
-  void Inst_Nop() { }    // No-operation.
-  void Inst_Not() {      // Pop[Nop-A]:X ; Push[Arg1] !X
+  // Inst: No-operation.
+  void Inst_Nop()  { }
+
+  // Inst: Pop[Nop-A]:X ; Push[Arg1] !X
+  void Inst_Not() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     GetStackArg(X_id).Push(!X);
   }
-  void Inst_Shift() {    // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X<<Y
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X<<Y
+  void Inst_Shift() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     GetStackArg(X_id).Push(X << emp::Mod(Y,DATA_BITS));
   }
-  void Inst_Add() {      // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X + Y
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X + Y
+  void Inst_Add() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     GetStackArg(X_id).Push(X + Y);
   }
-  void Inst_Sub() {      // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X - Y
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X - Y
+  void Inst_Sub() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     GetStackArg(X_id).Push(X - Y);
   }
-  void Inst_Mult() {     // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X * Y
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X * Y
+  void Inst_Mult() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     GetStackArg(X_id).Push(X * Y);
   }
-  void Inst_Div() {      // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X / Y
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X / Y
+  void Inst_Div() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     if (Y == 0) ++error_count;
     else GetStackArg(X_id).Push(X / Y);
   }
-  void Inst_Mod() {      // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X % Y
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X % Y
+  void Inst_Mod() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     if (Y == 0) ++error_count;
     else GetStackArg(X_id).Push(X % Y);
   }
-  void Inst_Exp() {      // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X ** Y
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X ** Y
+  void Inst_Exp() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     GetStackArg(X_id).Push(emp::Pow(X, Y));
   }
-  void Inst_Sort() {     // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X,Y if X>Y else Y,X
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X,Y if X>Y else Y,X
+  void Inst_Sort() {
     size_t X_id = GetArg(Nop::A);
     size_t Y_id = GetArg(X_id);
-    const data_t X = stacks[X_id].Pop();
-    const data_t Y = stacks[Y_id].Pop();
+    data_t X = stacks[X_id].Pop();
+    data_t Y = stacks[Y_id].Pop();
     if (X < Y) std::swap(X,Y);
     GetStackArg(X_id).Push(X);
     GetStackArg(Y_id).Push(Y);
   }
-  void Inst_TestLess() { // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X < Y
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X < Y
+  void Inst_TestLess() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     GetStackArg(X_id).Push(X < Y);
   }
-  void Inst_TestEqu() {  // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X == Y
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X == Y
+  void Inst_TestEqu() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     GetStackArg(X_id).Push(X == Y);
   }
-  void Inst_Nand() {     // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] ~(X&Y)  (bitwise)
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] ~(X&Y)  (bitwise)
+  void Inst_Nand() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     GetStackArg(X_id).Push(~(X & Y));
   }
-  void Inst_Xor() {      // Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X ^ Y   (bitwise)
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X ^ Y   (bitwise)
+  void Inst_Xor() {
     size_t X_id = GetArg(Nop::A);
     const data_t X = stacks[X_id].Pop();
     const data_t Y = GetStackArg(X_id).Pop();
     GetStackArg(X_id).Push(X ^ Y);
   }
-  void Inst_If() {         // Pop[Nop-A]:X ; if X == 0, skip next instruction
+
+  // Inst: Pop[Nop-A]:X ; if X == 0, skip next instruction
+  void Inst_If() {
     const data_t X = GetStackArg(Nop::A).Pop();
     if (!X) AdvanceIP();
   }
-  void Inst_Scope() {      // Change current Scope to [Nop-A]. If current Scope <= previous, end prev Scope.
+
+  // Inst: Change current Scope to [Nop-A]. If current Scope <= previous, end prev Scope.
+  void Inst_Scope() {
     size_t new_scope = GetArg(Nop::A);
     // If we are starting new scopes, track starting lines here.
     for (size_t scope = cur_scope; scope <= new_scope; ++scope) {
@@ -261,7 +301,9 @@ public:
     }
     cur_scope = new_scope;
   }
-  void Inst_Continue() {   // Restart Scope [Current]
+
+  // Inst: Restart Scope [Current]
+  void Inst_Continue() {
     size_t target_scope = GetArg(cur_scope);
     if (target_scope > cur_scope) ++error_count;  // Trying to continue a scope we are not in.
     else {
@@ -269,7 +311,9 @@ public:
       cur_scope = target_scope;
     }
   }
-  void Inst_Break() {      // Advance to end of Scope [Current]
+
+  // Inst: Advance to end of Scope [Current]
+  void Inst_Break() {
     size_t target_scope = GetArg(cur_scope);
     if (target_scope > cur_scope) ++error_count;  // Trying to break from a scope we are not in.
     else {
@@ -282,15 +326,21 @@ public:
       }
     }
   }
-  void Inst_StackPop() {  // Discard top entry from [Nop-A] X
+
+  // Inst: Discard top entry from [Nop-A] X
+  void Inst_StackPop() {
     GetStackArg(Nop::A).Pop();
   }
-  void Inst_StackDup() {  // Read top of Stack [Nop-A] (no popping) and push a copy on [Arg1]
+
+  // Inst: Read top of Stack [Nop-A] (no popping) and push a copy on [Arg1]
+  void Inst_StackDup() {
     const size_t stack1_id = GetArg(Nop::A);
     data_t value = stacks[stack1_id].Top();
     GetStackArg(stack1_id).Push(value);
   }
-  void Inst_StackSwap() { // Pop[Nop-A]:X ; Pop[Arg1]:Y; push X on Stack [Arg2]; push Y on Stack [Arg1]
+
+  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y; push X on Stack [Arg2]; push Y on Stack [Arg1]
+  void Inst_StackSwap() {
     const size_t stack1_id = GetArg(Nop::A);
     const size_t stack2_id = GetArg(stack1_id);
     const data_t X = stacks[stack1_id].Pop();
@@ -298,33 +348,62 @@ public:
     GetStackArg(stack2_id).Push(X);
     GetStackArg(stack1_id).Push(Y);
   }
-  void Inst_StackMove() { // Pop[Nop-A]:X and Push[Arg1+1] X
+
+  // Inst: Pop[Nop-A]:X and Push[Arg1+1] X
+  void Inst_StackMove() {
     const size_t stack1_id = GetArg(Nop::A);
     const size_t stack2_id = GetArg((stack1_id+1)%NUM_NOPS);
     if (stack1_id != stack2_id) {
       stacks[stack2_id].Push( stacks[stack1_id].Pop() );
     }
   }
-  void Inst_Copy() {       // Copy the value from Head [Nop-B] to Head [Nop-C], advancing both
+
+  // Inst: Copy the value from Head [Nop-B] to Head [Nop-C], advancing both
+  void Inst_Copy() {
     Head & from_head = GetHeadArg(HEAD_G_READ);
     Head & to_head = GetHeadArg(HEAD_G_WRITE);
-    from_head.Read();
+    WriteHead(to_head, ReadHead(from_head));
   }
 
+  // Inst: Read value at Head [Nop-D]:X ; Push X onto stack [Nop-A] ; advance Head.
+  void Inst_Load() {
+    Head & from_head = GetHeadArg(HEAD_M_READ);
+    GetStackArg(Nop::A).Push( ReadHead(from_head) );
   }
-  void Inst_Load() {       // Read value at Head [Nop-D]:X ; Push X onto stack [Nop-A] ; advance Head.
+
+  // Inst: Pop[Nop-A] and write the value into Head [NopE] ; advance Head.
+  void Inst_Store() {
+    data_t value = GetStackArg(Nop::A).Pop();
+    Head & to_head = GetHeadArg(HEAD_M_WRITE);
+    WriteHead(to_head, value);
   }
-  void Inst_Store() {      // Pop[Nop-A] and write the value into Head [NopE] ; advance Head.
+
+  // Inst: Split off space between read head and write head.
+  void Inst_DivideCell() {
   }
-  void Inst_DivideCell() { // Split off allocated space.
+
+  // Inst: Push the position of Head[Nop-F] onto stack [Nop-A]
+  void Inst_HeadPos() {
+    Head & head = GetHeadArg(HEAD_FLOW);
+    GetStackArg(Nop::A).Push(head.pos);
   }
-  void Inst_HeadPos() {    // Push the position of Head[Nop-F] onto stack [Nop-A]
+
+  // Inst: Pop stack [Nop-A] and move head[Nop-F] to that position.
+  void Inst_SetHead() {
+    const data_t new_pos = GetStackArg(Nop::A).Pop();
+    GetHeadArg(HEAD_FLOW).pos = new_pos;
   }
-  void Inst_SetHead() {    // Pop stack [Nop-A] and move head[Nop-F] to that position.
+
+  // Inst: Jump Head[Nop-A] to Head[Nop-F]
+  void Inst_JumpHead() {
+    Head & jump_head = GetHeadArg(HEAD_IP);
+    jump_head = GetHeadArg(HEAD_FLOW);
   }
-  void Inst_JumpHead() {   // Jump Head[Nop-A] to head[Nop-F]
-  }
-  void Inst_OffsetHead() { // Shift Head[Nop-F] by the value of Pop[Nop-A]
+  
+  // Inst: Shift Head[Nop-F] by the value Pop[Nop-A]
+  void Inst_OffsetHead() {
+    Head & head = GetHeadArg(HEAD_FLOW);
+    head.pos += GetStackArg(Nop::A).Pop();
   }
 
 
