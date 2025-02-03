@@ -1,3 +1,4 @@
+========== Traits ========
 On birth, how are traits handled?
 - Reset to default value
 - Copy from parent
@@ -21,154 +22,7 @@ Traits for Avida-style organisms only:
 
 
 ========= Virtual CPUs ===========
-- Stack based; Six Nops (A - F)?
-
-Unary - Consume top arg, perform math op, and push result.
-  NopA - Increment [default] (Arg2: A: +1, B: +2, C: +4, D: +8, E: +16, F: +32)
-  NopB - Decrement           (Arg2: A: -1, B: -2, C: -4, D: -8, E: -16, F: -32)
-  NopC - Times 2 (ShiftL)    (Arg2: A: *2, B: *4, C: *16, D: *256, E: *512, F: Negate)
-  NopD - Div by 2 (ShiftR)   (Arg2: A: /2, B: /4, C: /16, D: /256, E: /512, F: Negate)
-  NopE - Square              (Arg2: A: ^2, B: ^3, C: ^4, D: ^-1, E: ^-2, F: ^-3)
-  NopF - Exp2                (Arg2: A: 2^x, B: 3^x, C: 4^x, D: log2(x), E: log3(x), F: log4(x))
-
-  Other options: Not / Negate / Log2 / Exp2 / Sqrt
-
-Binary - Consume top two args, perform math op, and push result.
-  NopA - Add [default]
-  NopB - Sub
-  NopC - Mult
-  NopD - Divide
-  NopE - Remainder
-  NopF - Push BOTH back, but in sorted order.
-
-  Other: nand, nor, and, or
-         min, max
-
-Test - Consume top two args and push 0 or 1 onto stack.
-  NopA - TestIfLess [default]
-  NopB - TestIfGreaterOrEqu
-  NopC - TestIfEqu
-  NopD - TestIfNEqu
-
-Set - Move top of stack into variable that matches template.
-Get - Copy variable that matches template onto top of stack.
-
-
-Block -
-  NopA - Regular block [default]
-  NopB - Enter block if top of stack is true; pop top (If)
-  NopB - Enter block if top of stack is true; keep top (While)
-  NopC - Enter block if top of stack is true; decrement (Countdown)
-
-EndBlock -
-  NopA - RegularEnd [default] (Break)
-  NopB - Loop back to beginning of block (Continue)
-  NopC - Break out of TWO blocks
-  NopD - Break out of one block, then Continue out of next block
-
-BranchIf -
-  If ToS is true, trigger Break or Continue (as above)
-  Else keep going if top of stack is false.
-  Does NOT change scope
-
-Load - read from memory; takes position off stack
-Store - write to memory; takes position and value off stack
-
-
-
-
-Stack manipulate - swap top two; duplicate top; delete top
-
-DEFINE
-CALL
-
-BACKUP (Remove value from stack, but put it back on when leaving current scope)
-
-INPUT
-OUTPUT
-
-
-
-
-========= Virtual CPUs - ATTEPT 2 ===========
-- Stack based
-
-Const0 - Push a 0 on the stack
-Const1 - Push a 1 on the stack
-Const16 - Push a 16 on the stack
-Square
-SQRT
-Shift - Shift stack SECOND by TOP
-Not - !
-Add
-Sub
-Mult
-Divide
-Remainder
-Exp
-Sort (put top two elements of stack in order)
-Nand
-And
-Or
-Xor
-TestIfLess - Consume top two args and push 0 or 1 onto stack.
-TestIfEqu
-Block
-Loop
-End (keep going if block; loop if loop)
-BranchIf -
-  If stack top is true, trigger Break or Continue (based on block or loop), else keep going.
-Get - read from memory; takes position from stack
-Set - write to memory; takes position and value from stack
-AnalyzeSelf - Push onto stack: Genome Size / Alloc Size / IP Position / Scope Size
-CopyInst - Copy from position at top of stack onto END of allocated space.
-Divide - Split off allocated space.
-
-
-
-Const0        # Put zero on the stack
-Const0        # Put zero on the stack
-Set           # Save the current number of instructions copied (0) to position 0
-Block
-  Const0       # Put zero on the stack (location to load)
-  Get          # Get the next inst position to copy
-  CopyInst     # Copy the current line of code.
-  Const1       # Put a 1 on the stack
-  Add          # Increment the current position
-  Const0       # Put a zero on the stack (location to save)
-  Set          # Save the new position
-  
-  AnalyzeSelf  # Put genome size on stack
-  Test         # Compare current position to size to test if we are done
-  BranchIf     # Stop if we are done.
-  Branch
-
-
-
---- If we have heads ---
-Allocate - Uses top of stack to allocate space; sets write head into new space.
-Copy - Copies from the read head to the write head and advanced both.
-GetHead - Gets the position of the FlowHead
-  Sets Flow / IP / Read / Write
-SetHead - Sets the position of the FlowHead (beyond genome is allocated space)
-  Sets Flow / IP / Read / Write
-JumpTo - Moves one head to another.
-  IP->Flow / Read->Flow / Write->Flow / Flow->IP
-
-
-
-
-
-DEFINE
-CALL
-
-BACKUP (Remove value from stack, but put it back on when leaving current scope)
-
-INPUT
-OUTPUT
-
-
-==== CLASSIC SET UP
+=> AvidaVM
 
 6 Stacks - Stack A through Stack F
 6 Heads -
@@ -211,7 +65,7 @@ Break      : Advance to end of Scope [Current]
 Continue   : Restart Scope [Current]
 
 StackPop  : Discard top entry from [Nop-A] X
-StackDup  : Pop[Nop-A]:X and push two copies, one on [Arg1] and the other on [Arg1]
+StackDup  : Read top of Stack [Nop-A] (no popping) and push a copy on [Arg1]
 StackSwap : Pop[Nop-A]:X ; Pop[Arg1]:Y; push X on Stack [Arg2]; push Y on Stack [Arg1]
 StackMove : Pop[Nop-A]:X and Push[Arg1+1] X
 
@@ -222,5 +76,5 @@ DivideCell : Split off allocated space.
 
 HeadPos    : Push the position of Head[Nop-F] onto stack [Nop-A]
 SetHead    : Pop stack [Nop-A] and move head[Nop-F] to that position.
-JumpHead   : Jump head [Nop-A] to head[Nop-F]
-OffsetHead : Move head [Nop-F] by the amount of steps popped off of [Nop-A]
+JumpHead   : Jump Head[Nop-A] to head[Nop-F]
+OffsetHead : Shift Head[Nop-F] by the value of Pop[Nop-A]
