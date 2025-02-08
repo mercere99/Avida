@@ -8,7 +8,7 @@
 
 #include "emp/base/array.hpp"
 #include "emp/base/assert.hpp"
-#include "emp/base/vector.hpp"
+#include "emp/datastructs/Vector.hpp"
 #include "emp/meta/TypePack.hpp"
 
 /// @brief A genome with a fixed number of possible states.
@@ -28,9 +28,7 @@ public:
 
 private:
   using this_t = StateGenome<NUM_STATES, MAX_SIZE>;
-  using var_genome_t = emp::vector<state_t>;
-  using array_genome_t = emp::array<state_t, MAX_SIZE>;
-  using genome_t = std::conditional_t<MAX_SIZE, array_genome_t, var_genome_t>;
+  using genome_t = Vector<state_t, MAX_SIZE>;
 
   genome_t genome;
 
@@ -38,6 +36,8 @@ public:
   StateGenome() = default;
   StateGenome(const StateGenome &) = default;
   StateGenome(StateGenome &&) = default;
+  StateGenome(const genome_t & g) : genome(g) { }
+  StateGenome(genome_t && g) : genome(std::move(g)) { }
   StateGenome(size_t length, state_t default_value) : genome(length, default_value) { }
   ~StateGenome() { }
 
@@ -47,7 +47,12 @@ public:
   bool operator<=>(const StateGenome &) const = default;
 
   state_t operator[](size_t pos) const { return genome[pos]; }
-  state_t & operator[](size_t pos) { return genome[pos]; }
+  state_t Get(size_t pos) const { return genome[pos]; }
+
+  void Set(size_t pos, state_t val) {
+    emp_assert(val < NUM_STATES);
+    genome[pos] = val;
+  }
 
   size_t size() const { return genome.size(); }
   this_t & resize(size_t new_size) {
@@ -58,16 +63,7 @@ public:
 
   // Remove [start_pos, end_pos) from this genome and return it.
   this_t Extract(size_t start_pos, end_pos) {
-    emp_assert(start_pos <= end_pos && end_pos <= genome.size());
-    this_t out;
-    if constexpr (MAX_SIZE) {
-      std::copy(genome.begin() + start_pos, genome.begin() + end_pos, out.genome.begin());
-    }
-    else { // Variable size genomes
-      out.genome.reserve(end_pos - start_pos);
-      std::copy(genome.begin() + start_pos, genome.begin() + end_pos, std::back_inserter(out.genome));
-    }
-    return out_genome;
+    return genome.Extract(start_pos, end_pos);
   }
 
   bool OK() const {
