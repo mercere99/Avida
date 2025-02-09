@@ -20,8 +20,9 @@ private:
   // Configured values.
   static constexpr size_t NUM_NOPS = 6;
   static constexpr size_t STACK_DEPTH = 16;
-  static constexpr size_t MEM_SIZE = 64;    // How much physical memory is available?
-  static constexpr size_t MAX_INSTS = 256;  // Maximum number of distinct instructions.
+  static constexpr size_t MEM_SIZE = 64;          // How much physical memory is available?
+  static constexpr size_t MAX_INSTS = 256;        // Max number of distinct instructions.
+  static constexpr size_t MAX_GENOME_SIZE = 1024; // Max genome length.
 
   // Configured types.
   using data_t = int;  // What type of data does this VM use?
@@ -101,9 +102,9 @@ private:
   };
 
   enum HeadType {
-    HEAD_IP = 0,      // Instruction Pointer
+    HEAD_IP = 0,      // Instruction Pointer (init: genome start)
     HEAD_G_READ = 1,  // Genome Read (init: genome start)
-    HEAD_G_WRITE = 2, // Genome Write (init: genome end)
+    HEAD_G_WRITE = 2, // Genome Write (init: genome start)
     HEAD_M_READ = 3,  // Memory Read (init: memory start)
     HEAD_M_WRITE = 4, // Memory Write (init: memory start)
     HEAD_FLOW = 5,    // Flow Control (init: genome start)
@@ -117,10 +118,12 @@ private:
 
   // =========== Helper Functions ============
 
+  // Read the data found at the provided head and return it.
   data_t ReadHead(Head & head) {
     return head.on_genome ? head.Read(genome) : head.Read(memory);
   }
 
+  // Write the provided data to the position pointed by the provided head.
   void WriteHead(Head & head, data_t data) {
     head.on_genome ? head.Write(data, genome) : head.Write(data, memory);
   }
@@ -378,6 +381,13 @@ public:
     WriteHead(to_head, value);
   }
 
+  // Inst: Allocates extra space and places the write head at the beginning of the space.
+  void Inst_Allocate() {
+    const size_t start_size = genome.size();
+    genome.resize( std::min(start_size*2, MAX_GENOME_SIZE) );
+    heads[HEAD_G_WRITE].Reset(start_size, true);
+  }
+
   // Inst: Split off space between read head and write head.
   void Inst_DivideCell() {
   }
@@ -412,7 +422,7 @@ public:
     // Reset Heads
     heads[HEAD_IP].Reset();
     heads[HEAD_G_READ].Reset();
-    heads[HEAD_G_WRITE].Reset(genome.size()-1, true);
+    heads[HEAD_G_WRITE].Reset();
     heads[HEAD_M_READ].Reset(0, false);
     heads[HEAD_M_WRITE].Reset(0, false);
     heads[HEAD_FLOW].Reset();
