@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "emp/base/array.hpp"
+#include "emp/base/notify.hpp"
 #include "emp/math/math.hpp"
 
 #include "Genome.hpp"
@@ -58,6 +59,9 @@ private:
       buffer[pos] = data;
     }
 
+    emp::String ToString() const {
+      return emp::MakeString("[", (on_genome ? "genome:" : "memory:"), pos, "]");
+    }
   };
 
   struct Stack {
@@ -81,6 +85,15 @@ private:
 
     data_t Top() const {
       return stack[stack_pos ? (stack_pos - 1) : STACK_DEPTH-1];
+    }
+
+    emp::String ToString() const {
+      emp::String out;
+      for (size_t i = 0; i < STACK_DEPTH; ++i) {
+        if (i) out += ',';
+        out.Append(stack[(i+stack_pos)%STACK_DEPTH]);
+      }
+      return out;
     }
 
   };
@@ -115,6 +128,32 @@ private:
   emp::array<size_t, NUM_NOPS> scope_starts{0};  // Track where each scope started.
   size_t error_count = 0;
 
+  emp::String StatusString() const {
+    emp::String out;
+    out += "Genome: ";
+    for (size_t i=0; i < genome.size(); ++i) {
+      if (i) out += ',';
+      out += genome[i];
+    }
+    out += "\nMemory: ";
+    for (size_t i=0; i < memory.size(); ++i) {
+      if (i) out += ',';
+      memory[i];
+    }
+    out += "\nHeads: ";
+    for (size_t i = 0; i < heads.size(); ++i) {
+      if (i) out += ',';
+      out += heads[i].ToString();
+    }
+    out += "\nStacks: ";
+    for (size_t i = 0; i < stacks.size(); ++i ) {
+      if (i) out += ',';
+      out.Append(static_cast<char>('A' + i), ':', stacks[i].ToString());
+    }
+    out.Append("\ncur_scope = ", cur_scope);
+    out.Append("\nerror_count = ", error_count);
+    return out;
+  }
 
   // =========== Helper Functions ============
 
@@ -416,8 +455,55 @@ public:
     head.pos += GetStackArg(Nop::A).Pop();
   }
 
+  void ProcessInst() {
+    ProcessInst(IP().pos);
+    IP().pos++;
+  }
 
-  // Initialize the state of the virtual CPU
+  void ProcessInst(size_t id) {
+    switch (id) {
+    case 0: Inst_Nop(); break;   // Nop-A
+    case 1: Inst_Nop(); break;   // Nop-A
+    case 2: Inst_Nop(); break;   // Nop-A
+    case 3: Inst_Nop(); break;   // Nop-A
+    case 4: Inst_Nop(); break;   // Nop-A
+    case 5: Inst_Nop(); break;   // Nop-A
+    case 6: Inst_Not(); break;
+    case 7: Inst_Shift(); break;
+    case 8: Inst_Add(); break;
+    case 9: Inst_Sub(); break;
+    case 10: Inst_Mult(); break;
+    case 11: Inst_Div(); break;
+    case 12: Inst_Mod(); break;
+    case 13: Inst_Exp(); break;
+    case 14: Inst_Sort(); break;
+    case 15: Inst_TestLess(); break;
+    case 16: Inst_TestEqu(); break;
+    case 17: Inst_Nand(); break;
+    case 18: Inst_Xor(); break;
+    case 19: Inst_If(); break;
+    case 20: Inst_Scope(); break;
+    case 21: Inst_Continue(); break;
+    case 22: Inst_Break(); break;
+    case 23: Inst_StackPop(); break;
+    case 24: Inst_StackDup(); break;
+    case 25: Inst_StackSwap(); break;
+    case 26: Inst_StackMove(); break;
+    case 27: Inst_Copy(); break;
+    case 28: Inst_Load(); break;
+    case 29: Inst_Store(); break;
+    case 30: Inst_Allocate(); break;
+    case 31: Inst_DivideCell(); break;
+    case 32: Inst_HeadPos(); break;
+    case 33: Inst_SetHead(); break;
+    case 34: Inst_JumpHead(); break;
+    case 35: Inst_OffsetHead(); break;
+    default:
+      emp::notify::Error("Instruction ", id, " out of range.");
+    }
+  }
+
+   // Initialize the state of the virtual CPU
   void Reset() {
     // Reset Heads
     heads[HEAD_IP].Reset();
