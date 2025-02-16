@@ -19,21 +19,22 @@
 class AvidaVM {
 private:
   // Configured values.
-  static constexpr size_t NUM_NOPS = 6;
-  static constexpr size_t STACK_DEPTH = 16;
+  static constexpr size_t NUM_NOPS = 6;           // Num nop modifier instructions used
+  static constexpr size_t STACK_DEPTH = 16;       // Num entries on stack before it loops.
   static constexpr size_t MEM_SIZE = 64;          // How much physical memory is available?
   static constexpr size_t MAX_INSTS = 256;        // Max number of distinct instructions.
   static constexpr size_t MAX_GENOME_SIZE = 1024; // Max genome length.
 
   // Configured types.
-  using data_t = int;  // What type of data does this VM use?
-  using mem_t = emp::array<data_t, MEM_SIZE>;
-  using genome_t = StateGenome<MAX_INSTS>;
-  using inst_fun_t = void (AvidaVM::*)(); // Type for functions to be called.
+  using data_t = int;                         // What data type does this VM use?
+  using mem_t = emp::array<data_t, MEM_SIZE>; // Memory is a fixed size.
+  using genome_t = StateGenome<MAX_INSTS>;    // Genomes can grow as needed.
+  using inst_fun_t = void (AvidaVM::*)();     // Type for functions to be called.
 
   // Calculated values.
   static constexpr size_t DATA_BITS = sizeof(data_t)*8; // Number of bits in data_t;
 
+  /// Heads point to a position on the genome OR a position in the memory.
   struct Head {
     size_t pos;
     bool on_genome = true; // If false, head is on memory.
@@ -462,12 +463,13 @@ public:
 
   void ProcessInst(size_t id) {
     switch (id) {
-    case 0: Inst_Nop(); break;   // Nop-A
-    case 1: Inst_Nop(); break;   // Nop-A
-    case 2: Inst_Nop(); break;   // Nop-A
-    case 3: Inst_Nop(); break;   // Nop-A
-    case 4: Inst_Nop(); break;   // Nop-A
-    case 5: Inst_Nop(); break;   // Nop-A
+    case 0:                      // Nop-A
+    case 1:                      // Nop-B
+    case 2:                      // Nop-C
+    case 3:                      // Nop-D
+    case 4:                      // Nop-E
+    case 5: Inst_Nop(); break;   // Nop-F
+
     case 6: Inst_Not(); break;
     case 7: Inst_Shift(); break;
     case 8: Inst_Add(); break;
