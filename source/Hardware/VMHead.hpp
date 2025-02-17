@@ -25,7 +25,7 @@ struct VMHead {
   }
 
   template <typename BUFFER_T>
-  auto Read(const BUFFER_T & buffer) {
+  [[nodiscard]] auto Read(const BUFFER_T & buffer) {
     Refresh(buffer.size());
     return buffer[pos];
   }
@@ -36,7 +36,7 @@ struct VMHead {
     buffer[pos] = data;
   }
 
-  emp::String ToString() const {
+  [[nodiscard]] emp::String ToString() const {
     return emp::MakeString("[", (on_genome ? "genome:" : "memory:"), pos, "]");
   }
 };

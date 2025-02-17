@@ -38,18 +38,18 @@ public:
   StateGenome & operator=(const StateGenome &) = default;
   StateGenome & operator=(StateGenome &&) = default;
 
-  bool operator<=>(const StateGenome &) const = default;
+  [[nodiscard]] bool operator<=>(const StateGenome &) const = default;
 
-  state_t operator[](size_t pos) const { return genome[pos]; }
-  state_t & operator[](size_t pos) { return genome[pos]; }
+  [[nodiscard]] state_t operator[](size_t pos) const { return genome[pos]; }
+  [[nodiscard]] state_t & operator[](size_t pos) { return genome[pos]; }
 
-  state_t Get(size_t pos) const { return genome[pos]; }
+  [[nodiscard]] state_t Get(size_t pos) const { return genome[pos]; }
   void Set(size_t pos, state_t val) {
     emp_assert(val < NUM_STATES);
     genome[pos] = val;
   }
 
-  size_t size() const { return genome.size(); }
+  [[nodiscard]] size_t size() const { return genome.size(); }
   this_t & resize(size_t new_size) {
     emp_assert(GENOME_SIZE == 0, "Must have a variable genome size (0) to change size.");
     genome.Resize(new_size);
@@ -57,7 +57,7 @@ public:
   }
 
   // Remove [start_pos, end_pos) from this genome and return it.
-  this_t Extract(size_t start_pos, size_t end_pos) {
+  [[nodiscard]] this_t Extract(size_t start_pos, size_t end_pos) {
     return genome.Extract(start_pos, end_pos);
   }
 

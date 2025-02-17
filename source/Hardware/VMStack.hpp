@@ -30,11 +30,11 @@ struct VMStack {
     return stack[stack_pos];
   }
 
-  DATA_T Top() const {
+  [[nodiscard]] DATA_T Top() const {
     return stack[stack_pos ? (stack_pos - 1) : STACK_DEPTH-1];
   }
 
-  emp::String ToString() const {
+  [[nodiscard]] emp::String ToString() const {
     emp::String out;
     for (size_t i = 0; i < STACK_DEPTH; ++i) {
       if (i) out += ',';

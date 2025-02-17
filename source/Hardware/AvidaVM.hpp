@@ -67,7 +67,7 @@ private:
   emp::array<size_t, NUM_NOPS> scope_starts{0};  // Track where each scope started.
   size_t error_count = 0;
 
-  emp::String StatusString() const {
+  [[nodiscard]] emp::String StatusString() const {
     emp::String out;
     out += "Genome: ";
     for (size_t i=0; i < genome.size(); ++i) {
@@ -97,7 +97,7 @@ private:
   // =========== Helper Functions ============
 
   // Read the data found at the provided head and return it.
-  data_t ReadHead(VMHead & head) {
+  [[nodiscard]] data_t ReadHead(VMHead & head) {
     return head.on_genome ? head.Read(genome) : head.Read(memory);
   }
 
@@ -106,18 +106,18 @@ private:
     head.on_genome ? head.Write(data, genome) : head.Write(data, memory);
   }
 
-  VMHead & IP() { return heads[HEAD_IP]; }
-  data_t ReadIP() { return ReadHead(IP()); }
+  [[nodiscard]] VMHead & IP() { return heads[HEAD_IP]; }
+  [[nodiscard]] data_t ReadIP() { return ReadHead(IP()); }
   void AdvanceIP() { ++IP(); }
 
-  inst_id_t ToValidInst(data_t inst_val) const {
+  [[nodiscard]] inst_id_t ToValidInst(data_t inst_val) const {
     return static_cast<inst_id_t>(emp::Mod(inst_val, num_insts));
   }
 
-  inst_id_t ReadIPInst() { return ToValidInst(ReadIP()); }
+  [[nodiscard]] inst_id_t ReadIPInst() { return ToValidInst(ReadIP()); }
 
   // Select the argument to use, overriding a nop if possible.
-  size_t GetArg(size_t default_arg) {
+  [[nodiscard]] size_t GetArg(size_t default_arg) {
     inst_id_t out_val = ReadIPInst();
     if (out_val < NUM_NOPS) {  // We found a nop.
       AdvanceIP();
@@ -126,10 +126,10 @@ private:
     return default_arg; // We didn't find a nop.
   }
 
-  size_t GetArg(Nop default_arg) { return GetArg(static_cast<data_t>(default_arg)); }
-  Stack & GetStackArg(Nop default_arg) { return stacks[GetArg(default_arg)]; }
-  Stack & GetStackArg(size_t default_arg) { return stacks[GetArg(default_arg)]; }
-  VMHead & GetHeadArg(HeadType default_head) {
+  [[nodiscard]] size_t GetArg(Nop default_arg) { return GetArg(static_cast<data_t>(default_arg)); }
+  [[nodiscard]] Stack & GetStackArg(Nop default_arg) { return stacks[GetArg(default_arg)]; }
+  [[nodiscard]] Stack & GetStackArg(size_t default_arg) { return stacks[GetArg(default_arg)]; }
+  [[nodiscard]] VMHead & GetHeadArg(HeadType default_head) {
     return heads[GetArg(static_cast<size_t>(default_head))];
   }
 
@@ -460,7 +460,7 @@ public:
 
   // === Static Functions for working with Avida VMs ===
 
-  static inst_set_t BuildInstSet() {    
+  [[nodiscard]] static inst_set_t BuildInstSet() {    
     inst_set_t inst_set;
     inst_set.AddNopInst("Nop-A");
     inst_set.AddNopInst("Nop-B");

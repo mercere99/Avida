@@ -31,10 +31,10 @@ private:
 public:
   size_t size() const { return num_insts; }
 
-  emp::String GetName(size_t id) const { return info[id].name; }
-  inst_fun_t GetFunction(size_t id) const { return funs[id]; }
+  [[nodiscard]] emp::String GetName(size_t id) const { return info[id].name; }
+  [[nodiscard]] inst_fun_t GetFunction(size_t id) const { return funs[id]; }
 
-  inst_id_t GetID(emp::String name) const {
+  [[nodiscard]] inst_id_t GetID(emp::String name) const {
     for (inst_id_t id = 0; id < size(); ++id) {
       if (info[id].name == name) return id;
     }
