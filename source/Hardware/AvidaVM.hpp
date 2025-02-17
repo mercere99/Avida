@@ -13,7 +13,11 @@
 #include "emp/base/notify.hpp"
 #include "emp/math/math.hpp"
 
-#include "Genome.hpp"
+#include "InstSet.hpp"
+#include "VMHead.hpp"
+#include "VMStack.hpp"
+
+#include "../Genome.hpp"
 
 /// Default Avida Virtual Machine for use in Avida 5
 class AvidaVM {
@@ -29,90 +33,12 @@ private:
   using data_t = int;                         // What data type does this VM use?
   using mem_t = emp::array<data_t, MEM_SIZE>; // Memory is a fixed size.
   using genome_t = StateGenome<MAX_INSTS>;    // Genomes can grow as needed.
-  using inst_fun_t = void (AvidaVM::*)();     // Type for functions to be called.
-
-  // Calculated values.
-  static constexpr size_t DATA_BITS = sizeof(data_t)*8; // Number of bits in data_t;
-
-  /// Heads point to a position on the genome OR a position in the memory.
-  struct Head {
-    size_t pos;
-    bool on_genome = true; // If false, head is on memory.
-
-    Head & operator++() { ++pos; return *this; }
-
-    void Reset(size_t _pos=0, bool _on_genome=true) { pos = _pos; on_genome = _on_genome; }
-
-    // Make sure head is in a valid position given the size of the buffer it is on.
-    void Refresh(size_t buffer_size) {
-      if (pos >= buffer_size) pos %= buffer_size;
-    }
-
-    template <typename T>
-    data_t Read(const T & buffer) {
-      Refresh(buffer.size());
-      return buffer[pos];
-    }
-
-    template <typename T>
-    void Write(data_t data, const T & buffer) {
-      Refresh(buffer.size());
-      buffer[pos] = data;
-    }
-
-    emp::String ToString() const {
-      return emp::MakeString("[", (on_genome ? "genome:" : "memory:"), pos, "]");
-    }
-  };
-
-  struct Stack {
-    emp::array<data_t, STACK_DEPTH> stack{0};
-    size_t stack_pos = 0;
-
-    void Reset() {
-      for (auto & entry : stack) entry = 0;
-      stack_pos = 0;
-    }
-
-    void Push(data_t value) {
-      stack[stack_pos] = value;
-      stack_pos = (stack_pos+1) % STACK_DEPTH;
-    }
-    data_t Pop() {
-      --stack_pos;
-      if (stack_pos > STACK_DEPTH) stack_pos = STACK_DEPTH-1; // Loop if needed.
-      return stack[stack_pos];
-    }
-
-    data_t Top() const {
-      return stack[stack_pos ? (stack_pos - 1) : STACK_DEPTH-1];
-    }
-
-    emp::String ToString() const {
-      emp::String out;
-      for (size_t i = 0; i < STACK_DEPTH; ++i) {
-        if (i) out += ',';
-        out.Append(stack[(i+stack_pos)%STACK_DEPTH]);
-      }
-      return out;
-    }
-
-  };
-
-  // === Hardware ===
-
-  genome_t genome;
-  mem_t memory;
-  emp::array<inst_fun_t, MAX_INSTS> inst_set;
-  size_t num_insts = 0; // Number of instructions that are active.
+  using inst_id_t = genome_t::state_t;        // Type used for inst IDs in a genome.
+  using inst_set_t = InstSet<AvidaVM, 40>;    // Instruction set type for AvidaVM.
+  using Stack = VMStack<data_t, STACK_DEPTH>; // Stacks to use in virtual CPU.
 
   enum class Nop {
-    A = 0,
-    B = 1,
-    C = 2,
-    D = 3,
-    E = 4,
-    F = 5,
+    A = 0, B = 1, C = 2, D = 3, E = 4, F = 5,
   };
 
   enum HeadType {
@@ -123,7 +49,19 @@ private:
     HEAD_M_WRITE = 4, // Memory Write (init: memory start)
     HEAD_FLOW = 5,    // Flow Control (init: genome start)
   };
-  emp::array<Head, NUM_NOPS> heads;
+
+  // Calculated values.
+  static constexpr size_t DATA_BITS = sizeof(data_t)*8; // Number of bits in data_t;
+
+
+  // === Hardware ===
+
+  const inst_set_t & inst_set;
+  genome_t genome;
+  mem_t memory;
+  size_t num_insts = 0; // Number of instructions that are active.
+
+  emp::array<VMHead, NUM_NOPS> heads;
   emp::array<Stack, NUM_NOPS> stacks;
   size_t cur_scope = 0; // Start in the global scope.
   emp::array<size_t, NUM_NOPS> scope_starts{0};  // Track where each scope started.
@@ -139,7 +77,7 @@ private:
     out += "\nMemory: ";
     for (size_t i=0; i < memory.size(); ++i) {
       if (i) out += ',';
-      memory[i];
+      out += memory[i];
     }
     out += "\nHeads: ";
     for (size_t i = 0; i < heads.size(); ++i) {
@@ -159,28 +97,28 @@ private:
   // =========== Helper Functions ============
 
   // Read the data found at the provided head and return it.
-  data_t ReadHead(Head & head) {
+  data_t ReadHead(VMHead & head) {
     return head.on_genome ? head.Read(genome) : head.Read(memory);
   }
 
   // Write the provided data to the position pointed by the provided head.
-  void WriteHead(Head & head, data_t data) {
+  void WriteHead(VMHead & head, data_t data) {
     head.on_genome ? head.Write(data, genome) : head.Write(data, memory);
   }
 
-  Head & IP() { return heads[HEAD_IP]; }
+  VMHead & IP() { return heads[HEAD_IP]; }
   data_t ReadIP() { return ReadHead(IP()); }
   void AdvanceIP() { ++IP(); }
 
-  data_t ToValidInst(data_t inst_val) const {
-    return emp::Mod(inst_val, num_insts);
+  inst_id_t ToValidInst(data_t inst_val) const {
+    return static_cast<inst_id_t>(emp::Mod(inst_val, num_insts));
   }
 
-  data_t ReadIPInst() { return ToValidInst(ReadIP()); }
+  inst_id_t ReadIPInst() { return ToValidInst(ReadIP()); }
 
   // Select the argument to use, overriding a nop if possible.
   size_t GetArg(size_t default_arg) {
-    data_t out_val = ReadIPInst();
+    inst_id_t out_val = ReadIPInst();
     if (out_val < NUM_NOPS) {  // We found a nop.
       AdvanceIP();
       return out_val;
@@ -189,37 +127,32 @@ private:
   }
 
   size_t GetArg(Nop default_arg) { return GetArg(static_cast<data_t>(default_arg)); }
-
-  Stack & GetStackArg(Nop default_arg) {
-    return stacks[GetArg(default_arg)];
-  }
-  Stack & GetStackArg(size_t default_arg) {
-    return stacks[GetArg(default_arg)];
-  }
-
-  Head & GetHeadArg(HeadType default_head) {
+  Stack & GetStackArg(Nop default_arg) { return stacks[GetArg(default_arg)]; }
+  Stack & GetStackArg(size_t default_arg) { return stacks[GetArg(default_arg)]; }
+  VMHead & GetHeadArg(HeadType default_head) {
     return heads[GetArg(static_cast<size_t>(default_head))];
   }
 
 public:
-  // AvidaVM() = default;
-  // AvidaVM(const AvidaVM &) = default;
-  // AvidaVM(AvidaVM &&) = default;
+  AvidaVM() = delete;
+  AvidaVM(const AvidaVM &) = default;
+  AvidaVM(AvidaVM &&) = default;
+  AvidaVM(const inst_set_t & inst_set) : inst_set(inst_set) { }
   // AvidaVM & operator=(const AvidaVM &) = default;
   // AvidaVM & operator=(AvidaVM &&) = default;
 
 
   // === Instructions ===
 
+  // Inst: No-operation.
+  void Inst_Nop()  { }
+
   // Inst: Push value [Nop-A] onto Stack [Nop-A]
   void Inst_Const() {
-    static constexpr data_t const_vals[]{ 1, 2, 4, 16, 256, -1, 65536, 0, -2, 0, 0, 0};
+    static constexpr data_t const_vals[]{ 1, 2, 4, 16, 256, -1 }; // , 65536, 0, -2, 0, 0, 0};
     const data_t value = const_vals[GetArg(Nop::A)];
     GetStackArg(Nop::A).Push(value);
   }
-
-  // Inst: No-operation.
-  void Inst_Nop()  { }
 
   // Inst: Pop[Nop-A]:X ; Push[Arg1] !X
   void Inst_Not() {
@@ -360,6 +293,7 @@ public:
     size_t target_scope = GetArg(cur_scope);
     if (target_scope > cur_scope) ++error_count;  // Trying to break from a scope we are not in.
     else {
+      inst_id_t inst_scope_id = inst_set.GetID("Scope");
       while (IP().pos > 0) {  // Scan for end of this scope.
         if (ReadIPInst() == inst_scope_id) {
           AdvanceIP();
@@ -403,21 +337,21 @@ public:
 
   // Inst: Copy the value from Head [Nop-B] to Head [Nop-C], advancing both
   void Inst_Copy() {
-    Head & from_head = GetHeadArg(HEAD_G_READ);
-    Head & to_head = GetHeadArg(HEAD_G_WRITE);
+    VMHead & from_head = GetHeadArg(HEAD_G_READ);
+    VMHead & to_head = GetHeadArg(HEAD_G_WRITE);
     WriteHead(to_head, ReadHead(from_head));
   }
 
   // Inst: Read value at Head [Nop-D]:X ; Push X onto stack [Nop-A] ; advance Head.
   void Inst_Load() {
-    Head & from_head = GetHeadArg(HEAD_M_READ);
+    VMHead & from_head = GetHeadArg(HEAD_M_READ);
     GetStackArg(Nop::A).Push( ReadHead(from_head) );
   }
 
   // Inst: Pop[Nop-A] and write the value into Head [NopE] ; advance Head.
   void Inst_Store() {
     data_t value = GetStackArg(Nop::A).Pop();
-    Head & to_head = GetHeadArg(HEAD_M_WRITE);
+    VMHead & to_head = GetHeadArg(HEAD_M_WRITE);
     WriteHead(to_head, value);
   }
 
@@ -434,7 +368,7 @@ public:
 
   // Inst: Push the position of Head[Nop-F] onto stack [Nop-A]
   void Inst_HeadPos() {
-    Head & head = GetHeadArg(HEAD_FLOW);
+    VMHead & head = GetHeadArg(HEAD_FLOW);
     GetStackArg(Nop::A).Push(head.pos);
   }
 
@@ -446,13 +380,13 @@ public:
 
   // Inst: Jump Head[Nop-A] to Head[Nop-F]
   void Inst_JumpHead() {
-    Head & jump_head = GetHeadArg(HEAD_IP);
+    VMHead & jump_head = GetHeadArg(HEAD_IP);
     jump_head = GetHeadArg(HEAD_FLOW);
   }
   
   // Inst: Shift Head[Nop-F] by the value Pop[Nop-A]
   void Inst_OffsetHead() {
-    Head & head = GetHeadArg(HEAD_FLOW);
+    VMHead & head = GetHeadArg(HEAD_FLOW);
     head.pos += GetStackArg(Nop::A).Pop();
   }
 
@@ -470,36 +404,37 @@ public:
     case 4:                      // Nop-E
     case 5: Inst_Nop(); break;   // Nop-F
 
-    case 6: Inst_Not(); break;
-    case 7: Inst_Shift(); break;
-    case 8: Inst_Add(); break;
-    case 9: Inst_Sub(); break;
-    case 10: Inst_Mult(); break;
-    case 11: Inst_Div(); break;
-    case 12: Inst_Mod(); break;
-    case 13: Inst_Exp(); break;
-    case 14: Inst_Sort(); break;
-    case 15: Inst_TestLess(); break;
-    case 16: Inst_TestEqu(); break;
-    case 17: Inst_Nand(); break;
-    case 18: Inst_Xor(); break;
-    case 19: Inst_If(); break;
-    case 20: Inst_Scope(); break;
-    case 21: Inst_Continue(); break;
-    case 22: Inst_Break(); break;
-    case 23: Inst_StackPop(); break;
-    case 24: Inst_StackDup(); break;
-    case 25: Inst_StackSwap(); break;
-    case 26: Inst_StackMove(); break;
-    case 27: Inst_Copy(); break;
-    case 28: Inst_Load(); break;
-    case 29: Inst_Store(); break;
-    case 30: Inst_Allocate(); break;
-    case 31: Inst_DivideCell(); break;
-    case 32: Inst_HeadPos(); break;
-    case 33: Inst_SetHead(); break;
-    case 34: Inst_JumpHead(); break;
-    case 35: Inst_OffsetHead(); break;
+    case 6: Inst_Const(); break;
+    case 7: Inst_Not(); break;
+    case 8: Inst_Shift(); break;
+    case 9: Inst_Add(); break;
+    case 10: Inst_Sub(); break;
+    case 11: Inst_Mult(); break;
+    case 12: Inst_Div(); break;
+    case 13: Inst_Mod(); break;
+    case 14: Inst_Exp(); break;
+    case 15: Inst_Sort(); break;
+    case 16: Inst_TestLess(); break;
+    case 17: Inst_TestEqu(); break;
+    case 18: Inst_Nand(); break;
+    case 19: Inst_Xor(); break;
+    case 20: Inst_If(); break;
+    case 21: Inst_Scope(); break;
+    case 22: Inst_Continue(); break;
+    case 23: Inst_Break(); break;
+    case 24: Inst_StackPop(); break;
+    case 25: Inst_StackDup(); break;
+    case 26: Inst_StackSwap(); break;
+    case 27: Inst_StackMove(); break;
+    case 28: Inst_Copy(); break;
+    case 29: Inst_Load(); break;
+    case 30: Inst_Store(); break;
+    case 31: Inst_Allocate(); break;
+    case 32: Inst_DivideCell(); break;
+    case 33: Inst_HeadPos(); break;
+    case 34: Inst_SetHead(); break;
+    case 35: Inst_JumpHead(); break;
+    case 36: Inst_OffsetHead(); break;
     default:
       emp::notify::Error("Instruction ", id, " out of range.");
     }
@@ -518,15 +453,54 @@ public:
     // Reset the stacks.
     for (auto & stack : stacks) stack.Reset();
 
-    cur_scope = 0;       // Move back to global scope.
-    error_count = 0; // Reset all errors.
-
-
-    // Load instructions
-    emp::array<inst_fun_t, MAX_INSTS> inst_set;
-    size_t num_insts = 0; // Number of instructions that are active.
-
-    
+    cur_scope = 0;    // Move back to global scope.
+    error_count = 0;  // Reset all errors.
   }
 
+
+  // === Static Functions for working with Avida VMs ===
+
+  static inst_set_t BuildInstSet() {    
+    inst_set_t inst_set;
+    inst_set.AddNopInst("Nop-A");
+    inst_set.AddNopInst("Nop-B");
+    inst_set.AddNopInst("Nop-C");
+    inst_set.AddNopInst("Nop-D");
+    inst_set.AddNopInst("Nop-E");
+    inst_set.AddNopInst("Nop-F");
+
+    inst_set.AddInst("Const",      &AvidaVM::Inst_Const);
+    inst_set.AddInst("Not",        &AvidaVM::Inst_Not);
+    inst_set.AddInst("Shift",      &AvidaVM::Inst_Shift);
+    inst_set.AddInst("Add",        &AvidaVM::Inst_Add);
+    inst_set.AddInst("Sub",        &AvidaVM::Inst_Sub);
+    inst_set.AddInst("Mult",       &AvidaVM::Inst_Mult);
+    inst_set.AddInst("Div",        &AvidaVM::Inst_Div);
+    inst_set.AddInst("Mod",        &AvidaVM::Inst_Mod);
+    inst_set.AddInst("Exp",        &AvidaVM::Inst_Exp);
+    inst_set.AddInst("Sort",       &AvidaVM::Inst_Sort);
+    inst_set.AddInst("TestLess",   &AvidaVM::Inst_TestLess);
+    inst_set.AddInst("TestEqu",    &AvidaVM::Inst_TestEqu);
+    inst_set.AddInst("Nand",       &AvidaVM::Inst_Nand);
+    inst_set.AddInst("Xor",        &AvidaVM::Inst_Xor);
+    inst_set.AddInst("If",         &AvidaVM::Inst_If);
+    inst_set.AddInst("Scope",      &AvidaVM::Inst_Scope);
+    inst_set.AddInst("Continue",   &AvidaVM::Inst_Continue);
+    inst_set.AddInst("Break",      &AvidaVM::Inst_Break);
+    inst_set.AddInst("StackPop",   &AvidaVM::Inst_StackPop);
+    inst_set.AddInst("StackDup",   &AvidaVM::Inst_StackDup);
+    inst_set.AddInst("StackSwap",  &AvidaVM::Inst_StackSwap);
+    inst_set.AddInst("StackMove",  &AvidaVM::Inst_StackMove);
+    inst_set.AddInst("Copy",       &AvidaVM::Inst_Copy);
+    inst_set.AddInst("Load",       &AvidaVM::Inst_Load);
+    inst_set.AddInst("Store",      &AvidaVM::Inst_Store);
+    inst_set.AddInst("Allocate",   &AvidaVM::Inst_Allocate);
+    inst_set.AddInst("DivideCell", &AvidaVM::Inst_DivideCell);
+    inst_set.AddInst("HeadPos",    &AvidaVM::Inst_HeadPos);
+    inst_set.AddInst("SetHead",    &AvidaVM::Inst_SetHead);
+    inst_set.AddInst("JumpHead",   &AvidaVM::Inst_JumpHead);
+    inst_set.AddInst("OffsetHead", &AvidaVM::Inst_OffsetHead);
+
+    return inst_set;
+  }
 };
