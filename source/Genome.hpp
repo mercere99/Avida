@@ -8,21 +8,20 @@
 
 #include "emp/base/array.hpp"
 #include "emp/base/assert.hpp"
-#include "emp/datastructs/Vector.hpp"
+#include "emp/base/vector.hpp"
 #include "emp/meta/type_traits.hpp"
 #include "emp/meta/TypePack.hpp"
 
 /// @brief A genome with a fixed number of possible states.
 /// @param NUM_STATES a count of how many states are possible at each position.
-/// @param GENOME_SIZE a fixed number of sites in the genome (zero = variable size)
-template <size_t NUM_STATES=256, size_t GENOME_SIZE=0>
+template <size_t NUM_STATES=256>
 class StateGenome {
 public:
   using state_t = emp::min_uint_type<NUM_STATES>;
 
 private:
-  using this_t = StateGenome<NUM_STATES, GENOME_SIZE>;
-  using genome_t = emp::Vector<state_t, GENOME_SIZE>;
+  using this_t = StateGenome<NUM_STATES>;
+  using genome_t = emp::vector<state_t>;
 
   genome_t genome;
 
@@ -32,8 +31,13 @@ public:
   StateGenome(StateGenome &&) = default;
   StateGenome(const genome_t & g) : genome(g) { }
   StateGenome(genome_t && g) : genome(std::move(g)) { }
-  StateGenome(size_t length, state_t default_value) : genome(length, default_value) { }
+  StateGenome(size_t length, state_t default_value=0) : genome(length, default_value) { }
   ~StateGenome() { }
+
+  auto begin() { return genome.begin(); }
+  auto begin() const { return genome.begin(); }
+  auto end() { return genome.end(); }
+  auto end() const { return genome.end(); }
 
   StateGenome & operator=(const StateGenome &) = default;
   StateGenome & operator=(StateGenome &&) = default;
@@ -49,16 +53,39 @@ public:
     genome[pos] = val;
   }
 
+  void Push(state_t val) { genome.push_back(val); }
+
   [[nodiscard]] size_t size() const { return genome.size(); }
-  this_t & resize(size_t new_size) {
-    emp_assert(GENOME_SIZE == 0, "Must have a variable genome size (0) to change size.");
-    genome.Resize(new_size);
+  this_t & Resize(size_t new_size) {
+    genome.resize(new_size);
     return *this;
   }
 
-  // Remove [start_pos, end_pos) from this genome and return it.
-  [[nodiscard]] this_t Extract(size_t start_pos, size_t end_pos) {
-    return genome.Extract(start_pos, end_pos);
+  template <typename T>
+  void Insert(size_t pos, T && value, size_t count=1) {
+    values.insert(values.begin()+pos, count, std::forward<T>(value));
+  }
+
+  template <typename T>
+  void Erase(size_t pos, size_t count=1) {
+    values.erase(values.begin()+pos, count);
+  }
+
+  // Remove [start_pos, end_pos) from this Vector and return it.
+  [[nodiscard]] this_t Copy(size_t start_pos, size_t count) {
+    const size_t end_pos = start_pos + count;
+    emp_assert(start_pos <= size() && count <= size() && end_pos <= size());
+    this_t out;
+    out.reserve(count);
+    std::copy(begin() + start_pos, begin() + end_pos, std::back_inserter(out));
+    return out;
+  }
+
+  // Remove [start_pos, end_pos) from this Vector and return it.
+  [[nodiscard]] this_t Extract(size_t start_pos, size_t count) {
+    this_t out(Copy(start_pos, count));
+    Erase(start_pos, count);
+    return out;
   }
 
   bool OK() const {
