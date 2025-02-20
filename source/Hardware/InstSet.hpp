@@ -19,6 +19,7 @@ class InstSet {
 public:
   using inst_id_t = emp::min_uint_type<MAX_SET_SIZE+1>;
   using inst_fun_t = INST_RETURN_T (VM_T::*)();
+  using genome_t = StateGenome<MAX_SET_SIZE>;
   static constexpr size_t NULL_ID = static_cast<inst_id_t>(-1);
 
 private:
@@ -81,8 +82,8 @@ public:
   }
 
   /// Build a genome based on a string sequence.
-  [[nodiscard]] StateGenome<MAX_SET_SIZE> BuildGenome(emp::String sequence) {
-    StateGenome<MAX_SET_SIZE> genome;
+  [[nodiscard]] genome_t BuildGenome(emp::String sequence) {
+    genome_t genome;
     for (char symbol : sequence) {
       genome.Push(GetID(symbol));
     }
@@ -90,17 +91,27 @@ public:
   }
 
   /// Build a genome based on a repeated instruction.
-  [[nodiscard]] StateGenome<MAX_SET_SIZE> BuildGenome(size_t length, size_t inst_id=0) {
-    return StateGenome<MAX_SET_SIZE>(length, info[inst_id].id);
+  [[nodiscard]] genome_t BuildGenome(size_t length, size_t inst_id=0) {
+    return genome_t(length, info[inst_id].id);
   }
 
   /// Build a random genome of a given length.
-  [[nodiscard]] StateGenome<MAX_SET_SIZE> BuildGenome(size_t length, emp::Random & random) {
-    StateGenome<MAX_SET_SIZE> genome;
+  [[nodiscard]] genome_t BuildGenome(size_t length, emp::Random & random) {
+    genome_t genome;
     for (size_t i = 0; i < length; ++i) {
       genome.Push(info[random.GetUInt(num_insts)].id);
     }
     return genome;
+  }
+
+  /// Convert a genome into a simple sequence.
+  [[nodiscard]] std::string ToSequence(const genome_t & genome) const {
+    std::string out;
+    out.reserve(genome.size());
+    for (auto inst_id : genome) {
+      out.push_back(GetSymbol(inst_id));
+    }
+    return out;
   }
 
 };
