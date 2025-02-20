@@ -8,6 +8,7 @@
 
 #include <utility>
 
+#include "emp/base/concepts.hpp"
 #include "emp/tools/String.hpp"
 
 /// Heads point to a position on the genome OR a position in the memory.
@@ -19,21 +20,25 @@ struct VMHead {
 
   void Reset(size_t _pos=0, bool _on_genome=true) { pos = _pos; on_genome = _on_genome; }
 
-  // Make sure head is in a valid position given the size of the buffer it is on.
-  void Refresh(size_t buffer_size) {
-    if (pos >= buffer_size) pos %= buffer_size;
-  }
-
+  // Read in the symbol at the head position.  Return a 0 if head is out of range.
   template <typename BUFFER_T>
-  [[nodiscard]] auto Read(const BUFFER_T & buffer) {
-    Refresh(buffer.size());
-    return buffer[pos];
+  [[nodiscard]] auto Read(const BUFFER_T & buffer) const {
+    return pos < buffer.size() ? buffer[pos] : 0;
   }
 
+  // If in memory, write the value at the current head position.
+  // If on the genome, insert the value at the current head position (or at end)
   template <typename DATA_T, typename BUFFER_T>
   void Write(DATA_T data, BUFFER_T & buffer) {
-    Refresh(buffer.size());
-    buffer[pos] = data;
+    if constexpr (std::same_as<BUFFER_T, Genome>) {
+      emp_assert(on_genome);
+      if (pos < buffer.size()) buffer.Insert(pos, data);
+      else buffer.Push(data);
+    } else { // In memory!
+      emp_assert(!on_genome);
+      if (pos < buffer.size()) buffer[pos] = data;
+      // If out of range, nothing is written.
+    }
   }
 
   [[nodiscard]] emp::String ToString() const {

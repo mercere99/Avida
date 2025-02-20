@@ -32,8 +32,7 @@ private:
   // Configured types.
   using data_t = int;                             // What data type does this VM use?
   using mem_t = emp::array<data_t, MEM_SIZE>;     // Memory is a fixed size.
-  using genome_t = StateGenome<MAX_INSTS>;        // Genomes can grow as needed.
-  using inst_id_t = genome_t::state_t;            // Type used for inst IDs in a genome.
+  using inst_id_t = Genome::value_t;              // Type used for inst IDs in a genome.
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM.
   using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU.
 
@@ -57,9 +56,8 @@ private:
   // === Hardware ===
 
   const inst_set_t & inst_set;
-  genome_t genome;
+  Genome genome;
   mem_t memory;
-  size_t num_insts = 0; // Number of instructions that are active.
 
   emp::array<VMHead, NUM_NOPS> heads;
   emp::array<Stack, NUM_NOPS> stacks;
@@ -70,7 +68,7 @@ private:
   // =========== Helper Functions ============
 
   // Read the data found at the provided head and return it.
-  [[nodiscard]] data_t ReadHead(VMHead & head) {
+  [[nodiscard]] data_t ReadHead(const VMHead & head) const {
     return head.on_genome ? head.Read(genome) : head.Read(memory);
   }
 
@@ -80,14 +78,15 @@ private:
   }
 
   [[nodiscard]] VMHead & IP() { return heads[HEAD_IP]; }
-  [[nodiscard]] data_t ReadIP() { return ReadHead(IP()); }
+  [[nodiscard]] const VMHead & IP() const { return heads[HEAD_IP]; }
+  [[nodiscard]] data_t ReadIP() const { return ReadHead(IP()); }
   void AdvanceIP() { ++IP(); }
 
   [[nodiscard]] inst_id_t ToValidInst(data_t inst_val) const {
-    return static_cast<inst_id_t>(emp::Mod(inst_val, num_insts));
+    return static_cast<inst_id_t>(emp::Mod(inst_val, inst_set.size()));
   }
 
-  [[nodiscard]] inst_id_t ReadIPInst() { return ToValidInst(ReadIP()); }
+  [[nodiscard]] inst_id_t ReadIPInst() const { return ToValidInst(ReadIP()); }
 
   // Select the argument to use, overriding a nop if possible.
   [[nodiscard]] size_t GetArg(size_t default_arg) {
@@ -110,7 +109,7 @@ public:
   AvidaVM() = delete;
   AvidaVM(const AvidaVM &) = default;
   AvidaVM(AvidaVM &&) = default;
-  AvidaVM(const inst_set_t & inst_set, const genome_t & genome)
+  AvidaVM(const inst_set_t & inst_set, const Genome & genome)
     : inst_set(inst_set), genome(genome) { Reset(); }
   // AvidaVM & operator=(const AvidaVM &) = default;
   // AvidaVM & operator=(AvidaVM &&) = default;
@@ -314,6 +313,8 @@ public:
     VMHead & from_head = GetHeadArg(HEAD_G_READ);
     VMHead & to_head = GetHeadArg(HEAD_G_WRITE);
     WriteHead(to_head, ReadHead(from_head));
+    ++from_head;
+    ++to_head;
   }
 
   // Inst: Read value at Head [Nop-D]:X ; Push X onto stack [Nop-A] ; advance Head.
@@ -332,7 +333,7 @@ public:
   // Inst: Allocates extra space and places the write head at the beginning of the space.
   void Inst_Allocate() {
     const size_t start_size = genome.size();
-    genome.resize( std::min(start_size*2, MAX_GENOME_SIZE) );
+    genome.Resize( std::min(start_size*2, MAX_GENOME_SIZE) );
     heads[HEAD_G_WRITE].Reset(start_size, true);
   }
 
@@ -365,18 +366,19 @@ public:
   }
 
   void ProcessInst() {
-    ProcessInst(IP().pos);
-    IP().pos++;
+    const auto inst_id = ReadIPInst();
+    AdvanceIP();
+    ProcessInst(inst_id);
   }
 
   void ProcessInst(size_t id) {
     switch (id) {
-    case 0:                      // Nop-A
-    case 1:                      // Nop-B
-    case 2:                      // Nop-C
-    case 3:                      // Nop-D
-    case 4:                      // Nop-E
-    case 5: Inst_Nop(); break;   // Nop-F
+    case 0:          // Nop-A
+    case 1:          // Nop-B
+    case 2:          // Nop-C
+    case 3:          // Nop-D
+    case 4:          // Nop-E
+    case 5: break;   // Nop-F
 
     case 6: Inst_Const(); break;
     case 7: Inst_Not(); break;
@@ -478,13 +480,22 @@ public:
     return inst_set;
   }
 
+  /////////////////////////////////////////////
+  //
+  //  Functions for string-based information
+  //
+
+  [[nodiscard]] emp::String NextInstName() const {
+    return inst_set.GetName(ReadIPInst());
+  }
+
+  [[nodiscard]] char NextInstSymbol() const {
+    return inst_set.GetSymbol(ReadIPInst());
+  }
+
   [[nodiscard]] emp::String StatusString() const {
     emp::String out;
-    out += "Genome: ";
-    for (size_t i=0; i < genome.size(); ++i) {
-      out += inst_set.GetSymbol(genome[i]);
-      // out.Append("[", (size_t) genome[i], "]");
-    }
+    out.Append("Genome: ", inst_set.ToSequence(genome));
     out += "\nMemory: ";
     for (size_t i=0; i < memory.size(); ++i) {
       if (i) out += ',';
@@ -502,6 +513,7 @@ public:
     }
     out.Append("\ncur_scope = ", cur_scope);
     out.Append("\nerror_count = ", error_count);
+    out.Append("\nNEXT >>>>>>>>>>>> ", NextInstName(), " [", NextInstSymbol(), "]");
     return out;
   }
 };
