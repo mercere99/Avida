@@ -57,14 +57,15 @@ public:
 
   void AddInst(emp::String name, inst_fun_t fun) {
     emp_assert(num_insts < MAX_SET_SIZE);
-    const inst_id_t id = info.size();
 
     char symbol = '?';
-    if (id < 26) symbol = 'a' + id;
-    else if (id < 52) symbol = 'A' + (id - 26);
-    else if (id < 62) symbol = '0' + (id - 52);
+    if (num_insts < 26) symbol = 'a' + num_insts;
+    else if (num_insts < 52) symbol = 'A' + (num_insts - 26);
+    else if (num_insts < 62) symbol = '0' + (num_insts - 52);
 
-    info[num_insts] = InstInfo{name, id, symbol};
+    std::cout << "AddInst: " << name << " " << num_insts << " '" << symbol << "'\n";
+
+    info[num_insts] = InstInfo{name, static_cast<inst_id_t>(num_insts), symbol};
     funs[num_insts] = fun;
     ++num_insts;
   }
@@ -97,7 +98,7 @@ public:
   [[nodiscard]] StateGenome<MAX_SET_SIZE> BuildGenome(size_t length, emp::Random & random) {
     StateGenome<MAX_SET_SIZE> genome;
     for (size_t i = 0; i < length; ++i) {
-      genome.Push(info[random.GetUInt(info.size())].id);
+      genome.Push(info[random.GetUInt(num_insts)].id);
     }
     return genome;
   }
