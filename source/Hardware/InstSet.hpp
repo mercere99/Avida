@@ -19,7 +19,6 @@ class InstSet {
 public:
   using inst_id_t = emp::min_uint_type<MAX_SET_SIZE+1>;
   using inst_fun_t = INST_RETURN_T (VM_T::*)();
-  using genome_t = StateGenome<MAX_SET_SIZE>;
   static constexpr size_t NULL_ID = static_cast<inst_id_t>(-1);
 
 private:
@@ -32,9 +31,12 @@ private:
   emp::array<InstInfo, MAX_SET_SIZE> info;
   emp::array<inst_fun_t, MAX_SET_SIZE> funs;
   size_t num_insts = 0;
+  size_t num_nops = 0;
 
 public:
   size_t size() const { return num_insts; }
+  size_t NumInsts() const { return num_insts; }
+  size_t NumNops() const { return num_nops; }
 
   [[nodiscard]] emp::String GetName(size_t id) const { return info[id].name; }
   [[nodiscard]] char GetSymbol(size_t id) const { return info[id].symbol; }
@@ -71,19 +73,24 @@ public:
     ++num_insts;
   }
 
+  /// Add an instruction to the set that is a nop that can be used as a modifier.
+  /// Note: Nops must be at the BEGINNING of the instruction set.
   void AddNopInst(emp::String name) {
+    emp_assert(num_nops == num_insts, "Nops must be at the beginning of the instruction set.");
     AddInst(name, nullptr);
+    ++num_nops;
   }
 
   // Execute an instruction on a given VM instance
   void Execute(VM_T & vm, size_t id) {
     emp_assert(id < funs.size(), id);
+    if (id < num_nops) return;
     (vm.*funs[id])(); // Call the instruction on the VM instance
   }
 
   /// Build a genome based on a string sequence.
-  [[nodiscard]] genome_t BuildGenome(emp::String sequence) {
-    genome_t genome;
+  [[nodiscard]] Genome BuildGenome(emp::String sequence) {
+    Genome genome;
     for (char symbol : sequence) {
       genome.Push(GetID(symbol));
     }
@@ -91,21 +98,27 @@ public:
   }
 
   /// Build a genome based on a repeated instruction.
-  [[nodiscard]] genome_t BuildGenome(size_t length, size_t inst_id=0) {
-    return genome_t(length, info[inst_id].id);
+  [[nodiscard]] Genome BuildGenome(size_t length, size_t inst_id=0) {
+    return Genome(length, info[inst_id].id);
   }
 
   /// Build a random genome of a given length.
-  [[nodiscard]] genome_t BuildGenome(size_t length, emp::Random & random) {
-    genome_t genome;
+  /// By default half of the instructions will be nop modifiers.
+  [[nodiscard]] Genome BuildGenome(size_t length, emp::Random & random, double nop_prob=0.5) {
+    Genome genome;
+    const size_t non_nops = num_insts - num_nops;
     for (size_t i = 0; i < length; ++i) {
-      genome.Push(info[random.GetUInt(num_insts)].id);
+      if (random.P(nop_prob)) {
+        genome.Push(info[random.GetUInt(num_nops)].id);
+      } else {
+        genome.Push(info[random.GetUInt(non_nops) + num_nops].id);
+      }
     }
     return genome;
   }
 
   /// Convert a genome into a simple sequence.
-  [[nodiscard]] std::string ToSequence(const genome_t & genome) const {
+  [[nodiscard]] std::string ToSequence(const Genome & genome) const {
     std::string out;
     out.reserve(genome.size());
     for (auto inst_id : genome) {
