@@ -63,12 +63,12 @@ public:
 
   template <typename T>
   void Insert(size_t pos, T && value, size_t count=1) {
-    values.insert(values.begin()+pos, count, std::forward<T>(value));
+    genome.insert(genome.begin()+pos, count, std::forward<T>(value));
   }
 
   template <typename T>
   void Erase(size_t pos, size_t count=1) {
-    values.erase(values.begin()+pos, count);
+    genome.erase(genome.begin()+pos, count);
   }
 
   // Remove [start_pos, end_pos) from this Vector and return it.
