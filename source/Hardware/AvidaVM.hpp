@@ -27,15 +27,15 @@ private:
   static constexpr size_t STACK_DEPTH = 16;       // Num entries on stack before it loops.
   static constexpr size_t MEM_SIZE = 64;          // How much physical memory is available?
   static constexpr size_t MAX_INSTS = 256;        // Max number of distinct instructions.
-  static constexpr size_t MAX_GENOME_SIZE = 1024; // Max genome length.
+  static constexpr size_t MAX_GENOME_SIZE = 2048; // Max genome length.
 
   // Configured types.
-  using data_t = int;                         // What data type does this VM use?
-  using mem_t = emp::array<data_t, MEM_SIZE>; // Memory is a fixed size.
-  using genome_t = StateGenome<MAX_INSTS>;    // Genomes can grow as needed.
-  using inst_id_t = genome_t::state_t;        // Type used for inst IDs in a genome.
-  using inst_set_t = InstSet<AvidaVM, 40>;    // Instruction set type for AvidaVM.
-  using Stack = VMStack<data_t, STACK_DEPTH>; // Stacks to use in virtual CPU.
+  using data_t = int;                             // What data type does this VM use?
+  using mem_t = emp::array<data_t, MEM_SIZE>;     // Memory is a fixed size.
+  using genome_t = StateGenome<MAX_INSTS>;        // Genomes can grow as needed.
+  using inst_id_t = genome_t::state_t;            // Type used for inst IDs in a genome.
+  using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM.
+  using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU.
 
   enum class Nop {
     A = 0, B = 1, C = 2, D = 3, E = 4, F = 5,
@@ -66,33 +66,6 @@ private:
   size_t cur_scope = 0; // Start in the global scope.
   emp::array<size_t, NUM_NOPS> scope_starts{0};  // Track where each scope started.
   size_t error_count = 0;
-
-  [[nodiscard]] emp::String StatusString() const {
-    emp::String out;
-    out += "Genome: ";
-    for (size_t i=0; i < genome.size(); ++i) {
-      if (i) out += ',';
-      out += genome[i];
-    }
-    out += "\nMemory: ";
-    for (size_t i=0; i < memory.size(); ++i) {
-      if (i) out += ',';
-      out += memory[i];
-    }
-    out += "\nHeads: ";
-    for (size_t i = 0; i < heads.size(); ++i) {
-      if (i) out += ',';
-      out += heads[i].ToString();
-    }
-    out += "\nStacks: ";
-    for (size_t i = 0; i < stacks.size(); ++i ) {
-      if (i) out += ',';
-      out.Append(static_cast<char>('A' + i), ':', stacks[i].ToString());
-    }
-    out.Append("\ncur_scope = ", cur_scope);
-    out.Append("\nerror_count = ", error_count);
-    return out;
-  }
 
   // =========== Helper Functions ============
 
@@ -137,7 +110,8 @@ public:
   AvidaVM() = delete;
   AvidaVM(const AvidaVM &) = default;
   AvidaVM(AvidaVM &&) = default;
-  AvidaVM(const inst_set_t & inst_set) : inst_set(inst_set) { }
+  AvidaVM(const inst_set_t & inst_set, const genome_t & genome)
+    : inst_set(inst_set), genome(genome) { Reset(); }
   // AvidaVM & operator=(const AvidaVM &) = default;
   // AvidaVM & operator=(AvidaVM &&) = default;
 
@@ -502,5 +476,32 @@ public:
     inst_set.AddInst("OffsetHead", &AvidaVM::Inst_OffsetHead);
 
     return inst_set;
+  }
+
+  [[nodiscard]] emp::String StatusString() const {
+    emp::String out;
+    out += "Genome: ";
+    for (size_t i=0; i < genome.size(); ++i) {
+      out += inst_set.GetSymbol(genome[i]);
+      // out.Append("[", (size_t) genome[i], "]");
+    }
+    out += "\nMemory: ";
+    for (size_t i=0; i < memory.size(); ++i) {
+      if (i) out += ',';
+      out.Append(static_cast<int>(memory[i]));
+    }
+    out += "\nHeads: ";
+    for (size_t i = 0; i < heads.size(); ++i) {
+      if (i) out += ',';
+      out += heads[i].ToString();
+    }
+    out += "\nStacks: ";
+    for (size_t i = 0; i < stacks.size(); ++i ) {
+      if (i) out += ',';
+      out.Append(static_cast<char>('A' + i), ':', stacks[i].ToString());
+    }
+    out.Append("\ncur_scope = ", cur_scope);
+    out.Append("\nerror_count = ", error_count);
+    return out;
   }
 };
