@@ -8,6 +8,7 @@
 
 #include <emp/base/array.hpp>
 #include <emp/datastructs/Vector.hpp>
+#include <emp/io/File.hpp>
 #include <emp/math/Random.hpp>
 #include <emp/tools/String.hpp>
 
@@ -82,30 +83,23 @@ public:
   }
 
   // Execute an instruction on a given VM instance
-  void Execute(VM_T & vm, size_t id) {
+  void Execute(VM_T & vm, size_t id) const {
     emp_assert(id < funs.size(), id);
     if (id < num_nops) return;
     (vm.*funs[id])(); // Call the instruction on the VM instance
   }
 
   /// Build a genome based on a string sequence.
-  [[nodiscard]] Genome BuildGenome(emp::String sequence) {
-    Genome genome;
+  void BuildGenome(Genome & genome, emp::String sequence) {
     for (char symbol : sequence) {
       genome.Push(GetID(symbol));
     }
-    return genome;
-  }
-
-  /// Build a genome based on a repeated instruction.
-  [[nodiscard]] Genome BuildGenome(size_t length, size_t inst_id=0) {
-    return Genome(length, info[inst_id].id);
   }
 
   /// Build a random genome of a given length.
   /// By default half of the instructions will be nop modifiers.
-  [[nodiscard]] Genome BuildGenome(size_t length, emp::Random & random, double nop_prob=0.5) {
-    Genome genome;
+  void BuildGenome(Genome & genome, size_t length, emp::Random & random, double nop_prob=0.5) {
+    genome.Resize(0);
     const size_t non_nops = num_insts - num_nops;
     for (size_t i = 0; i < length; ++i) {
       if (random.P(nop_prob)) {
@@ -114,8 +108,28 @@ public:
         genome.Push(info[random.GetUInt(non_nops) + num_nops].id);
       }
     }
+  }
+
+  [[nodiscard]] Genome LoadGenome(std::istream & is) {
+    Genome genome;
+    emp::File file(is);
+    file.RemoveComments("//");
+    file.CompressWhitespace();
+    for (emp::String line : file) {
+      auto inst_id = GetID(line);
+      if (inst_id == NULL_ID) {
+        emp::notify::Error("Unknown instruction '", line, "'.");
+      }
+      genome.Push(inst_id);
+    }
     return genome;
   }
+
+  [[nodiscard]] Genome LoadGenome(emp::String filename) {
+    std::ifstream is(filename);
+    return LoadGenome(is);
+  }
+
 
   /// Convert a genome into a simple sequence.
   [[nodiscard]] std::string ToSequence(const Genome & genome) const {
