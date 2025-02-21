@@ -40,13 +40,14 @@ private:
     A = 0, B = 1, C = 2, D = 3, E = 4, F = 5,
   };
 
+  // Heads are assumed to be either on the genome or memory and cannot shift.
   enum HeadType {
-    HEAD_IP = 0,      // Instruction Pointer (init: genome start)
-    HEAD_G_READ = 1,  // Genome Read (init: genome start)
-    HEAD_G_WRITE = 2, // Genome Write (init: genome end)
-    HEAD_M_READ = 3,  // Memory Read (init: memory start)
-    HEAD_M_WRITE = 4, // Memory Write (init: memory start)
-    HEAD_FLOW = 5,    // Flow Control (init: genome start)
+    HEAD_IP = 0,      // Inst. Pointer (buffer: genome; init: start)
+    HEAD_G_READ = 1,  // Genome Read   (buffer: genome; init: start)
+    HEAD_G_WRITE = 2, // Genome Write  (buffer: genome; init: end)
+    HEAD_M_READ = 3,  // Memory Read   (buffer: memory; init: start)
+    HEAD_M_WRITE = 4, // Memory Write  (buffer: memory; init: start)
+    HEAD_FLOW = 5,    // Flow Control  (buffer: genome; init: start)
   };
 
   static constexpr data_t const_vals[]{ 1, 2, 4, 16, 256, -1 };
@@ -64,8 +65,6 @@ private:
 
   emp::array<VMHead, NUM_NOPS> heads;
   emp::array<Stack, NUM_NOPS> stacks;
-  size_t cur_scope = 0; // Start in the global scope.
-  emp::array<size_t, NUM_NOPS> scope_starts{0};  // Track where each scope started.
   size_t error_count = 0;
 
   // =========== Helper Functions ============
@@ -106,6 +105,26 @@ private:
   [[nodiscard]] Stack & GetStackArg(size_t default_arg) { return stacks[GetArg(default_arg)]; }
   [[nodiscard]] VMHead & GetHeadArg(HeadType default_head) {
     return heads[GetArg(static_cast<size_t>(default_head))];
+  }
+
+  // Does the current instruction have the specified argument?
+  [[nodiscard]] bool HasArg(inst_id_t arg) {
+    for (size_t pos = IP().pos + 1;
+         pos < genome.size() && genome[pos] < NUM_NOPS;
+         ++pos) {
+      if (genome[pos] == arg) return true;
+    }
+    return false;
+  }
+
+  // Is the IP currently at a "Scope" instruction for the target scope?
+  [[nodiscard]] bool AtScopeLimit(inst_id_t target_scope) {
+    static const inst_id_t inst_scope_id = inst_set.GetID("Scope");
+    return (ReadIP() == inst_scope_id) && HasArg(target_scope);
+  }
+
+  void SkipNops() {
+    while (IP().pos < genome.size() && genome[IP().pos] < NUM_NOPS) AdvanceIP();
   }
 
 public:
@@ -257,39 +276,38 @@ public:
     if (X) AdvanceIP();
   }
 
-  // Inst: Change current Scope to [Nop-A]. If current Scope <= previous, end prev Scope.
-  void Inst_Scope() {
-    size_t new_scope = GetArg(Nop::A);
-    // If we are starting new scopes, track starting lines here.
-    for (size_t scope = cur_scope; scope <= new_scope; ++scope) {
-      scope_starts[scope] = IP().pos;
-    }
-    cur_scope = new_scope;
-  }
+  // Inst: A marker for scope beginnings and ends; each nop to follow indicates a scope break.
+  void Inst_Scope() {  }
 
-  // Inst: Restart Scope [Current]
+  // Inst: Restart Scope [Nop-A]
   void Inst_Continue() {
-    size_t target_scope = GetArg(cur_scope);
-    if (target_scope > cur_scope) ++error_count;  // Trying to continue a scope we are not in.
-    else {
-      IP().pos = scope_starts[target_scope];
-      cur_scope = target_scope;
+    IP().pos -= 2; // Scan backward for a "Scope" from this position.
+    const inst_id_t target_scope = GetArg(Nop::A);
+
+    // Scan backwards to find beginning of target scope.
+    while (IP().pos < genome.size()) {
+      // Test if this is a Scope instruction and if it starts the target scope.
+      if (AtScopeLimit(target_scope)) {
+        AdvanceIP();
+        SkipNops(); // IP() should jump past Nops on the Scope instruction.
+        return;
+      }
+      --IP().pos;
     }
   }
 
-  // Inst: Advance to end of Scope [Current]
+  // Inst: Advance to end of Scope [Nop-A]
   void Inst_Break() {
-    size_t target_scope = GetArg(cur_scope);
-    if (target_scope > cur_scope) ++error_count;  // Trying to break from a scope we are not in.
-    else {
-      inst_id_t inst_scope_id = inst_set.GetID("Scope");
-      while (IP().pos < genome.size()) {  // Scan for end of this scope.
-        if (ReadIPInst() == inst_scope_id) {
-          AdvanceIP();
-          if (GetArg(Nop::A) <= target_scope) break;
-        }
-        AdvanceIP();
+    const size_t target_scope = GetArg(Nop::A);
+
+    // Scan find end of target scope.
+    while (IP().pos < genome.size()) {
+      // Test if this is a Scope instruction and if it starts the target scope.
+      if (AtScopeLimit(target_scope)) {
+        SkipNops(); // IP() should jump past Nops on the Scope instruction.
+        return;
       }
+      AdvanceIP();
     }
   }
 
@@ -464,7 +482,6 @@ public:
     // Reset the stacks.
     for (auto & stack : stacks) stack.Reset();
 
-    cur_scope = 0;    // Move back to global scope.
     error_count = 0;  // Reset all errors.
   }
 
@@ -557,7 +574,6 @@ public:
       if (i) out += "; ";
       out.Append(static_cast<char>('A' + i), ':', stacks[i].ToString());
     }
-    out.Append("\ncur_scope = ", cur_scope);
     out.Append("\nerror_count = ", error_count);
     out.Append("\nNEXT >>>>>>>>>>>> ", NextInstName(), " [", NextInstSymbol(), "]");
     return out;
