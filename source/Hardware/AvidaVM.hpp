@@ -14,7 +14,6 @@
 #include "emp/math/math.hpp"
 
 #include "InstSet.hpp"
-#include "VMHead.hpp"
 #include "VMStack.hpp"
 
 #include "../Genome.hpp"
@@ -42,12 +41,12 @@ private:
 
   // Heads are assumed to be either on the genome or memory and cannot shift.
   enum HeadType {
-    HEAD_IP = 0,      // Inst. Pointer (buffer: genome; init: start)
-    HEAD_G_READ = 1,  // Genome Read   (buffer: genome; init: start)
-    HEAD_G_WRITE = 2, // Genome Write  (buffer: genome; init: end)
-    HEAD_M_READ = 3,  // Memory Read   (buffer: memory; init: start)
-    HEAD_M_WRITE = 4, // Memory Write  (buffer: memory; init: start)
-    HEAD_FLOW = 5,    // Flow Control  (buffer: genome; init: start)
+    HEAD_IP = 0,      // Inst. Pointer (init: 0)
+    HEAD_G_READ = 1,  // Genome Read   (init: 0)
+    HEAD_G_WRITE = 2, // Genome Write  (init: genome size)
+    HEAD_M_READ = 3,  // Memory Read   (init: 0)
+    HEAD_M_WRITE = 4, // Memory Write  (init: 0)
+    HEAD_FLOW = 5,    // Flow Control  (init: 0)
   };
 
   static constexpr data_t const_vals[]{ 1, 2, 4, 16, 256, -1 };
@@ -63,36 +62,45 @@ private:
   Genome offspring;  // Offspring waiting to be placed.
   mem_t memory;
 
-  emp::array<VMHead, NUM_NOPS> heads;
+  emp::array<size_t, NUM_NOPS> heads;
   emp::array<Stack, NUM_NOPS> stacks;
   size_t error_count = 0;
 
   // =========== Helper Functions ============
 
-  // Read the data found at the provided head and return it.
-  [[nodiscard]] data_t ReadHead(const VMHead & head) const {
-    return head.on_genome ? head.Read(genome) : head.Read(memory);
+  /// Read from a position in the genome.
+  [[nodiscard]] inst_id_t ReadGenome(const size_t pos) const {
+    return (pos < genome.size()) ? genome[pos] : 0;
   }
 
-  // Write the provided data to the position pointed by the provided head.
-  void WriteHead(VMHead & head, data_t data) {
-    head.on_genome ? head.Write(data, genome) : head.Write(data, memory);
+  /// Write to a position in the genome.
+  [[nodiscard]] data_t ReadMemory(const size_t pos) const {
+    return (pos < memory.size()) ? memory[pos] : 0;
   }
 
-  [[nodiscard]] VMHead & IP() { return heads[HEAD_IP]; }
-  [[nodiscard]] const VMHead & IP() const { return heads[HEAD_IP]; }
-  [[nodiscard]] data_t ReadIP() const { return ReadHead(IP()); }
+  /// Write to the genome (always an insertion)
+  void WriteGenome(const size_t pos, inst_id_t id) {
+    if (pos < genome.size()) genome.Insert(pos, id);
+    else genome.Push(id);
+  }
+
+  /// Write to the memory
+  void WriteMemory(const size_t pos, data_t data) {
+    if (pos < memory.size()) memory[pos] = data;
+    else ++error_count; // Writing outside of range.
+  }
+
+  /// Get the current position of the instruction pointer.
+  [[nodiscard]] size_t & IP() { return heads[HEAD_IP]; }
+  [[nodiscard]] size_t IP() const { return heads[HEAD_IP]; }
+
+  [[nodiscard]] inst_id_t ReadIP() const { return ReadGenome(IP()); }
   void AdvanceIP() { ++IP(); }
 
-  [[nodiscard]] inst_id_t ToValidInst(data_t inst_val) const {
-    return static_cast<inst_id_t>(emp::Mod(inst_val, inst_set.size()));
-  }
 
-  [[nodiscard]] inst_id_t ReadIPInst() const { return ToValidInst(ReadIP()); }
-
-  // Select the argument to use, overriding a nop if possible.
-  [[nodiscard]] size_t GetArg(size_t default_arg) {
-    inst_id_t out_val = ReadIPInst();
+  // Select the argument based on nop, using default if none available.
+  [[nodiscard]] inst_id_t GetArg(inst_id_t default_arg) {
+    inst_id_t out_val = ReadIP();
     if (out_val < NUM_NOPS) {  // We found a nop.
       AdvanceIP();
       return out_val;
@@ -103,13 +111,13 @@ private:
   [[nodiscard]] size_t GetArg(Nop default_arg) { return GetArg(static_cast<data_t>(default_arg)); }
   [[nodiscard]] Stack & GetStackArg(Nop default_arg) { return stacks[GetArg(default_arg)]; }
   [[nodiscard]] Stack & GetStackArg(size_t default_arg) { return stacks[GetArg(default_arg)]; }
-  [[nodiscard]] VMHead & GetHeadArg(HeadType default_head) {
-    return heads[GetArg(static_cast<size_t>(default_head))];
+  [[nodiscard]] size_t & GetHeadArg(HeadType default_head) {
+    return heads[GetArg(static_cast<Nop>(default_head))];
   }
 
   // Does the current instruction have the specified argument?
   [[nodiscard]] bool HasArg(inst_id_t arg) {
-    for (size_t pos = IP().pos + 1;
+    for (size_t pos = IP() + 1;
          pos < genome.size() && genome[pos] < NUM_NOPS;
          ++pos) {
       if (genome[pos] == arg) return true;
@@ -124,7 +132,7 @@ private:
   }
 
   void SkipNops() {
-    while (IP().pos < genome.size() && genome[IP().pos] < NUM_NOPS) AdvanceIP();
+    while (IP() < genome.size() && genome[IP()] < NUM_NOPS) AdvanceIP();
   }
 
 public:
@@ -281,18 +289,18 @@ public:
 
   // Inst: Restart Scope [Nop-A]
   void Inst_Continue() {
-    IP().pos -= 2; // Scan backward for a "Scope" from this position.
+    IP() -= 2; // Scan backward for a "Scope" from this position.
     const inst_id_t target_scope = GetArg(Nop::A);
 
     // Scan backwards to find beginning of target scope.
-    while (IP().pos < genome.size()) {
+    while (IP() < genome.size()) {
       // Test if this is a Scope instruction and if it starts the target scope.
       if (AtScopeLimit(target_scope)) {
         AdvanceIP();
         SkipNops(); // IP() should jump past Nops on the Scope instruction.
         return;
       }
-      --IP().pos;
+      --IP();
     }
   }
 
@@ -301,7 +309,7 @@ public:
     const size_t target_scope = GetArg(Nop::A);
 
     // Scan find end of target scope.
-    while (IP().pos < genome.size()) {
+    while (IP() < genome.size()) {
       // Test if this is a Scope instruction and if it starts the target scope.
       if (AtScopeLimit(target_scope)) {
         SkipNops(); // IP() should jump past Nops on the Scope instruction.
@@ -343,78 +351,78 @@ public:
   }
 
   // Inst: Copy the value from Head [Nop-B] to Head [Nop-C], advancing both
-  void Inst_Copy() {
-    VMHead & from_head = GetHeadArg(HEAD_G_READ);
-    VMHead & to_head = GetHeadArg(HEAD_G_WRITE);
-    WriteHead(to_head, ReadHead(from_head));
-    ++from_head;
-    ++to_head;
+  void Inst_CopyInst() {
+    size_t & read_head = GetHeadArg(HEAD_G_READ);
+    size_t & write_head = GetHeadArg(HEAD_G_WRITE);
+    const inst_id_t inst = ReadGenome(read_head);
+    WriteGenome(write_head, inst);
+    ++read_head;
+    ++write_head;
   }
 
   // Inst: Read value at Head [Nop-D]:X ; Push X onto stack [Nop-A] ; advance Head.
   void Inst_Load() {
-    VMHead & from_head = GetHeadArg(HEAD_M_READ);
-    GetStackArg(Nop::A).Push( ReadHead(from_head) );
+    size_t & from_head = GetHeadArg(HEAD_M_READ);
+    GetStackArg(Nop::A).Push( ReadMemory(from_head) );
+    ++from_head;
   }
 
   // Inst: Pop[Nop-A] and write the value into Head [NopE] ; advance Head.
   void Inst_Store() {
-    data_t value = GetStackArg(Nop::A).Pop();
-    VMHead & to_head = GetHeadArg(HEAD_M_WRITE);
-    WriteHead(to_head, value);
+    const data_t value = GetStackArg(Nop::A).Pop();
+    size_t & to_head = GetHeadArg(HEAD_M_WRITE);
+    WriteMemory(to_head, value);
+    ++to_head;
   }
 
   // Inst: Split off space between Head[Nop-B] and Head[Nop-C], resetting both.
   void Inst_DivideCell() {
-    VMHead & head1 = GetHeadArg(HEAD_G_READ);
-    VMHead & head2 = GetHeadArg(HEAD_G_WRITE);
+    size_t & head1 = GetHeadArg(HEAD_G_READ);
+    size_t & head2 = GetHeadArg(HEAD_G_WRITE);
 
-    auto start_pos = head1.pos;
-    auto stop_pos = head2.pos;
-    if (stop_pos < start_pos) std::swap(start_pos, stop_pos);
-    if (stop_pos > genome.size()) stop_pos = genome.size();
+    if (head2 < head1) std::swap(head1, head2);
+    if (head2 > genome.size()) head2 = genome.size();
 
-    if (!head1.on_genome || !head2.on_genome || // Both heads must be on the genome
-        start_pos >= genome.size() ||           // Start pos cannot be past end of genome
-        start_pos == stop_pos) {                // Must be space between heads
+    if (head1 >= genome.size() ||  // Start pos cannot be past end of genome
+        head1 == head2) {          // Must be space between heads
       ++error_count;
       return;      
     }
 
     // Extract the offspring from the genome.
-    offspring = genome.Extract(start_pos, stop_pos - start_pos);
+    offspring = genome.Extract(head1, head2 - head1);
 
     // Reset the heads.
-    head1.pos = 0;
-    head2.pos = genome.size();
+    head2 = head1;  // Move head2 to the beginning of the extracted position (likely org end)
+    head1 = 0;      // Move head1 to the beginning of the genome
   }
 
   // Inst: Push the position of Head[Nop-F] onto stack [Nop-A]
   void Inst_HeadPos() {
-    VMHead & head = GetHeadArg(HEAD_FLOW);
-    GetStackArg(Nop::A).Push(head.pos);
+    const size_t pos = GetHeadArg(HEAD_FLOW);
+    GetStackArg(Nop::A).Push(pos);
   }
 
   // Inst: Pop stack [Nop-A] and move head[Nop-F] to that position.
   void Inst_SetHead() {
     const data_t new_pos = GetStackArg(Nop::A).Pop();
-    GetHeadArg(HEAD_FLOW).pos = new_pos;
+    GetHeadArg(HEAD_FLOW) = new_pos;
   }
 
   // Inst: Jump Head[Nop-A] to Head[Nop-F]
   void Inst_JumpHead() {
-    VMHead & jump_head = GetHeadArg(HEAD_IP);
+    size_t & jump_head = GetHeadArg(HEAD_IP);
     jump_head = GetHeadArg(HEAD_FLOW);
   }
   
   // Inst: Shift Head[Nop-F] by the value Pop[Nop-A]
   void Inst_OffsetHead() {
-    VMHead & head = GetHeadArg(HEAD_FLOW);
-    head.pos += GetStackArg(Nop::A).Pop();
+    size_t & head = GetHeadArg(HEAD_FLOW);
+    head += GetStackArg(Nop::A).Pop();
   }
 
   void ProcessInst() {
-    const auto inst_id = ReadIPInst();
+    const inst_id_t inst_id = ReadIP();
     AdvanceIP();
     inst_set.Execute(*this, inst_id);
     // ProcessInst(inst_id);
@@ -453,7 +461,7 @@ public:
     case 27: Inst_StackDup(); break;
     case 28: Inst_StackSwap(); break;
     case 29: Inst_StackMove(); break;
-    case 30: Inst_Copy(); break;
+    case 30: Inst_CopyInst(); break;
     case 31: Inst_Load(); break;
     case 32: Inst_Store(); break;
     case 33: Inst_DivideCell(); break;
@@ -472,12 +480,12 @@ public:
     offspring.Resize(0);
 
     // Reset Heads
-    heads[HEAD_IP].Reset();
-    heads[HEAD_G_READ].Reset();
-    heads[HEAD_G_WRITE].Reset(genome.size());
-    heads[HEAD_M_READ].Reset(0, false);
-    heads[HEAD_M_WRITE].Reset(0, false);
-    heads[HEAD_FLOW].Reset();
+    heads[HEAD_IP] = 0;
+    heads[HEAD_G_READ] = 0;
+    heads[HEAD_G_WRITE] = genome.size();
+    heads[HEAD_M_READ] = 0;
+    heads[HEAD_M_WRITE] = 0;
+    heads[HEAD_FLOW] = 0;
 
     // Reset the stacks.
     for (auto & stack : stacks) stack.Reset();
@@ -528,7 +536,7 @@ public:
     inst_set.AddInst("StackDup",   &AvidaVM::Inst_StackDup);
     inst_set.AddInst("StackSwap",  &AvidaVM::Inst_StackSwap);
     inst_set.AddInst("StackMove",  &AvidaVM::Inst_StackMove);
-    inst_set.AddInst("Copy",       &AvidaVM::Inst_Copy);
+    inst_set.AddInst("CopyInst",   &AvidaVM::Inst_CopyInst);
     inst_set.AddInst("Load",       &AvidaVM::Inst_Load);
     inst_set.AddInst("Store",      &AvidaVM::Inst_Store);
     inst_set.AddInst("DivideCell", &AvidaVM::Inst_DivideCell);
@@ -546,17 +554,17 @@ public:
   //
 
   [[nodiscard]] emp::String NextInstName() const {
-    return inst_set.GetName(ReadIPInst());
+    return inst_set.GetName(ReadIP());
   }
 
   [[nodiscard]] char NextInstSymbol() const {
-    return inst_set.GetSymbol(ReadIPInst());
+    return inst_set.GetSymbol(ReadIP());
   }
 
   [[nodiscard]] emp::String StatusString() const {
     emp::String out = inst_set.ToSequence(genome);
-    if (IP().pos < out.size()) {
-      out.insert(IP().pos, ">");
+    if (IP() < out.size()) {
+      out.insert(IP(), ">");
     }
     out.insert(0, "Genome: ");
     out += "\nMemory: ";
@@ -564,11 +572,12 @@ public:
       if (i) out += ',';
       out.Append(static_cast<int>(memory[i]));
     }
-    out += "\nHeads: ";
-    for (size_t i = 0; i < heads.size(); ++i) {
-      if (i) out += ',';
-      out += heads[i].ToString();
-    }
+    out.Append("\nHeads: IP:", IP(),
+      " GenRead:", heads[1],
+      " GenWrite:", heads[2],
+      " MemRead:", heads[3],
+      " MemWrite:", heads[4],
+      " Flow:", heads[5]);
     out += "\nStacks: ";
     for (size_t i = 0; i < stacks.size(); ++i ) {
       if (i) out += "; ";
