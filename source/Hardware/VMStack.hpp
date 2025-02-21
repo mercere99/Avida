@@ -36,9 +36,14 @@ struct VMStack {
 
   [[nodiscard]] emp::String ToString() const {
     emp::String out;
+    bool printing = false;
     for (size_t i = 0; i < STACK_DEPTH; ++i) {
-      if (i) out += ',';
-      out.Append(stack[(i+stack_pos)%STACK_DEPTH]);
+      if (printing) out += ',';
+      auto value = stack[(i+stack_pos)%STACK_DEPTH];
+      if (printing || value != 0) {
+        printing = true;
+        out.Append(value);
+      }
     }
     return out;
   }
