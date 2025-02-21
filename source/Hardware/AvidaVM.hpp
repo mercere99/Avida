@@ -43,11 +43,13 @@ private:
   enum HeadType {
     HEAD_IP = 0,      // Instruction Pointer (init: genome start)
     HEAD_G_READ = 1,  // Genome Read (init: genome start)
-    HEAD_G_WRITE = 2, // Genome Write (init: genome start)
+    HEAD_G_WRITE = 2, // Genome Write (init: genome end)
     HEAD_M_READ = 3,  // Memory Read (init: memory start)
     HEAD_M_WRITE = 4, // Memory Write (init: memory start)
     HEAD_FLOW = 5,    // Flow Control (init: genome start)
   };
+
+  static constexpr data_t const_vals[]{ 1, 2, 4, 16, 256, -1 };
 
   // Calculated values.
   static constexpr size_t DATA_BITS = sizeof(data_t)*8; // Number of bits in data_t;
@@ -57,6 +59,7 @@ private:
 
   const inst_set_t & inst_set;
   Genome genome;
+  Genome offspring;  // Offspring waiting to be placed.
   mem_t memory;
 
   emp::array<VMHead, NUM_NOPS> heads;
@@ -122,9 +125,16 @@ public:
 
   // Inst: Push value [Nop-A] onto Stack [Nop-A]
   void Inst_Const() {
-    static constexpr data_t const_vals[]{ 1, 2, 4, 16, 256, -1 }; // , 65536, 0, -2, 0, 0, 0};
     const data_t value = const_vals[GetArg(Nop::A)];
     GetStackArg(Nop::A).Push(value);
+  }
+
+  // Inst: Y = Value[Nop-A] ; Pop[Nop-A]:Y ; Push[Arg2] X + Y.
+  void Inst_Offset() {
+    const data_t X = const_vals[GetArg(Nop::A)];
+    size_t Y_id = GetArg(Nop::A);
+    const data_t Y = stacks[Y_id].Pop();
+    GetStackArg(Y_id).Push(X + Y);
   }
 
   // Inst: Pop[Nop-A]:X ; Push[Arg1] !X
@@ -241,6 +251,12 @@ public:
     if (!X) AdvanceIP();
   }
 
+  // Inst: Pop[Nop-A]:X ; if X != 0, skip next instruction
+  void Inst_IfNot() {
+    const data_t X = GetStackArg(Nop::A).Pop();
+    if (X) AdvanceIP();
+  }
+
   // Inst: Change current Scope to [Nop-A]. If current Scope <= previous, end prev Scope.
   void Inst_Scope() {
     size_t new_scope = GetArg(Nop::A);
@@ -267,7 +283,7 @@ public:
     if (target_scope > cur_scope) ++error_count;  // Trying to break from a scope we are not in.
     else {
       inst_id_t inst_scope_id = inst_set.GetID("Scope");
-      while (IP().pos > 0) {  // Scan for end of this scope.
+      while (IP().pos < genome.size()) {  // Scan for end of this scope.
         if (ReadIPInst() == inst_scope_id) {
           AdvanceIP();
           if (GetArg(Nop::A) <= target_scope) break;
@@ -330,15 +346,29 @@ public:
     WriteHead(to_head, value);
   }
 
-  // Inst: Allocates extra space and places the write head at the beginning of the space.
-  void Inst_Allocate() {
-    const size_t start_size = genome.size();
-    genome.Resize( std::min(start_size*2, MAX_GENOME_SIZE) );
-    heads[HEAD_G_WRITE].Reset(start_size, true);
-  }
-
-  // Inst: Split off space between read head and write head.
+  // Inst: Split off space between Head[Nop-B] and Head[Nop-C], resetting both.
   void Inst_DivideCell() {
+    VMHead & head1 = GetHeadArg(HEAD_G_READ);
+    VMHead & head2 = GetHeadArg(HEAD_G_WRITE);
+
+    auto start_pos = head1.pos;
+    auto stop_pos = head2.pos;
+    if (stop_pos < start_pos) std::swap(start_pos, stop_pos);
+    if (stop_pos > genome.size()) stop_pos = genome.size();
+
+    if (!head1.on_genome || !head2.on_genome || // Both heads must be on the genome
+        start_pos >= genome.size() ||           // Start pos cannot be past end of genome
+        start_pos == stop_pos) {                // Must be space between heads
+      ++error_count;
+      return;      
+    }
+
+    // Extract the offspring from the genome.
+    offspring = genome.Extract(start_pos, stop_pos - start_pos);
+
+    // Reset the heads.
+    head1.pos = 0;
+    head2.pos = genome.size();
   }
 
   // Inst: Push the position of Head[Nop-F] onto stack [Nop-A]
@@ -368,7 +398,8 @@ public:
   void ProcessInst() {
     const auto inst_id = ReadIPInst();
     AdvanceIP();
-    ProcessInst(inst_id);
+    inst_set.Execute(*this, inst_id);
+    // ProcessInst(inst_id);
   }
 
   void ProcessInst(size_t id) {
@@ -381,36 +412,37 @@ public:
     case 5: break;   // Nop-F
 
     case 6: Inst_Const(); break;
-    case 7: Inst_Not(); break;
-    case 8: Inst_Shift(); break;
-    case 9: Inst_Add(); break;
-    case 10: Inst_Sub(); break;
-    case 11: Inst_Mult(); break;
-    case 12: Inst_Div(); break;
-    case 13: Inst_Mod(); break;
-    case 14: Inst_Exp(); break;
-    case 15: Inst_Sort(); break;
-    case 16: Inst_TestLess(); break;
-    case 17: Inst_TestEqu(); break;
-    case 18: Inst_Nand(); break;
-    case 19: Inst_Xor(); break;
-    case 20: Inst_If(); break;
-    case 21: Inst_Scope(); break;
-    case 22: Inst_Continue(); break;
-    case 23: Inst_Break(); break;
-    case 24: Inst_StackPop(); break;
-    case 25: Inst_StackDup(); break;
-    case 26: Inst_StackSwap(); break;
-    case 27: Inst_StackMove(); break;
-    case 28: Inst_Copy(); break;
-    case 29: Inst_Load(); break;
-    case 30: Inst_Store(); break;
-    case 31: Inst_Allocate(); break;
-    case 32: Inst_DivideCell(); break;
-    case 33: Inst_HeadPos(); break;
-    case 34: Inst_SetHead(); break;
-    case 35: Inst_JumpHead(); break;
-    case 36: Inst_OffsetHead(); break;
+    case 7: Inst_Offset(); break;
+    case 8: Inst_Not(); break;
+    case 9: Inst_Shift(); break;
+    case 10: Inst_Add(); break;
+    case 11: Inst_Sub(); break;
+    case 12: Inst_Mult(); break;
+    case 13: Inst_Div(); break;
+    case 14: Inst_Mod(); break;
+    case 15: Inst_Exp(); break;
+    case 16: Inst_Sort(); break;
+    case 17: Inst_TestLess(); break;
+    case 18: Inst_TestEqu(); break;
+    case 19: Inst_Nand(); break;
+    case 20: Inst_Xor(); break;
+    case 21: Inst_If(); break;
+    case 22: Inst_IfNot(); break;
+    case 23: Inst_Scope(); break;
+    case 24: Inst_Continue(); break;
+    case 25: Inst_Break(); break;
+    case 26: Inst_StackPop(); break;
+    case 27: Inst_StackDup(); break;
+    case 28: Inst_StackSwap(); break;
+    case 29: Inst_StackMove(); break;
+    case 30: Inst_Copy(); break;
+    case 31: Inst_Load(); break;
+    case 32: Inst_Store(); break;
+    case 33: Inst_DivideCell(); break;
+    case 34: Inst_HeadPos(); break;
+    case 35: Inst_SetHead(); break;
+    case 36: Inst_JumpHead(); break;
+    case 37: Inst_OffsetHead(); break;
     default:
       emp::notify::Error("Instruction ", id, " out of range.");
     }
@@ -418,10 +450,13 @@ public:
 
    // Initialize the state of the virtual CPU
   void Reset() {
+    // Reset offspring
+    offspring.Resize(0);
+
     // Reset Heads
     heads[HEAD_IP].Reset();
     heads[HEAD_G_READ].Reset();
-    heads[HEAD_G_WRITE].Reset();
+    heads[HEAD_G_WRITE].Reset(genome.size());
     heads[HEAD_M_READ].Reset(0, false);
     heads[HEAD_M_WRITE].Reset(0, false);
     heads[HEAD_FLOW].Reset();
@@ -432,6 +467,13 @@ public:
     cur_scope = 0;    // Move back to global scope.
     error_count = 0;  // Reset all errors.
   }
+
+  // Reset with a new genome.
+  void Reset(const Genome & in_genome) {
+    genome = in_genome;
+    Reset();
+  }
+
 
 
   // === Static Functions for working with Avida VMs ===
@@ -446,6 +488,7 @@ public:
     inst_set.AddNopInst("Nop-F");
 
     inst_set.AddInst("Const",      &AvidaVM::Inst_Const);
+    inst_set.AddInst("Offset",     &AvidaVM::Inst_Offset);
     inst_set.AddInst("Not",        &AvidaVM::Inst_Not);
     inst_set.AddInst("Shift",      &AvidaVM::Inst_Shift);
     inst_set.AddInst("Add",        &AvidaVM::Inst_Add);
@@ -460,6 +503,7 @@ public:
     inst_set.AddInst("Nand",       &AvidaVM::Inst_Nand);
     inst_set.AddInst("Xor",        &AvidaVM::Inst_Xor);
     inst_set.AddInst("If",         &AvidaVM::Inst_If);
+    inst_set.AddInst("IfNot",      &AvidaVM::Inst_IfNot);
     inst_set.AddInst("Scope",      &AvidaVM::Inst_Scope);
     inst_set.AddInst("Continue",   &AvidaVM::Inst_Continue);
     inst_set.AddInst("Break",      &AvidaVM::Inst_Break);
@@ -470,7 +514,6 @@ public:
     inst_set.AddInst("Copy",       &AvidaVM::Inst_Copy);
     inst_set.AddInst("Load",       &AvidaVM::Inst_Load);
     inst_set.AddInst("Store",      &AvidaVM::Inst_Store);
-    inst_set.AddInst("Allocate",   &AvidaVM::Inst_Allocate);
     inst_set.AddInst("DivideCell", &AvidaVM::Inst_DivideCell);
     inst_set.AddInst("HeadPos",    &AvidaVM::Inst_HeadPos);
     inst_set.AddInst("SetHead",    &AvidaVM::Inst_SetHead);
@@ -494,8 +537,11 @@ public:
   }
 
   [[nodiscard]] emp::String StatusString() const {
-    emp::String out;
-    out.Append("Genome: ", inst_set.ToSequence(genome));
+    emp::String out = inst_set.ToSequence(genome);
+    if (IP().pos < out.size()) {
+      out.insert(IP().pos, ">");
+    }
+    out.insert(0, "Genome: ");
     out += "\nMemory: ";
     for (size_t i=0; i < memory.size(); ++i) {
       if (i) out += ',';
@@ -508,7 +554,7 @@ public:
     }
     out += "\nStacks: ";
     for (size_t i = 0; i < stacks.size(); ++i ) {
-      if (i) out += ',';
+      if (i) out += "; ";
       out.Append(static_cast<char>('A' + i), ':', stacks[i].ToString());
     }
     out.Append("\ncur_scope = ", cur_scope);
