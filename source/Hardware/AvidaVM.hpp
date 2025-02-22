@@ -13,13 +13,14 @@
 #include "emp/base/notify.hpp"
 #include "emp/math/math.hpp"
 
+#include "HardwareBase.hpp"
 #include "InstSet.hpp"
 #include "VMStack.hpp"
 
 #include "../Genome.hpp"
 
 /// Default Avida Virtual Machine for use in Avida 5
-class AvidaVM {
+class AvidaVM : public HardwareBase {
 private:
   // Configured values.
   static constexpr size_t NUM_NOPS = 6;           // Num nop modifier instructions used
@@ -438,6 +439,12 @@ public:
     // ProcessInst(inst_id);
   }
 
+  void Run(size_t cycles=10) override {
+    for (size_t i = 0; i < cycles; ++i) {
+      ProcessInst();
+    }
+  }
+
   void ProcessInst(size_t id) {
     switch (id) {
     case 0:          // Nop-A
@@ -485,7 +492,7 @@ public:
   }
 
    // Initialize the state of the virtual CPU
-  void Reset() {
+  void Reset() override {
     // Reset offspring
     offspring.Resize(0);
 
@@ -504,7 +511,7 @@ public:
   }
 
   // Reset with a new genome.
-  void Reset(const Genome & in_genome) {
+  void Reset(const Genome & in_genome)  override {
     genome = in_genome;
     Reset();
   }
