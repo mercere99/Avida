@@ -60,7 +60,7 @@ private:
   const inst_set_t & inst_set;
   Genome genome;
   Genome offspring;  // Offspring waiting to be placed.
-  mem_t memory;
+  mem_t memory{};
 
   emp::array<size_t, NUM_NOPS> heads;
   emp::array<Stack, NUM_NOPS> stacks;
@@ -116,7 +116,7 @@ private:
   }
 
   // Does the current instruction have the specified argument?
-  [[nodiscard]] bool HasArg(inst_id_t arg) {
+  [[nodiscard]] bool HasArg(inst_id_t arg) const {
     for (size_t pos = IP() + 1;
          pos < genome.size() && genome[pos] < NUM_NOPS;
          ++pos) {
@@ -126,8 +126,15 @@ private:
   }
 
   // Is the IP currently at a "Scope" instruction for the target scope?
-  [[nodiscard]] bool AtScopeLimit(inst_id_t target_scope) {
+  [[nodiscard]] bool AtScopeLimit(inst_id_t target_scope) const {
     static const inst_id_t inst_scope_id = inst_set.GetID("Scope");
+    // std::cout << "[[ScopeLimit(" << (size_t) target_scope << ");"
+    //           << " Scope=" << (size_t) inst_scope_id
+    //           << " IP=" << IP()
+    //           << " inst=" << (size_t) ReadIP()
+    //           << " hasarg=" << HasArg(target_scope)
+    //           << " result=" << ((ReadIP() == inst_scope_id) && HasArg(target_scope))
+    //           << " ]]\n";
     return (ReadIP() == inst_scope_id) && HasArg(target_scope);
   }
 
@@ -285,12 +292,14 @@ public:
   }
 
   // Inst: A marker for scope beginnings and ends; each nop to follow indicates a scope break.
-  void Inst_Scope() {  }
+  void Inst_Scope() {
+    SkipNops();  // When executing, just consume nops and nothing else.
+  }
 
   // Inst: Restart Scope [Nop-A]
   void Inst_Continue() {
-    IP() -= 2; // Scan backward for a "Scope" from this position.
     const inst_id_t target_scope = GetArg(Nop::A);
+    IP() -= 2; // Scan backward for a "Scope" from this position.
 
     // Scan backwards to find beginning of target scope.
     while (IP() < genome.size()) {
@@ -302,6 +311,7 @@ public:
       }
       --IP();
     }
+    IP() = 0; // If we made it here, reset to the beginning.
   }
 
   // Inst: Advance to end of Scope [Nop-A]

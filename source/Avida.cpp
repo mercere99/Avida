@@ -18,20 +18,27 @@ public:
     (void) args;
   }
 
+  void Trace(AvidaVM & vm, size_t cpu_cycles=200) {
+    for (size_t i = 0; i < cpu_cycles; ++i) {
+      std::cout << "STEP " << i << ":\n" << vm.StatusString() << std::endl;
+      vm.ProcessInst();
+    }
+    std::cout << "STEP " << cpu_cycles << ":\n" << vm.StatusString() << std::endl;
+  }
+
   void Run() {
+    constexpr size_t NUM_TRIALS = 500000;
+
     auto inst_set = AvidaVM::BuildInstSet();
-    Genome genome;
+    Genome genome = inst_set.LoadGenome("../config/ancestor.org");
     AvidaVM org(inst_set, genome);
-    for (size_t trial = 0; trial < 1000000; ++trial) {
+    for (size_t trial = 0; trial < NUM_TRIALS; ++trial) {
       if (trial % 100000 == 0) std::cout << "Trial: " << trial << std::endl; 
-      inst_set.BuildGenome(genome, 512, random);
-      // genome = inst_set.LoadGenome("../config/ancestor.org");
-      org.Reset(genome);
-      for (size_t i = 0; i < 100; ++i) {
-        // std::cout << org.StatusString() << std::endl;
+      inst_set.BuildGenome(genome, 256, random);
+      // org.Reset(genome);
+      for (size_t i = 0; i < 200; ++i) {
         org.ProcessInst();
       }
-      // std::cout << org.StatusString() << std::endl;
     }
   }
 };
