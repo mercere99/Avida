@@ -1,16 +1,16 @@
-Scope
-Nop-A
 HeadPos     // Get the position of the Write head (at the end of the genome)
 Nop-C
 Scope       // Start copy loop (in Scope D)
 Nop-D
-  Copy      // Copy the next instruction to the end of the genome.
+  CopyInst  // Copy the next instruction to the end of the genome.
   Offset    // Decrement the number of copies left to perform
   Nop-F
   StackDup  // Duplicate the stack count (of instructions left to copy)
   IfNot     // If we are done...
   Break     // ...exit the current scope
+  Nop-B
   Continue  // Otherwise continue the copy loop
+  Nop-D
 Scope       // End the copy loop
 Nop-B
 DivideCell  // Divide off the offspring
