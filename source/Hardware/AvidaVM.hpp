@@ -480,7 +480,15 @@ public:
     case 36: Inst_JumpHead(); break;
     case 37: Inst_OffsetHead(); break;
     default:
+      #ifdef NDEBUG // optimization: allow compiler to forgo bounds checking
+      #if defined(_MSC_VER) && !defined(__clang__) // MSVC
+      __assume(false);
+      #else // GCC, Clang
+      __builtin_unreachable();
+      #endif
+      #else // #ifdef NDEBUG
       emp::notify::Error("Instruction ", id, " out of range.");
+      #endif // #ifdef NDEBUG
     }
   }
 
