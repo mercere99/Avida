@@ -10,6 +10,7 @@
 #include "emp/base/vector.hpp"
 
 #include "HardwareBase.hpp"
+#include "InstSet.hpp"
 
 /// A class to handle a particular configuration of hardware.
 class HardwareManager {
@@ -19,6 +20,8 @@ protected:
 
   virtual hw_ptr_t AllocateNew() = 0;
 public:
+  virtual Genome LoadGenome(emp::String filename) = 0;
+
   hw_ptr_t Allocate() {
     if (hw_ptrs.size()) {
       hw_ptr_t out = hw_ptrs.back();
@@ -39,5 +42,12 @@ private:
   using HardwareManager::hw_ptr_t;
   hw_ptr_t AllocateNew() override { return emp::NewPtr<VM_T>(); }
 
+  InstSet inst_set;
 public:
+  HardwareType() : inst_set(VM_T::BuildInstSet()) { }
+
+  // Load an organism from a file.
+  Genome LoadGenome(emp::String filename) override {
+    return inst_set.LoadGenome(filename);
+  }
 };
