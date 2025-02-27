@@ -1,0 +1,16 @@
+LEVEL 0:
+Genome
+
+LEVEL 1:
+HardwareBase : Genome (Keeps reference to HardwareManager, but doesn't use it directly)
+InstSet      : Genome
+
+Level 2 
+HardwareManager : HardwareBase, InstSet
+[Derived Hardware] (e.g., AvidaVM)  : HardwareBase, InstSet
+
+Level 3:
+Organism : HardwareBase, HardwareManager
+
+Level 4:
+Population : Organism
