@@ -11,9 +11,20 @@
 /// A Population is a collection of organisms an a structure of how they are connected.
 class Population {
 private:
-  using org_ptr_t = emp::Ptr<Organism>;
-  emp::vector<org_ptr_t> orgs;
+  emp::vector<Organism> orgs{};
 
 public:
-  Population(size_t num_orgs=0) : orgs(num_orgs, nullptr) { }
+  Population() { }
+
+  void Inject(HardwareManager & hw_man, const Genome & genome) {
+    orgs.emplace_back(hw_man, genome);
+  }
+
+  void Inject(HardwareManager & hw_man, Genome && genome) {
+    orgs.emplace_back(hw_man, std::move(genome));
+  }
+
+  void Inject(HardwareManager & hw_man, emp::String filename) {
+    orgs.emplace_back(hw_man, hw_man.LoadGenome(filename));
+  }
 };
