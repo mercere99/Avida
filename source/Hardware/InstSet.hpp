@@ -12,14 +12,16 @@
 #include <emp/math/Random.hpp>
 #include <emp/tools/String.hpp>
 
+#include "HardwareBase.hpp"
 #include "../Genome.hpp"
 
 // Map of genome instruction to which instruction should be run.
-template <typename VM_T, size_t MAX_SET_SIZE, typename INST_RETURN_T=void>
+template <typename VM_T, size_t MAX_SET_SIZE=256, typename INST_RETURN_T=void>
 class InstSet {
 public:
   using inst_id_t = emp::min_uint_type<MAX_SET_SIZE+1>;
   using inst_fun_t = INST_RETURN_T (VM_T::*)();
+  using callback_t = std::function<void(Organism &)>;
   static constexpr size_t NULL_ID = static_cast<inst_id_t>(-1);
 
 private:
@@ -27,10 +29,12 @@ private:
     emp::String name;
     inst_id_t id;
     char symbol = '?';
+    bool is_callback = false;
   };
 
-  emp::array<InstInfo, MAX_SET_SIZE> info;
-  emp::array<inst_fun_t, MAX_SET_SIZE> funs;
+  emp::array<inst_fun_t, MAX_SET_SIZE> funs;          // Member functions to call in CPU
+  emp::array<callback_t, MAX_SET_SIZE> callback_funs; // For instructions with custom callbacks.
+  emp::array<InstInfo, MAX_SET_SIZE> info;            // Additional info about instructions
   size_t num_insts = 0;
   size_t num_nops = 0;
 
@@ -42,6 +46,7 @@ public:
   [[nodiscard]] emp::String GetName(size_t id) const { return info[id].name; }
   [[nodiscard]] char GetSymbol(size_t id) const { return info[id].symbol; }
   [[nodiscard]] inst_fun_t GetFunction(size_t id) const { return funs[id]; }
+  [[nodiscard]] bool IsCallback(size_t id) const { return info[id].is_callback; }
 
   // Get an ID from a name.
   [[nodiscard]] inst_id_t GetID(emp::String name) const {
@@ -59,34 +64,51 @@ public:
     return NULL_ID;
   }
 
-  void AddInst(emp::String name, inst_fun_t fun) {
+  [[nodiscard]] char GetNextSymbol() const {
+    if (num_insts < 26) return 'a' + num_insts;
+    if (num_insts < 52) return 'A' + (num_insts - 26);
+    if (num_insts < 62) return '0' + (num_insts - 52);
+    return '?';
+  }
+
+  void AddInst(emp::String name, inst_fun_t fun, callback_t callback_fun=nullptr) {
     emp_assert(num_insts < MAX_SET_SIZE);
 
-    char symbol = '?';
-    if (num_insts < 26) symbol = 'a' + num_insts;
-    else if (num_insts < 52) symbol = 'A' + (num_insts - 26);
-    else if (num_insts < 62) symbol = '0' + (num_insts - 52);
-
+    const char symbol = GetNextSymbol();
+    inst_id_t id = static_cast<inst_id_t>(num_insts);
     std::cout << "AddInst: " << name << " " << num_insts << " '" << symbol << "'\n";
 
-    info[num_insts] = InstInfo{name, static_cast<inst_id_t>(num_insts), symbol};
+    info[num_insts] = InstInfo{name, id, symbol, false};
     funs[num_insts] = fun;
+    if (callback_fun) callback_funs[num_insts] = callback_fun;
     ++num_insts;
   }
 
   /// Add an instruction to the set that is a nop that can be used as a modifier.
   /// Note: Nops must be at the BEGINNING of the instruction set.
   void AddNopInst(emp::String name) {
-    emp_assert(num_nops == num_insts, "Nops must be at the beginning of the instruction set.");
+    if (num_nops != num_insts) {
+      emp::notify::Error("Nops must be at beginning of instruction set. (inst='", name, "')");
+    }
     AddInst(name, nullptr);
     ++num_nops;
   }
 
+  // Add a function that's just a callback.
+  void AddCallbackInst(emp::String name, callback_t callback_fun) {
+    AddInst(name, nullptr, callback_fun);
+  }
+
   // Execute an instruction on a given VM instance
   void Execute(VM_T & vm, size_t id) const {
-    emp_assert(id < funs.size(), id);
+    emp_assert(id < num_insts, id);
     if (id < num_nops) return;
-    (vm.*funs[id])(); // Call the instruction on the VM instance
+
+    // If this function doesn't exist, assume it is just a callback.
+    if (!funs[id]) callback_funs[id](vm.GetOrganism());
+
+    // Otherwise call the appropriate function.
+    else (vm.*funs[id])();   // Call the instruction on the VM instance
   }
 
   /// Build a genome based on a string sequence.
@@ -102,6 +124,7 @@ public:
     genome.Resize(0);
     const size_t non_nops = num_insts - num_nops;
     for (size_t i = 0; i < length; ++i) {
+      // genome.Push(info[random.GetUInt(num_insts)].id);
       if (random.P(nop_prob)) {
         genome.Push(info[random.GetUInt(num_nops)].id);
       } else {
