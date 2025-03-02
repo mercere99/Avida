@@ -7,6 +7,7 @@
  */
 
 #include <algorithm>
+#include <functional>
 #include <utility>
 
 #include "emp/base/array.hpp"
@@ -14,6 +15,7 @@
 #include "emp/math/math.hpp"
 
 #include "HardwareBase.hpp"
+#include "HardwareManager.hpp"
 #include "InstSet.hpp"
 #include "VMStack.hpp"
 
@@ -35,6 +37,8 @@ private:
   using inst_id_t = Genome::value_t;              // Type used for inst IDs in a genome.
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM.
   using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU.
+  using manager_t = HardwareType<AvidaVM>;        // Derived type of this HardwareManager
+  using callback_t = std::function<void(Organism &)>; // Special functions added to inst set.
 
   enum class Nop {
     A = 0, B = 1, C = 2, D = 3, E = 4, F = 5,
@@ -58,7 +62,6 @@ private:
 
   // === Hardware ===
 
-  const inst_set_t & inst_set;
   Genome genome;
   Genome offspring;  // Offspring waiting to be placed.
   mem_t memory{};
@@ -68,6 +71,15 @@ private:
   size_t error_count = 0;
 
   // =========== Helper Functions ============
+
+  manager_t & Manager() {
+    return static_cast<manager_t &>(hw_manager);
+  }
+  const manager_t & Manager() const {
+    return static_cast<const manager_t &>(hw_manager);
+  }
+  inst_set_t & GetInstSet() { return Manager().GetInstSet(); }
+  const inst_set_t & GetInstSet() const { return Manager().GetInstSet(); }
 
   /// Read from a position in the genome.
   [[nodiscard]] inst_id_t ReadGenome(const size_t pos) const {
@@ -128,7 +140,7 @@ private:
 
   // Is the IP currently at a "Scope" instruction for the target scope?
   [[nodiscard]] bool AtScopeLimit(inst_id_t target_scope) const {
-    static const inst_id_t inst_scope_id = inst_set.GetID("Scope");
+    static const inst_id_t inst_scope_id = GetInstSet().GetID("Scope");
     // std::cout << "[[ScopeLimit(" << (size_t) target_scope << ");"
     //           << " Scope=" << (size_t) inst_scope_id
     //           << " IP=" << IP()
@@ -147,8 +159,10 @@ public:
   AvidaVM() = delete;
   AvidaVM(const AvidaVM &) = default;
   AvidaVM(AvidaVM &&) = default;
-  AvidaVM(const inst_set_t & inst_set, const Genome & genome)
-    : inst_set(inst_set), genome(genome) { Reset(); }
+  AvidaVM(HardwareManager & hw_manager)
+    : HardwareBase(hw_manager) { Reset(); }
+  AvidaVM(HardwareManager & hw_manager, const Genome & genome)
+    : HardwareBase(hw_manager), genome(genome) { Reset(); }
   // AvidaVM & operator=(const AvidaVM &) = default;
   // AvidaVM & operator=(AvidaVM &&) = default;
 
@@ -435,7 +449,7 @@ public:
   void ProcessInst() {
     const inst_id_t inst_id = ReadIP();
     AdvanceIP();
-    inst_set.Execute(*this, inst_id);
+    GetInstSet().Execute(*this, inst_id);
     // ProcessInst(inst_id);
   }
 
@@ -565,21 +579,26 @@ public:
     return inst_set;
   }
 
+  static bool AddCallback(inst_set_t & inst_set, emp::String name, callback_t callback_fun) {
+    inst_set.AddCallbackInst(name, callback_fun);
+    return true;
+  }
+
   /////////////////////////////////////////////
   //
   //  Functions for string-based information
   //
 
   [[nodiscard]] emp::String NextInstName() const {
-    return inst_set.GetName(ReadIP());
+    return GetInstSet().GetName(ReadIP());
   }
 
   [[nodiscard]] char NextInstSymbol() const {
-    return inst_set.GetSymbol(ReadIP());
+    return GetInstSet().GetSymbol(ReadIP());
   }
 
   [[nodiscard]] emp::String StatusString() const {
-    emp::String out = inst_set.ToSequence(genome);
+    emp::String out = GetInstSet().ToSequence(genome);
     if (IP() < out.size()) {
       out.insert(IP(), ">");
     }
