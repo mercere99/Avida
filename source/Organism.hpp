@@ -55,7 +55,14 @@ public:
   {
     hw_ptr->Reset(offspring_genome);
   }
-  ~Organism() { }
+  ~Organism() {
+    // Clean up hardware if we have it.
+    if (hw_ptr) {
+      auto & hw_manager = hw_ptr->GetManager();
+      hw_manager.Release(hw_ptr);
+      hw_ptr = nullptr;
+    }
+  }
 
   Organism & operator=(Organism && in) {
     genome = std::move(in.genome);
