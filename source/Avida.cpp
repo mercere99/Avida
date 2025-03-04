@@ -20,11 +20,7 @@ private:
   
   emp::Random random;
   std::unordered_map<emp::String, hw_man_ptr> hw_man_map;
-
-  template <typename VM_T>
-  HardwareManager & AddHardwareManager(emp::String name) {
-    return *(hw_man_map[name] = emp::NewPtr<HardwareType<VM_T>>());
-  }
+  std::unordered_map<emp::String, Population> pop_map;
 
 public:
   Avida(emp::vector<emp::String> args) {
@@ -34,12 +30,34 @@ public:
     }
   }
   ~Avida() {
+    // Close down the populations, moving all of the hardware to the managers for deletion.
+    pop_map.clear();
+
+    // Delete all of the hardware managers and the hardware they have.
     for ( auto [name, ptr] : hw_man_map) ptr.Delete();
   }
 
   HardwareManager & GetHWManager(emp::String name) {
     emp_assert( emp::Has(hw_man_map, name) );
     return *hw_man_map[name];
+  }
+
+  template <typename VM_T>
+  HardwareManager & AddHardwareManager(emp::String name) {
+    emp_assert(!emp::Has(hw_man_map, name));
+    return *(hw_man_map[name] = emp::NewPtr<HardwareType<VM_T>>());
+  }
+
+  Population & GetPopulation(emp::String name) {
+    emp_assert( emp::Has(pop_map, name) );    
+    return pop_map.find(name)->second;
+  }
+
+  Population & AddPopulation(emp::String name) {
+    emp_assert(!emp::Has(pop_map, name));
+    auto [it, success] = pop_map.emplace(name, random);
+    emp_assert(success);
+    return it->second;
   }
 
   void PrintHelp(emp::String exec_name, std::ostream & os) const {
@@ -83,7 +101,7 @@ public:
       }
     });
 
-    Population pop(random);
+    Population & pop = AddPopulation("main");
     pop.Inject(hw_man, "../config/ancestor.org");
 
     std::cout << "Size = " << pop.size() << std::endl;
