@@ -20,10 +20,17 @@ public:
   HardwareBase(HardwareManager & hw_manager) : hw_manager(hw_manager) { }
   virtual ~HardwareBase() { }
 
-  Organism & GetOrganism() { emp_assert(org_ptr); return *org_ptr; }
+  [[nodiscard]] Organism & GetOrganism() { emp_assert(org_ptr); return *org_ptr; }
+  [[nodiscard]] const Organism & GetOrganism() const { emp_assert(org_ptr); return *org_ptr; }
   HardwareBase & SetOrganism(Organism & org) { org_ptr = &org; return *this; }
 
-  virtual void Run(size_t cycles=10) = 0;
+  [[nodiscard]] HardwareManager & GetManager() { return hw_manager; }
+  [[nodiscard]] const HardwareManager & GetManager() const { return hw_manager; }
+
+  virtual void Process(size_t cycles=10) = 0;
   virtual void Reset() = 0;
   virtual void Reset(const Genome & in_genome) = 0;
+  [[nodiscard]] virtual Genome DivideGenome() = 0;
+
+  virtual bool OK([[maybe_unused]] bool check_org_ok=true) const { return true; }
 };
