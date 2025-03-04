@@ -28,7 +28,7 @@ protected:
 
   virtual hw_ptr_t AllocateNew(Organism & org) = 0;
 public:
-  virtual ~HardwareManager() { }
+  virtual ~HardwareManager() { Clear(); }
 
   virtual bool AddCallback(emp::String name, feedback_t fun) = 0;
 
@@ -46,6 +46,12 @@ public:
 
   void Release(hw_ptr_t ptr) {
     hw_ptrs.push_back(ptr);
+  }
+
+  // Remove current inventory of hardware.
+  void Clear() {
+    for (auto ptr : hw_ptrs) ptr.Delete();
+    hw_ptrs.resize(0);
   }
 };
 
