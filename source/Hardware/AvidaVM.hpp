@@ -20,6 +20,7 @@
 #include "VMStack.hpp"
 
 #include "../Genome.hpp"
+#include "../Organism.hpp"
 
 /// Default Avida Virtual Machine for use in Avida 5
 class AvidaVM : public HardwareBase {
@@ -63,7 +64,6 @@ private:
   // === Hardware ===
 
   Genome genome;
-  Genome offspring;  // Offspring waiting to be placed.
   mem_t memory{};
 
   emp::array<size_t, NUM_NOPS> heads;
@@ -400,28 +400,6 @@ public:
     ++to_head;
   }
 
-  // Inst: Split off space between Head[Nop-B] and Head[Nop-C], resetting both.
-  void Inst_DivideCell() {
-    size_t & head1 = GetHeadArg(HEAD_G_READ);
-    size_t & head2 = GetHeadArg(HEAD_G_WRITE);
-
-    if (head2 < head1) std::swap(head1, head2);
-    if (head2 > genome.size()) head2 = genome.size();
-
-    if (head1 >= genome.size() ||  // Start pos cannot be past end of genome
-        head1 == head2) {          // Must be space between heads
-      ++error_count;
-      return;      
-    }
-
-    // Extract the offspring from the genome.
-    offspring = genome.Extract(head1, head2 - head1);
-
-    // Reset the heads.
-    head2 = head1;  // Move head2 to the beginning of the extracted position (likely org end)
-    head1 = 0;      // Move head1 to the beginning of the genome
-  }
-
   // Inst: Push the position of Head[Nop-F] onto stack [Nop-A]
   void Inst_HeadPos() {
     const size_t pos = GetHeadArg(HEAD_FLOW);
@@ -447,69 +425,22 @@ public:
   }
 
   void ProcessInst() {
+    emp_assert(OK());
     const inst_id_t inst_id = ReadIP();
     AdvanceIP();
     GetInstSet().Execute(*this, inst_id);
     // ProcessInst(inst_id);
   }
 
-  void Run(size_t cycles=10) override {
+  void Process(size_t cycles=10) override {
+    emp_assert(OK());
     for (size_t i = 0; i < cycles; ++i) {
       ProcessInst();
     }
   }
 
-  void ProcessInst(size_t id) {
-    switch (id) {
-    case 0:          // Nop-A
-    case 1:          // Nop-B
-    case 2:          // Nop-C
-    case 3:          // Nop-D
-    case 4:          // Nop-E
-    case 5: break;   // Nop-F
-
-    case 6: Inst_Const(); break;
-    case 7: Inst_Offset(); break;
-    case 8: Inst_Not(); break;
-    case 9: Inst_Shift(); break;
-    case 10: Inst_Add(); break;
-    case 11: Inst_Sub(); break;
-    case 12: Inst_Mult(); break;
-    case 13: Inst_Div(); break;
-    case 14: Inst_Mod(); break;
-    case 15: Inst_Exp(); break;
-    case 16: Inst_Sort(); break;
-    case 17: Inst_TestLess(); break;
-    case 18: Inst_TestEqu(); break;
-    case 19: Inst_Nand(); break;
-    case 20: Inst_Xor(); break;
-    case 21: Inst_If(); break;
-    case 22: Inst_IfNot(); break;
-    case 23: Inst_Scope(); break;
-    case 24: Inst_Continue(); break;
-    case 25: Inst_Break(); break;
-    case 26: Inst_StackPop(); break;
-    case 27: Inst_StackDup(); break;
-    case 28: Inst_StackSwap(); break;
-    case 29: Inst_StackMove(); break;
-    case 30: Inst_CopyInst(); break;
-    case 31: Inst_Load(); break;
-    case 32: Inst_Store(); break;
-    case 33: Inst_DivideCell(); break;
-    case 34: Inst_HeadPos(); break;
-    case 35: Inst_SetHead(); break;
-    case 36: Inst_JumpHead(); break;
-    case 37: Inst_OffsetHead(); break;
-    default:
-      emp::notify::Error("Instruction ", id, " out of range.");
-    }
-  }
-
-   // Initialize the state of the virtual CPU
+  // Initialize the state of the virtual CPU
   void Reset() override {
-    // Reset offspring
-    offspring.Resize(0);
-
     // Reset Heads
     heads[HEAD_IP] = 0;
     heads[HEAD_G_READ] = 0;
@@ -525,11 +456,33 @@ public:
   }
 
   // Reset with a new genome.
-  void Reset(const Genome & in_genome)  override {
+  void Reset(const Genome & in_genome) override {
     genome = in_genome;
     Reset();
   }
 
+  Genome DivideGenome() override {
+    size_t & head1 = GetHeadArg(HEAD_G_READ);
+    size_t & head2 = GetHeadArg(HEAD_G_WRITE);
+
+    if (head2 < head1) std::swap(head1, head2);
+    if (head2 > genome.size()) head2 = genome.size();
+
+    if (head1 >= genome.size() ||  // Start pos cannot be past end of genome
+        head1 == head2) {          // Must be space between heads
+      ++error_count;
+      return Genome{};
+    }
+
+    // Extract the offspring from the genome.
+    Genome offspring = genome.Extract(head1, head2 - head1);
+
+    // Reset the heads.
+    head2 = head1;  // Move head2 to the beginning of the extracted position (likely org end)
+    head1 = 0;      // Move head1 to the beginning of the genome
+
+    return offspring;
+  }
 
 
   // === Static Functions for working with Avida VMs ===
@@ -570,7 +523,6 @@ public:
     inst_set.AddInst("CopyInst",   &AvidaVM::Inst_CopyInst);
     inst_set.AddInst("Load",       &AvidaVM::Inst_Load);
     inst_set.AddInst("Store",      &AvidaVM::Inst_Store);
-    inst_set.AddInst("DivideCell", &AvidaVM::Inst_DivideCell);
     inst_set.AddInst("HeadPos",    &AvidaVM::Inst_HeadPos);
     inst_set.AddInst("SetHead",    &AvidaVM::Inst_SetHead);
     inst_set.AddInst("JumpHead",   &AvidaVM::Inst_JumpHead);
@@ -622,5 +574,21 @@ public:
     out.Append("\nerror_count = ", error_count);
     out.Append("\nNEXT >>>>>>>>>>>> ", NextInstName(), " [", NextInstSymbol(), "]");
     return out;
+  }
+
+
+  bool OK(bool check_org_ok=true) const override {
+    // @CAO Check hw_manager?
+ 
+    // Check both the organism pointer itself and the organism it's pointing to.
+    if (!org_ptr.OK()) {
+      emp::notify::Warning("Invalid organism pointer found in AvidaVM.");
+      return false;
+    }
+    if (check_org_ok && !org_ptr->OK(false)) {
+      emp::notify::Warning("Organism failed OK() check in AvidaVM.");
+      return false;
+    }
+    return true;
   }
 };
