@@ -82,4 +82,14 @@ public:
     Erase(start_pos, count);
     return out;
   }
+
+  /// Print genome as a series of comma-separated values.
+  void Print(std::ostream & os = std::cout) {
+    bool start = true;
+    for (auto x : genome) {
+      if (!start) os << ",";
+      os << static_cast<size_t>(x);
+      start = false;
+    }
+  }
 };
