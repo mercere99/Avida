@@ -13,12 +13,12 @@
 class Population {
 private:
   emp::vector<Organism> orgs{};
-  emp::Random random;
+  emp::Random & random;
 
   size_t max_size = static_cast<size_t>(-1); // Population cap.
 
   Population & SwapOrgs(size_t id1, size_t id2) {
-    std::swap(orgs[id1], orgs[id2]);
+    if (id1 != id2) std::swap(orgs[id1], orgs[id2]);
     return *this;
   }
 
@@ -33,6 +33,7 @@ private:
     return *this;
   }
 
+  // Organism being added to the population; may be birth or injection.
   Population & Insert(Organism && org) {
     emp_assert(org.OK());
     emp_assert(orgs.size() <= max_size);
@@ -49,11 +50,14 @@ private:
     orgs.back().SetPopulation(*this);
     return *this;
   }
+
 public:
   Population(emp::Random & random) : random(random) { }
 
   size_t GetSize() const { return orgs.size(); }
   size_t size() const { return orgs.size(); }
+
+  Population & SetMaxSize(size_t in) { max_size = in; return *this; }
 
   template <typename T>
   requires std::same_as<std::remove_cvref_t<T>, Genome>
@@ -73,10 +77,10 @@ public:
     return Insert(Organism{parent, offspring_genome});
   }
 
-  Population & Process(size_t cycles) {
+  Population & Process(int cycles) {
     emp_assert(orgs.size());
-    static constexpr size_t CPU_CHUNK = 10;
-    while (cycles) {
+    static constexpr int CPU_CHUNK = 10;
+    while (cycles > 0) {
       size_t id = random.GetUInt(orgs.size());
       orgs[id].Process(CPU_CHUNK);
       cycles -= CPU_CHUNK;
