@@ -59,6 +59,9 @@ public:
 
   Population & SetMaxSize(size_t in) { max_size = in; return *this; }
 
+  Organism & operator[](size_t id) { emp_assert(id < orgs.size()); return orgs[id]; }
+  const Organism & operator[](size_t id) const { emp_assert(id < orgs.size()); return orgs[id]; }
+
   template <typename T>
   requires std::same_as<std::remove_cvref_t<T>, Genome>
   Population & Inject(HardwareManager & hw_man, T && genome) {
@@ -74,6 +77,8 @@ public:
   }
 
   Population & DivideOrg(Organism & parent, Genome && offspring_genome) {
+    emp_assert(parent.GetGenome().size() > 0);
+    emp_assert(offspring_genome.size() > 0);
     return Insert(Organism{parent, offspring_genome});
   }
 
