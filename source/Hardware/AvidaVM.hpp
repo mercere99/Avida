@@ -129,9 +129,9 @@ private:
   }
 
   // Does the current instruction have the specified argument?
-  [[nodiscard]] bool HasArg(inst_id_t arg) const {
+  [[nodiscard]] bool HasArg(inst_id_t arg, size_t max_args=1000) const {
     for (size_t pos = IP() + 1;
-         pos < genome.size() && genome[pos] < NUM_NOPS;
+         pos < genome.size() && max_args-- && genome[pos] < NUM_NOPS;
          ++pos) {
       if (genome[pos] == arg) return true;
     }
@@ -148,11 +148,13 @@ private:
     //           << " hasarg=" << HasArg(target_scope)
     //           << " result=" << ((ReadIP() == inst_scope_id) && HasArg(target_scope))
     //           << " ]]\n";
-    return (ReadIP() == inst_scope_id) && HasArg(target_scope);
+    return (ReadIP() == inst_scope_id) && HasArg(target_scope, 3);
   }
 
-  void SkipNops() {
-    while (IP() < genome.size() && genome[IP()] < NUM_NOPS) AdvanceIP();
+  void SkipNops(size_t max_skipped=1000) {
+    while (IP() < genome.size() &&
+           max_skipped-- &&
+           genome[IP()] < NUM_NOPS) AdvanceIP();
   }
 
 public:
@@ -308,7 +310,7 @@ public:
 
   // Inst: A marker for scope beginnings and ends; each nop to follow indicates a scope break.
   void Inst_Scope() {
-    SkipNops();  // When executing, just consume nops and nothing else.
+    SkipNops(3);  // When executing, just consume nops and nothing else.
   }
 
   // Inst: Restart Scope [Nop-A]
@@ -461,7 +463,7 @@ public:
     Reset();
   }
 
-  Genome DivideGenome() override {
+  Genome DivideGenome(emp::Random & random) override {
     size_t & head1 = GetHeadArg(HEAD_G_READ);
     size_t & head2 = GetHeadArg(HEAD_G_WRITE);
 
@@ -480,6 +482,8 @@ public:
     // Reset the heads.
     head2 = head1;  // Move head2 to the beginning of the extracted position (likely org end)
     head1 = 0;      // Move head1 to the beginning of the genome
+
+    hw_manager.Mutate(random, offspring);
 
     return offspring;
   }
