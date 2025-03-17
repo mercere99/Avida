@@ -30,7 +30,7 @@ public:
   virtual void Process(size_t cycles=10) = 0;
   virtual void Reset() = 0;
   virtual void Reset(const Genome & in_genome) = 0;
-  [[nodiscard]] virtual Genome DivideGenome() = 0;
+  [[nodiscard]] virtual Genome DivideGenome(emp::Random & random) = 0;
 
   virtual bool OK([[maybe_unused]] bool check_org_ok=true) const { return true; }
 };

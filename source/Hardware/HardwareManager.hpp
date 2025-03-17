@@ -32,9 +32,12 @@ public:
 
   virtual bool AddCallback(emp::String name, feedback_t fun) = 0;
 
-  virtual Genome LoadGenome(emp::String filename) = 0;
+  [[nodiscard]] virtual emp::String ToSequence(const Genome & genome) const = 0;
+  [[nodiscard]] virtual Genome LoadGenome(emp::String filename) = 0;
 
-  hw_ptr_t Allocate(Organism & org) {
+  virtual void Mutate(emp::Random & random, Genome & genome) const = 0;
+
+  [[nodiscard]] hw_ptr_t Allocate(Organism & org) {
     if (hw_ptrs.size()) {
       hw_ptr_t out = hw_ptrs.back();
       hw_ptrs.pop_back();
@@ -63,7 +66,10 @@ private:
     auto out_ptr = emp::NewPtr<VM_T>(*this);
     out_ptr->SetOrganism(org);
     return out_ptr;
-}
+  }
+
+  static constexpr double mut_prob{0.0075};
+  static constexpr double mut_scale{1.0 / emp::Log2(1.0 - mut_prob)};
 
   InstSet<VM_T> inst_set;
 public:
@@ -77,8 +83,21 @@ public:
     return true;
   }
 
+  [[nodiscard]] emp::String ToSequence(const Genome & genome) const override {
+    return inst_set.ToSequence(genome);
+  }
+
   // Load an organism from a file.
   Genome LoadGenome(emp::String filename) override {
     return inst_set.LoadGenome(filename);
   }
+
+  void Mutate(emp::Random & random, Genome & genome) const override {
+    size_t mut_pos = static_cast<size_t>(emp::Log2(random.GetDouble()) * mut_scale);
+    while (mut_pos < genome.size()) {
+      genome[mut_pos] = inst_set.GetRandom(random);
+      mut_pos += static_cast<size_t>(emp::Log2(random.GetDouble()) * mut_scale) + 1;
+    }
+  }
+
 };
