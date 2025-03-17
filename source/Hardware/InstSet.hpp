@@ -71,6 +71,10 @@ public:
     return '?';
   }
 
+  [[nodiscard]] inst_id_t GetRandom(emp::Random & random) const {
+    return static_cast<inst_id_t>(random.GetUInt(num_insts));
+  }
+
   void AddInst(emp::String name, inst_fun_t fun, callback_t callback_fun=nullptr) {
     emp_assert(num_insts < MAX_SET_SIZE);
 
@@ -101,8 +105,10 @@ public:
 
   // Execute an instruction on a given VM instance
   void Execute(VM_T & vm, size_t id) const {
-    emp_assert(id < num_insts, id);
-    if (id < num_nops) return;
+    emp_assert(id < num_insts, "Calling execute with an invalid inst id.", id, num_insts);
+    emp_assert(vm.OK(), "Calling execute on an invalid virtual machine.");
+
+    if (id < num_nops) return;  // Nops are "no operation" instructions.
 
     // If this function doesn't exist, assume it is just a callback.
     if (!funs[id]) callback_funs[id](vm.GetOrganism());
@@ -155,8 +161,8 @@ public:
 
 
   /// Convert a genome into a simple sequence.
-  [[nodiscard]] std::string ToSequence(const Genome & genome) const {
-    std::string out;
+  [[nodiscard]] emp::String ToSequence(const Genome & genome) const {
+    emp::String out;
     out.reserve(genome.size());
     for (auto inst_id : genome) {
       out.push_back(GetSymbol(inst_id));
