@@ -22,6 +22,19 @@ private:
   std::unordered_map<emp::String, hw_man_ptr> hw_man_map;
   std::unordered_map<emp::String, Population> pop_map;
 
+  // ===== Helper Functions =====
+  void DoDivide(Organism & org) {
+    emp_assert(org.OK());
+    Genome offspring_genome = org.DivideGenome(random);
+    if (offspring_genome.size()) {
+      org.GetPopulation().DivideOrg(org, std::move(offspring_genome));
+    }  
+  }
+
+  void AddCallbacks(HardwareManager & hw_man) {
+    hw_man.AddCallback("DivideCell", [this](Organism & org){ DoDivide(org); });
+  }
+
 public:
   Avida(emp::vector<emp::String> args) {
     size_t arg_id = 1;
@@ -93,20 +106,26 @@ public:
 
   void Run() {
     HardwareManager & hw_man = AddHardwareManager<AvidaVM>("AvidaVM");
-    hw_man.AddCallback("DivideCell", [](Organism & org){
-      emp_assert(org.OK());
-      Genome offspring_genome = org.DivideGenome();
-      if (offspring_genome.size()) {
-        org.GetPopulation().DivideOrg(org, std::move(offspring_genome));
-      }
-    });
+    AddCallbacks(hw_man);
 
     Population & pop = AddPopulation("main");
+    pop.SetMaxSize(10000);
     pop.Inject(hw_man, "../config/ancestor.org");
 
-    std::cout << "Size = " << pop.size() << std::endl;
-    pop.Process(1000);
-    std::cout << "Size = " << pop.size() << std::endl;
+    int64_t total_cycles = 0;
+    for (size_t ud = 0; ud < 10000; ++ud) {
+      if (ud % 100 == 0) {
+        std::cout << "UD:" << ud
+                  << "  Pop Size:" << pop.size()
+                  << "  Genome0:[" << pop[0].GetGenomeSequence() << "]"
+                  << std::endl;
+      }
+      const int ud_cycles = std::ssize(pop) * 30;
+      pop.Process(ud_cycles);
+      total_cycles += ud_cycles;
+    }
+    std::cout << "Final Pop Size = " << pop.size() << std::endl;
+    std::cout << "Total Cycles = " << total_cycles << std::endl;
   }
 };
 
