@@ -44,13 +44,15 @@ public:
   Organism(HardwareManager & hw_man, Genome genome)
     : genome(genome), hw_ptr(hw_man.Allocate(*this)) { hw_ptr->Reset(genome); }
   Organism(Organism & org_to_clone) // If not offspring, assume clone!
-    : hw_ptr(org_to_clone.GetHardware().GetManager().Allocate(*this))
+    : genome(org_to_clone.genome)
+    , hw_ptr(org_to_clone.GetHardware().GetManager().Allocate(*this))
     , generation(org_to_clone.generation)
   {
     hw_ptr->Reset(org_to_clone.GetGenome());
   }
   Organism(Organism & parent, Genome offspring_genome) // If not offspring, assume clone!
-    : hw_ptr(parent.GetHardware().GetManager().Allocate(*this))
+    : genome(offspring_genome)
+    , hw_ptr(parent.GetHardware().GetManager().Allocate(*this))
     , generation(parent.generation+1)
   {
     hw_ptr->Reset(offspring_genome);
@@ -65,6 +67,9 @@ public:
   }
 
   Organism & operator=(Organism && in) {
+    emp_assert(in.OK());
+
+    // Move over guts of Organism.
     genome = std::move(in.genome);
     hw_ptr = in.hw_ptr;
     pop_ptr = in.pop_ptr;
@@ -85,6 +90,9 @@ public:
   Organism & SetID(id_t in_id) { id = in_id; return *this; }
 
   [[nodiscard]] const Genome & GetGenome() const { return genome; }
+  [[nodiscard]] emp::String GetGenomeSequence() const {
+    return hw_ptr->GetManager().ToSequence(genome);
+  }
 
   [[nodiscard]] gen_t GetGeneration() const { return generation; }
   Organism & SetGeneration(gen_t in_gen) { generation = in_gen; return *this; }
@@ -116,9 +124,9 @@ public:
     return *this;
   }
 
-  [[nodiscard]] Genome DivideGenome() {
+  [[nodiscard]] Genome DivideGenome(emp::Random & random) {
     emp_assert(OK());
-    return hw_ptr->DivideGenome();
+    return hw_ptr->DivideGenome(random);
   }
 
   /// Called when organism is about to die.
