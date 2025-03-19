@@ -104,19 +104,25 @@ public:
     }
   }
 
-  void Run() {
+  void Setup() {
     HardwareManager & hw_man = AddHardwareManager<AvidaVM>("AvidaVM");
     AddCallbacks(hw_man);
 
     Population & pop = AddPopulation("main");
-    pop.SetMaxSize(10000);
+    // pop.SetMaxSize(10000);
+    pop.SetMaxSize(3600);
     pop.Inject(hw_man, "../config/ancestor.org");
+  }
+
+  void Run() {
+    Population & pop = AddPopulation("main");
 
     int64_t total_cycles = 0;
     for (size_t ud = 0; ud < 10000; ++ud) {
       if (ud % 100 == 0) {
         std::cout << "UD:" << ud
                   << "  Pop Size:" << pop.size()
+                  << "  Generation: " << pop.GetAveGeneration()
                   << "  Genome0:[" << pop[0].GetGenomeSequence() << "]"
                   << std::endl;
       }
@@ -132,5 +138,6 @@ public:
 int main(int argc, char * argv[])
 {
   Avida avida(emp::ArgsToStrings(argc, argv));
+  avida.Setup();
   avida.Run();
 }
