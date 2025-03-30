@@ -10,6 +10,7 @@
 
 #include "Hardware/HardwareBase.hpp"
 #include "Hardware/HardwareManager.hpp"
+#include "PopPosition.hpp"
 
 class Population;
 
@@ -17,26 +18,27 @@ class Population;
 class Organism {
 private:
   using id_t = uint64_t;
-  using gen_t = uint32_t;
   static constexpr id_t UNKNOWN_ID = static_cast<id_t>(-1);
 
   Genome genome;                           // Original genome for this organism.
   emp::Ptr<HardwareBase> hw_ptr = nullptr; // What hardware is this organism using?
-  emp::Ptr<Population> pop_ptr = nullptr;  // Which population is this organism in?
+  PopPosition position;                    // Where is this Organism located?
 
   id_t id = UNKNOWN_ID;     // Unique organism ID.
-  gen_t generation = 0;     // Number of ancestral steps back to injected organism.
+  uint32_t pos = emp::MAX_4BYTE; // Population position (max -> not in population)
+  uint32_t generation = 0;       // Number of ancestral steps back to injected organism.
 public:
   Organism(Organism && in)  // Move constructor.
     : genome(std::move(in.genome))
     , hw_ptr(in.hw_ptr)
-    , pop_ptr(in.pop_ptr)
+    , position(in.position)
     , id(in.id)
     , generation(in.generation)
   {
     // Clean up old pointers (so they don't deallocate on destruction.)
     in.hw_ptr = nullptr;
-    in.pop_ptr = nullptr;
+    in.position.Clear();
+    in.pos = emp::MAX_4BYTE;
 
     // Make sure hardware knows about its new Organism.
     hw_ptr->SetOrganism(*this);
@@ -72,13 +74,13 @@ public:
     // Move over guts of Organism.
     genome = std::move(in.genome);
     hw_ptr = in.hw_ptr;
-    pop_ptr = in.pop_ptr;
+    position = in.position;
     id = in.id;
     generation = in.generation;
 
     // Clean up old pointers (so they don't deallocate on destruction.)
     in.hw_ptr = nullptr;
-    in.pop_ptr = nullptr;
+    in.position.Clear();
 
     // Make sure hardware knows about its new Organism.
     hw_ptr->SetOrganism(*this);
@@ -94,27 +96,31 @@ public:
     return hw_ptr->GetManager().ToSequence(genome);
   }
 
-  [[nodiscard]] gen_t GetGeneration() const { return generation; }
-  Organism & SetGeneration(gen_t in_gen) { generation = in_gen; return *this; }
+  [[nodiscard]] double GetMetabolicRate() const { return genome.size(); }
+
+  [[nodiscard]] uint32_t GetGeneration() const { return generation; }
+  Organism & SetGeneration(uint32_t in_gen) { generation = in_gen; return *this; }
 
   [[nodiscard]] HardwareBase & GetHardware() { emp_assert(hw_ptr); return *hw_ptr; }
   [[nodiscard]] const HardwareBase & GetHardware() const { emp_assert(hw_ptr); return *hw_ptr; }
 
-  [[nodiscard]] bool InPopulation() const { return pop_ptr; }
-  [[nodiscard]] bool InPopulation(const Population & pop) const { return pop_ptr == &pop; }
+  [[nodiscard]] bool InPopulation() const { return position.InPopulation(); }
+  [[nodiscard]] bool InPopulation(const Population & pop) const {
+    return position.InPopulation(pop);
+  }
   [[nodiscard]] Population & GetPopulation() {
     emp_assert(OK());
-    emp_assert(pop_ptr);
-    return *pop_ptr;
+    emp_assert(InPopulation());
+    return position.GetPopulation();
   }
   [[nodiscard]] const Population & GetPopulation() const {
     emp_assert(OK());
-    emp_assert(pop_ptr);
-    return *pop_ptr;
+    emp_assert(InPopulation());
+    return position.GetPopulation();
   }
-  Organism & SetPopulation(Population & in_pop) {
+  Organism & SetPopulation(Population & in_pop, uint32_t index) {
     emp_assert(OK());
-    pop_ptr = &in_pop;
+    position.Set(in_pop, index);
     return *this;
   }
 
@@ -138,7 +144,6 @@ public:
   void Print(std::ostream & os = std::cout) {
     os << "Genome:"; genome.Print(os);
     os << " hw_ptr:" << hw_ptr 
-       << " pop_ptr:" << pop_ptr
        << " id:" << id
        << " generation:" << generation;
   }
@@ -160,12 +165,6 @@ public:
     }
     if (&(hw_ptr->GetOrganism()) != this) {
       emp::notify::Warning("Hardware does not point back to correct organism.");
-      return false;
-    }
-
-    // Make sure population is valid (can be null if org is not a in a population)
-    if (!pop_ptr.OK()) {
-      emp::notify::Warning("Invalid population pointer in Organism.");
       return false;
     }
 
