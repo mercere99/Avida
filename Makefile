@@ -34,25 +34,27 @@ WEB_EXE = $(WEB_DIR)/$(TARGET).js
 
 # Specify sets of compilation flags to use
 FLAGS_version := -std=c++20
-FLAGS_warn    = -Wall -Wextra -Wno-unused-function -Wnon-virtual-dtor -Wcast-align -Woverloaded-virtual -pedantic
-FLAGS_include = -I$(SOURCE_DIR)/ -I$(EMP_DIR)/include/
-FLAGS_main    = $(FLAGS_version) $(FLAGS_warn) $(FLAGS_include) -pthread
+FLAGS_warn    := -Wall -Wextra -Wno-unused-function -Wnon-virtual-dtor -Wcast-align -Woverloaded-virtual -pedantic
+FLAGS_include := -I$(SOURCE_DIR)/ -I$(EMP_DIR)/include/
+FLAGS_main    := $(FLAGS_version) $(FLAGS_warn) $(FLAGS_include) # -pthread
+
+FLAGS_QUICK    := $(FLAGS_main) -DNDEBUG
+FLAGS_DEBUG    := $(FLAGS_main) -g -DEMP_TRACK_MEM
+FLAGS_OPT      := $(FLAGS_main) -O3 -DNDEBUG
+FLAGS_GRUMPY   := $(FLAGS_main) -DNDEBUG -Wconversion -Weffc++
+FLAGS_COVERAGE := $(FLAGS_main)  -O0 -DEMP_TRACK_MEM -ftemplate-backtrace-limit=0 -fprofile-instr-generate -fcoverage-mapping -fno-inline -fno-elide-constructors
 
 # Emscripten / Empirical information
-EMP_methods = -s EXPORTED_RUNTIME_METHODS="['ccall', 'cwrap', 'UTF8ToString', 'stringToUTF8', 'lengthBytesUTF8']"
-EMP_funs = -s EXPORTED_FUNCTIONS="['_main', '_malloc', '_free', '_empCppCallback']"
-EMP_js_lib = --js-library $(EMP_DIR)/emp/web/library_emp.js
-EMP_limits = -s NO_EXIT_RUNTIME=1  -s TOTAL_MEMORY=67108864 -s DISABLE_EXCEPTION_CATCHING=1
-FLAGS_emp := $(FLAGS_main) $(EMP_methods) $(EMP_js_lib) $(EMP_funs) $(EMP_limits)
+EMP_methods  := -s EXPORTED_RUNTIME_METHODS="['ccall', 'cwrap', 'UTF8ToString', 'stringToUTF8', 'lengthBytesUTF8']"
+EMP_funs     := -s EXPORTED_FUNCTIONS="['_main', '_malloc', '_free', '_empCppCallback']"
+EMP_js_lib   := --js-library $(EMP_DIR)/include/emp/web/library_emp.js
+EMP_limits   := -s NO_EXIT_RUNTIME=1  -s TOTAL_MEMORY=67108864
+EMP_warnings := -Wno-dollar-in-identifier-extension
+FLAGS_emp    := $(FLAGS_main) $(EMP_methods) $(EMP_js_lib) $(EMP_funs) $(EMP_limits) $(EMP_warnings)
 
-FLAGS_QUICK    = $(FLAGS_main) -DNDEBUG
-FLAGS_DEBUG    = $(FLAGS_main) -g -DEMP_TRACK_MEM
-FLAGS_OPT      = $(FLAGS_main) -O3 -DNDEBUG
-FLAGS_GRUMPY   = $(FLAGS_main) -DNDEBUG -Wconversion -Weffc++
-FLAGS_COVERAGE = $(FLAGS_main)  -O0 -DEMP_TRACK_MEM -ftemplate-backtrace-limit=0 -fprofile-instr-generate -fcoverage-mapping -fno-inline -fno-elide-constructors
-
-FLAGS_WEB       = $(FLAGS_emp) -Oz -DNDEBUG
-FLAGS_WEB_DEBUG = $(FLAGS_emp) -g4 -pedantic -Wno-dollar-in-identifier-extension
+FLAGS_WEB       := $(FLAGS_emp) -Oz -DNDEBUG -s DISABLE_EXCEPTION_CATCHING=1
+FLAGS_WEB_DEBUG := $(FLAGS_emp) -gsource-map -pedantic -s ASSERTIONS=1
+FLAGS_WEB_QUICK := $(FLAGS_emp) -DNDEBUG
 
 native: FLAGS := $(FLAGS_OPT)
 native: $(NATIVE_EXE)
@@ -71,8 +73,11 @@ quick: $(NATIVE_EXE)
 web: FLAGS := $(FLAGS_WEB)
 web: $(WEB_EXE)
 
-debug-web: FLAGS := $(FLAGS_WEB_DEBUG)
-debug-web: $(WEB_EXE)
+web-debug: FLAGS := $(FLAGS_WEB_DEBUG)
+web-debug: $(WEB_EXE)
+
+web-quick: FLAGS := $(FLAGS_WEB_QUICK)
+web-quick: $(WEB_EXE)
 
 all: native web
 
@@ -107,5 +112,6 @@ $(NATIVE_EXE): $(NATIVE_CODE) | $(BUILD_DIR)
 	@echo To build the web version use: make web
 
 # Compile the web version.
-$(WEB_EXE): $(WEB_CODE) | $(WEB_DIR)
+$(WEB_EXE): $(WEB_CODE)
+	@mkdir -p $(WEB_DIR)
 	$(CXX_web) $(FLAGS) $(WEB_CODE) -o $(WEB_EXE)
