@@ -1,10 +1,52 @@
-HeadPos     // Get the position of the Write head (at the end of the genome)
+Nop-A
+Nop-B
+Nop-C
+Nop-D
+Nop-E
+Nop-F
+Nop-A
+Nop-B
+Nop-C
+Nop-D
+Nop-E
+Nop-F
+Nop-A
+Nop-B
+Nop-C
+Nop-D
+Nop-E
+Nop-F
+Nop-A
+Nop-B
+Nop-C
+Nop-D
+Nop-E
+Nop-F
+Nop-A
+Nop-B
+Nop-C
+Nop-D
+Nop-E
+Nop-F
+Nop-A
+Nop-B
+Nop-C
+Nop-D
+Nop-E
+Nop-F
+Nop-A
+Nop-B
+Nop-C
+Nop-D
+Nop-E
+Nop-F
+HeadPos     // Get the position of the Write head (Nop-C; at the end of the genome); push to Stack A
 Nop-C
 Scope       // Start copy loop (in Scope D)
 Nop-D
   CopyInst  // Copy the next instruction to the end of the genome.
-  Offset    // Decrement the number of copies left to perform
-  Nop-F
+  Offset    // Decrement the top of Stack A (number of copies left to perform)
+  Nop-F     //   Modifies offset to use -1
   StackDup  // Duplicate the stack count (of instructions left to copy)
   IfNot     // If we are done...
   Break     // ...exit the current scope
