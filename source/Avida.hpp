@@ -40,7 +40,8 @@ private:
   }
 
 public:
-  Avida(emp::vector<emp::String> args) {
+Avida() { }
+Avida(emp::vector<emp::String> args) {
     size_t arg_id = 1;
     while (arg_id < args.size()) {      
       if (args[arg_id].IsOneOf("-h", "--help")) { PrintHelp(args[0], std::cout); }
