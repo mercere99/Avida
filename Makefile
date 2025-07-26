@@ -23,7 +23,7 @@ WEB_DIR      = web
 SETTINGS_DIR = settings
 SOURCE_DIR   = source
 
-CXX = g++
+CXX = clang++
 CXX_web := emcc
 
 NATIVE_CODE = $(SOURCE_DIR)/$(TARGET).cpp
@@ -33,7 +33,7 @@ NATIVE_EXE = $(BUILD_DIR)/$(TARGET)
 WEB_EXE = $(WEB_DIR)/$(TARGET).js
 
 # Specify sets of compilation flags to use
-FLAGS_version := -std=c++20
+FLAGS_version := -std=c++23
 FLAGS_warn    := -Wall -Wextra -Wno-unused-function -Wnon-virtual-dtor -Wcast-align -Woverloaded-virtual -pedantic
 FLAGS_include := -I$(SOURCE_DIR)/ -I$(EMP_DIR)/include/
 FLAGS_main    := $(FLAGS_version) $(FLAGS_warn) $(FLAGS_include) # -pthread
