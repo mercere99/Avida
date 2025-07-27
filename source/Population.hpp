@@ -27,40 +27,44 @@ private:
   int CPU_chunk_size = 10;      // Num cycles to execute each time as org is picked.
 
   // === HELPER FUNCTIONS ===
-  Population & SwapOrgs(size_t id1, size_t id2) {
+  template <class Self>
+  Self & SwapOrgs(this Self & self, size_t id1, size_t id2) {
     if (id1 != id2) {
-      std::swap(orgs[id1], orgs[id2]);
-      speed_map.Swap(id1, id2);
+      std::swap(self.orgs[id1], self.orgs[id2]);
+      self.speed_map.Swap(id1, id2);
     }
-    return *this;
+    return self;
   }
 
-  Population & DeleteOrg() {
-    emp_assert(orgs.size() > 0);
+  template <class Self>
+  Self & DeleteOrg(this Self & self) {
+    const size_t num_orgs = self.orgs.size()
+    emp_assert(num_orgs > 0);
 
     // Pick a random organism to remove.
-    size_t delete_id = random.GetUInt(orgs.size()); // Choose org to delete.
-    orgs[delete_id].SignalDeath();      // Let org know its about to be deleted.
-    SwapOrgs(delete_id, orgs.size()-1); // Move last org to replaced deleted.
-    orgs.pop_back();                    // Remove org now at end.
-    return *this;
+    size_t delete_id = self.random.GetUInt(num_orgs); // Choose org to delete.
+    self.orgs[delete_id].SignalDeath();               // Signal org prior to deletion.
+    self.SwapOrgs(delete_id, num_orgs-1);             // Move last org to replaced deleted.
+    self.orgs.pop_back();                             // Remove org now at end.
+    return self;
   }
 
   // Organism being added to the population; may be birth or injection.
-  Population & Insert(Organism && org) {
-    emp_assert(org.OK());
-    emp_assert(orgs.size() <= max_size);
+  template <class Self>
+  Self & Insert(this Self & self, Organism && org) {
+    emp_assert(self.org.OK());
+    emp_assert(self.orgs.size() <= max_size);
 
     // See if we must delete an organism before we can add a new one.
-    if (orgs.size() == max_size) DeleteOrg();
+    if (self.orgs.size() == self.max_size) self.DeleteOrg();
 
-    uint32_t index = orgs.size();
-    orgs.push_back(std::move(org));
-    Organism & new_org = orgs.back();
+    uint32_t index = self.orgs.size();
+    self.orgs.push_back(std::move(org));
+    Organism & new_org = self.orgs.back();
     emp_assert(new_org.OK());
-    new_org.SetPopulation(*this, index);
-    speed_map.Set(index, new_org.GetMetabolicRate());
-    return *this;
+    new_org.SetPopulation(self, index);
+    self.speed_map.Set(index, new_org.GetMetabolicRate());
+    return self;
   }
 
 public:
@@ -69,7 +73,8 @@ public:
   size_t GetSize() const { return orgs.size(); }
   size_t size() const { return orgs.size(); }
 
-  Population & SetMaxSize(size_t in) { max_size = in; return *this; }
+  template <class Self>
+  Self & SetMaxSize(this Self & self, size_t in) { self.max_size = in; return self; }
 
   double GetAveGeneration() {
     if (orgs.empty()) return 0.0;  // An empty population has no generations.
@@ -85,24 +90,26 @@ public:
     return self.orgs[pos];
   }
 
-  template <typename T>
+  template <class Self, typename T>
   requires std::same_as<std::remove_cvref_t<T>, Genome>
-  Population & Inject(HardwareManager & hw_man, T && genome) {
-    return Insert(Organism{hw_man, std::forward<T>(genome)});
+  Self & Inject(this Self & self, HardwareManager & hw_man, T && genome) {
+    return self.Insert(Organism{hw_man, std::forward<T>(genome)});
   }
   
   /// @brief Inject an organism using a genome loaded from a file.
   /// @param hw_man - The HardwareManager for this CPU type.
   /// @param filename - The name of the file with the genome information.
   /// @return A reference to this population object.
-  Population & Inject(HardwareManager & hw_man, emp::String filename) {
-    return Inject(hw_man, hw_man.LoadGenome(filename));
+  template <class Self>
+  Self & Inject(this Self & self, HardwareManager & hw_man, emp::String filename) {
+    return self.Inject(hw_man, hw_man.LoadGenome(filename));
   }
 
-  Population & DivideOrg(Organism & parent, Genome && offspring_genome) {
+  template <class Self>
+  Self & DivideOrg(this Self & self, Organism & parent, Genome && offspring_genome) {
     emp_assert(parent.GetGenome().size() > 0);
     emp_assert(offspring_genome.size() > 0);
-    return Insert(Organism{parent, offspring_genome});
+    return self.Insert(Organism{parent, offspring_genome});
   }
 
   // Process a single update for this population, returning the number of CPU cycles used.
