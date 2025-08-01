@@ -40,8 +40,8 @@ private:
   }
 
 public:
-Avida() { }
-Avida(emp::vector<emp::String> args) {
+  Avida() { }
+  Avida(emp::vector<emp::String> args) {
     size_t arg_id = 1;
     while (arg_id < args.size()) {      
       if (args[arg_id].IsOneOf("-h", "--help")) { PrintHelp(args[0], std::cout); }
@@ -115,13 +115,11 @@ Avida(emp::vector<emp::String> args) {
 
     Population & pop = AddPopulation("main");
     // pop.SetMaxSize(10000);
-    pop.SetMaxSize(3600);
+    pop.SetMaxSize(10000);
     pop.Inject(hw_man, "../config/ancestor.org");
   }
 
-  void Run() {
-    Population & pop = AddPopulation("main");
-
+  void Run(Population & pop) {
     int64_t total_cycles = 0;
     for (size_t ud = 0; ud < 10000; ++ud) {
       if (ud % 100 == 0) {
@@ -131,11 +129,14 @@ Avida(emp::vector<emp::String> args) {
                   << "  Genome0:[" << pop[0].GetGenomeSequence() << "]"
                   << std::endl;
       }
-      const int ud_cycles = std::ssize(pop) * 30;
-      pop.Process(ud_cycles);
-      total_cycles += ud_cycles;
+      total_cycles += pop.ProcessUpdate();
     }
     std::cout << "Final Pop Size = " << pop.size() << std::endl;
     std::cout << "Total Cycles = " << total_cycles << std::endl;
+  }
+
+  void Run() {
+    Population & pop = AddPopulation("main");
+    Run(pop);
   }
 };
