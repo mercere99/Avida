@@ -6,6 +6,8 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  */
 
+#include "emp/math/Random.hpp"
+
 #include "../Genome.hpp"
 
 // Forward declarations
