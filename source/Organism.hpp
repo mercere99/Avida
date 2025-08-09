@@ -24,7 +24,7 @@ private:
   emp::Ptr<HardwareBase> hw_ptr = nullptr; // What hardware is this organism using?
   PopPosition position;                    // Where is this Organism located?
 
-  id_t id = UNKNOWN_ID;     // Unique organism ID.
+  id_t id = UNKNOWN_ID;          // Unique organism ID.
   uint32_t pos = emp::MAX_4BYTE; // Population position (max -> not in population)
   uint32_t generation = 0;       // Number of ancestral steps back to injected organism.
 public:
@@ -43,16 +43,16 @@ public:
     // Make sure hardware knows about its new Organism.
     hw_ptr->SetOrganism(*this);
   } 
-  Organism(HardwareManager & hw_man, Genome genome)
+  Organism(HardwareManager & hw_man, Genome genome) // Build organism from components.
     : genome(genome), hw_ptr(hw_man.Allocate(*this)) { hw_ptr->Reset(genome); }
-  Organism(Organism & org_to_clone) // If not offspring, assume clone!
+  Organism(Organism & org_to_clone) // If no offspring genome, assume clone!
     : genome(org_to_clone.genome)
     , hw_ptr(org_to_clone.GetHardware().GetManager().Allocate(*this))
     , generation(org_to_clone.generation)
   {
     hw_ptr->Reset(org_to_clone.GetGenome());
   }
-  Organism(Organism & parent, Genome offspring_genome) // If not offspring, assume clone!
+  Organism(Organism & parent, Genome offspring_genome) // Provide parent and new genome.
     : genome(offspring_genome)
     , hw_ptr(parent.GetHardware().GetManager().Allocate(*this))
     , generation(parent.generation+1)
