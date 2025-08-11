@@ -71,16 +71,23 @@ public:
   Population(emp::Random & random) : random(random) { }
 
   size_t GetSize() const { return orgs.size(); }
-  size_t size() const { return orgs.size(); }
 
   template <class Self>
-  Self & SetMaxSize(this Self & self, size_t in) { self.max_size = in; return self; }
+  Self & SetMaxSize(this Self & self, size_t in) {
+    self.max_size = in;
+    return self;
+  }
+
+  template <typename FUN_T>
+  double GetAveTrait(const FUN_T & fun) {
+    if (orgs.empty()) return 0.0;  // An empty population has no generations.
+    double total = std::accumulate(orgs.begin(), orgs.end(), 0.0,
+                   [fun](double total, Organism & org){ return total + fun(org); });
+    return total / static_cast<double>(orgs.size());
+  }
 
   double GetAveGeneration() {
-    if (orgs.empty()) return 0.0;  // An empty population has no generations.
-    size_t total = std::accumulate(orgs.begin(), orgs.end(), 0.0,
-                   [](size_t total, Organism & org){ return total + org.GetGeneration(); });
-    return total / static_cast<double>(orgs.size());
+    return GetAveTrait([](Organism & org){ return org.GetGeneration(); });
   }
 
   // Access organism by population position.
