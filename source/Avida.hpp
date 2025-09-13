@@ -94,18 +94,20 @@ public:
     std::cout << "STEP " << cpu_cycles << ":\n" << vm.StatusString() << std::endl;
   }
 
-  void Test() {
-    constexpr size_t NUM_TRIALS = 5000000;
-
+  // Generate many random genomes of a given size and try running them.
+  void Test(const size_t genome_size = 256, const size_t num_trials = 5000000, size_t run_time=200) {
+    // Create the AvidaVM hardware manager.
     HardwareManager & hw_manager = AddHardwareManager<AvidaVM>("AvidaVM");
     auto inst_set = AvidaVM::BuildInstSet();
+
+    // Load in the default ancestor genome.
     Genome genome = inst_set.LoadGenome("../config/ancestor.org");
     AvidaVM org(hw_manager, genome);
-    for (size_t trial = 0; trial < NUM_TRIALS; ++trial) {
+    for (size_t trial = 0; trial < num_trials; ++trial) {
       if (trial % 100000 == 0) std::cout << "Trial: " << trial << std::endl; 
-      inst_set.BuildGenome(genome, 256, random);
-      // org.Reset(genome);
-      org.Process(200);
+      // Build a random genome and run it.
+      inst_set.BuildGenome(genome, genome_size, random);
+      org.Process(run_time);
     }
   }
 
