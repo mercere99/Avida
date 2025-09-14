@@ -111,12 +111,14 @@ public:
     }
   }
 
+  // Initialize the hardware manager (with AvidVM) and the population (with the default) ancestor.
   void Setup() {
+    // Default to the AvidaVM hardware manager.
     HardwareManager & hw_man = AddHardwareManager<AvidaVM>("AvidaVM");
     AddCallbacks(hw_man);
 
+    // Create a population called "main" and inject a single individual of the default ancestor.
     Population & pop = AddPopulation("main");
-    // pop.SetMaxSize(10000);
     pop.SetMaxSize(10000);
     pop.Inject(hw_man, "../config/ancestor.org");
   }
