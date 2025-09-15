@@ -30,6 +30,8 @@ protected:
 public:
   virtual ~HardwareManager() { Clear(); }
 
+  static std::string DefaultName() { return "Unnamed"; };
+
   virtual bool AddCallback(emp::String name, feedback_t fun) = 0;
 
   [[nodiscard]] virtual emp::String ToSequence(const Genome & genome) const = 0;
@@ -58,6 +60,8 @@ public:
   }
 };
 
+// A helper class where a particular hardware implementation can be provided and it will
+// automatically build a manager for that hardware.
 template <typename VM_T>
 class HardwareType : public HardwareManager {
 private:
@@ -74,6 +78,8 @@ private:
   InstSet<VM_T> inst_set;
 public:
   HardwareType() : inst_set(VM_T::BuildInstSet()) { }
+
+  static std::string DefaultName() const { return VM_T::HardwareName() + "Manager"; }
 
   InstSet<VM_T> & GetInstSet() { return inst_set; }
   const InstSet<VM_T> & GetInstSet() const { return inst_set; }
