@@ -94,6 +94,15 @@ CLEAN_EXE = $(NATIVE_EXE) $(WEB_EXE)
 
 CLEAN_FILES = $(CLEAN_BACKUP) $(CLEAN_TEST) $(CLEAN_EXE)
 
+server:
+	cd tests ; python -m http.server
+
+# Always run the tests, even if nothing has changed
+.PHONY: clean debug grumpy native quick tests web web-debug web-quick
+
+# Changes in any header file in source/ should trigger recompilation
+KEY_HEADERS := $(shell find source -name '*.hpp')
+
 clean:
 	@echo Removing:
 	@echo $(wildcard $(CLEAN_FILES))
@@ -107,7 +116,7 @@ $(WEB_DIR):
 	mkdir -p $(WEB_DIR)
 
 # Compile the command-line version.
-$(NATIVE_EXE): $(NATIVE_CODE) | $(BUILD_DIR)
+$(NATIVE_EXE): $(NATIVE_CODE) $(KEY_HEADERS) | $(BUILD_DIR)
 	$(CXX) $(FLAGS) $(NATIVE_CODE) -o $(NATIVE_EXE)
 	@echo To build the web version use: make web
 
