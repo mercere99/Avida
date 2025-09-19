@@ -100,8 +100,8 @@ server:
 # Always run the tests, even if nothing has changed
 .PHONY: clean debug grumpy native quick tests web web-debug web-quick
 
-# Changes in any header file in source/ should trigger recompilation
-KEY_HEADERS := $(shell find source -name '*.hpp')
+# Changes in any header file in SOURCE_DIR should trigger recompilation
+KEY_HEADERS := $(shell find $(SOURCE_DIR) -name '*.hpp')
 
 clean:
 	@echo Removing:
@@ -121,6 +121,5 @@ $(NATIVE_EXE): $(NATIVE_CODE) $(KEY_HEADERS) | $(BUILD_DIR)
 	@echo To build the web version use: make web
 
 # Compile the web version.
-$(WEB_EXE): $(WEB_CODE)
-	@mkdir -p $(WEB_DIR)
+$(WEB_EXE): $(WEB_CODE) $(KEY_HEADERS) | $(WEB_DIR)
 	$(CXX_web) $(FLAGS) $(WEB_CODE) -o $(WEB_EXE)
