@@ -14,7 +14,7 @@
 
 #include "Organism.hpp"
 
-/// A Population is a collection of organisms an a structure of how they are connected.
+/// A Population is a collection of organisms and a structure of how they are connected.
 class Population {
 private:
   emp::vector<Organism> orgs{};
@@ -36,17 +36,24 @@ private:
     return self;
   }
 
+  // Delete a the organism at a specific position from the population.
+  template <class Self>
+  Self & DeleteOrg(this Self & self, size_t delete_id) {
+    emp_assert(delete_id < self.orgs.size());
+
+    self.orgs[delete_id].SignalDeath();            // Signal org prior to deletion.
+    self.SwapOrgs(delete_id, self.orgs.size()-1);  // Move last org to replace deleted.
+    self.orgs.pop_back();                          // Remove org now at end.
+    return self;
+  }
+
+  // Delete a random organism from the population.
   template <class Self>
   Self & DeleteOrg(this Self & self) {
-    const size_t num_orgs = self.orgs.size()
-    emp_assert(num_orgs > 0);
+    emp_assert(self.orgs.size() > 0);
 
-    // Pick a random organism to remove.
-    size_t delete_id = self.random.GetUInt(num_orgs); // Choose org to delete.
-    self.orgs[delete_id].SignalDeath();               // Signal org prior to deletion.
-    self.SwapOrgs(delete_id, num_orgs-1);             // Move last org to replaced deleted.
-    self.orgs.pop_back();                             // Remove org now at end.
-    return self;
+    // Pick a random organism to delete.
+    return self.DeleteOrg( self.random.GetUInt(self.orgs.size()) );
   }
 
   // Organism being added to the population; may be birth or injection.
@@ -71,7 +78,9 @@ public:
   Population(emp::Random & random) : random(random) { }
 
   size_t GetSize() const { return orgs.size(); }
+  size_t size() { return orgs.size(); } // For std compatibility.
 
+  size_t GetMaxSize() const { return max_size; }
   template <class Self>
   Self & SetMaxSize(this Self & self, size_t in) {
     self.max_size = in;
