@@ -79,7 +79,7 @@ private:
 public:
   HardwareType() : inst_set(VM_T::BuildInstSet()) { }
 
-  static std::string DefaultName() const { return VM_T::HardwareName() + "Manager"; }
+  static std::string DefaultName() { return VM_T::HardwareName() + "Manager"; }
 
   InstSet<VM_T> & GetInstSet() { return inst_set; }
   const InstSet<VM_T> & GetInstSet() const { return inst_set; }
