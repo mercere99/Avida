@@ -491,6 +491,8 @@ public:
 
   // === Static Functions for working with Avida VMs ===
 
+  [[nodiscard]] static std::string HardwareName() { return "AvidaVM"; }
+
   [[nodiscard]] static inst_set_t BuildInstSet() {    
     inst_set_t inst_set;
     inst_set.AddNopInst("Nop-A");
