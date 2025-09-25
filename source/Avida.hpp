@@ -95,14 +95,15 @@ public:
   }
 
   // Generate many random genomes of a given size and try running them.
+  template <typename MANAGER_T=AvidaVM>
   void Test(const size_t genome_size = 256, const size_t num_trials = 5000000, size_t run_time=200) {
-    // Create the AvidaVM hardware manager.
-    HardwareManager & hw_manager = AddHardwareManager<AvidaVM>("AvidaVM");
-    auto inst_set = AvidaVM::BuildInstSet();
+    // Create the hardware manager.
+    HardwareManager & hw_manager = AddHardwareManager<MANAGER_T>(MANAGER_T::DefaultName());
+    auto inst_set = MANAGER_T::BuildInstSet();
 
     // Load in the default ancestor genome.
     Genome genome = inst_set.LoadGenome("../config/ancestor.org");
-    AvidaVM org(hw_manager, genome);
+    MANAGER_T org(hw_manager, genome);
     for (size_t trial = 0; trial < num_trials; ++trial) {
       if (trial % 100000 == 0) std::cout << "Trial: " << trial << std::endl; 
       // Build a random genome and run it.
