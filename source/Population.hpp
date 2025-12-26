@@ -79,6 +79,7 @@ public:
 
   size_t GetSize() const { return orgs.size(); }
   size_t size() { return orgs.size(); } // For std compatibility.
+  size_t GetNumOrgs() const { return orgs.size(); }
 
   size_t GetMaxSize() const { return max_size; }
   template <class Self>
