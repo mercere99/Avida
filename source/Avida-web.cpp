@@ -113,45 +113,43 @@ public:
     map_sel.TriggerID(1);
     control_set << map_sel;
 
-    UI::Selector size_sel("size_sel");
-    size_sel.SetOption("Cell Size 2",  [this](){world.org_radius=2.0;} );
-    size_sel.SetOption("Cell Size 3",  [this](){world.org_radius=3.0;} );
-    size_sel.SetOption("Cell Size 4",  [this](){world.org_radius=4.0;} );
-    size_sel.SetOption("Cell Size 6",  [this](){world.org_radius=6.0;} );
-    size_sel.SetOption("Cell Size 8",  [this](){world.org_radius=8.0;} );
-    size_sel.SetOption("Cell Size 10", [this](){world.org_radius=10.0;} );
-    size_sel.SetOption("Cell Size 15", [this](){world.org_radius=15.0;} );
-    size_sel.TriggerID(2);
-    control_set << size_sel;
+    // UI::Selector size_sel("size_sel");
+    // size_sel.SetOption("Cell Size 2",  [this](){world.org_radius=2.0;} );
+    // size_sel.SetOption("Cell Size 3",  [this](){world.org_radius=3.0;} );
+    // size_sel.SetOption("Cell Size 4",  [this](){world.org_radius=4.0;} );
+    // size_sel.SetOption("Cell Size 6",  [this](){world.org_radius=6.0;} );
+    // size_sel.SetOption("Cell Size 8",  [this](){world.org_radius=8.0;} );
+    // size_sel.SetOption("Cell Size 10", [this](){world.org_radius=10.0;} );
+    // size_sel.SetOption("Cell Size 15", [this](){world.org_radius=15.0;} );
+    // size_sel.TriggerID(2);
+    // control_set << size_sel;
 
-    UI::Selector drift_sel("drift_sel");
-    drift_sel.SetOption("Flow Off",    [this](){world.drift=0.0;} );
-    drift_sel.SetOption("Flow Low",    [this](){world.drift=0.05;} );
-    drift_sel.SetOption("Flow Medium", [this](){world.drift=0.1;} );
-    drift_sel.SetOption("Flow High",   [this](){world.drift=0.15;} );
-    drift_sel.TriggerID(0);
-    control_set << drift_sel;
+    // UI::Selector drift_sel("drift_sel");
+    // drift_sel.SetOption("Flow Off",    [this](){world.drift=0.0;} );
+    // drift_sel.SetOption("Flow Low",    [this](){world.drift=0.05;} );
+    // drift_sel.SetOption("Flow Medium", [this](){world.drift=0.1;} );
+    // drift_sel.SetOption("Flow High",   [this](){world.drift=0.15;} );
+    // drift_sel.TriggerID(0);
+    // control_set << drift_sel;
 
 
     // And stats (next to canvas)
     auto stats_set = doc.AddDiv("stats");
-    stats_set.SetPosition(world.size.Width()+40, 80);
+    stats_set.SetPosition(main_win_size.X() + 40, 80);
 
     stats_set << "Update: " << UI::Live( [this]() { return anim.GetFrameCount(); } ) << "<br>";
-    stats_set << "Org Count: " << UI::Live( [this](){ return world.physics.NumBodies(); } ) << "<br>";
-    stats_set << "Array Size: " << UI::Live( [this](){ return world.physics.GetBodySet().size(); } ) << "<br>";
-    stats_set << "Empty: " << UI::Live( [this](){ return world.physics.NumOpen(); } ) << "<br>";
+    stats_set << "Org Count: " << UI::Live( [this](){ return avida.GetPopulation("main").GetNumOrgs(); } ) << "<br>";
 
-    stats_set << "<br>"
-              << "Sample Org: " << UI::Live( [this](){
-                    return world.physics.NumBodies() ? world.physics.GetActiveBody().GetID() : 1000000;
-                  } ) << "<br>"
-              << "Center: " << UI::Live( [this](){
-                    return world.physics.NumBodies() ? world.physics.GetActiveBody().GetCenter() : emp::Point{-1,-1};
-                  } ) << "<br>"
-              << "Links: " << UI::Live( [this](){
-                return world.physics.NumBodies() ? world.physics.GetActiveBody().GetLinkIDs() : emp::vector<size_t>{};
-              } ) << "<br>";
+    // stats_set << "<br>"
+    //           << "Sample Org: " << UI::Live( [this](){
+    //                 return world.physics.NumBodies() ? world.physics.GetActiveBody().GetID() : 1000000;
+    //               } ) << "<br>"
+    //           << "Center: " << UI::Live( [this](){
+    //                 return world.physics.NumBodies() ? world.physics.GetActiveBody().GetCenter() : emp::Point{-1,-1};
+    //               } ) << "<br>"
+    //           << "Links: " << UI::Live( [this](){
+    //             return world.physics.NumBodies() ? world.physics.GetActiveBody().GetLinkIDs() : emp::vector<size_t>{};
+    //           } ) << "<br>";
 
     stats_set << "<br>"
       "Each circle represents a <b>single cell</b>.<br>"
@@ -163,7 +161,7 @@ public:
       "Freeze the <b>Map</b> to speed up processing by more than 10-fold.<br>"
       "Cells can be <b>Individuals</b> or linked into clusters like <b>Snowflake</b> Yeast.<br>"
       "<b>Cell Sizes</b> can be changed, but you need to <b>Reset</b> the run to see the results.<br>"
-      "<b>Flow</b> indicates the ammount of Brownian motion in the run.<br>"
+      "<b>Flow</b> indicates the amount of Brownian motion in the run.<br>"
       "<b>Copy</b> rate determines how quickly cells should be reproducing.<br>"
       "<br>"
       "<b>Keyboard Shortcuts</b>:<br>"
@@ -175,17 +173,17 @@ public:
       ;
 
 
-    world.Init(); // Startup the world.
+    avida.Setup(); // Initialize the Avida population.
 
     // Draw initial state of the world.
-    UI::Draw( doc.Canvas("pop_view"), world.physics);
+    // UI::Draw( doc.Canvas("pop_view"), world.physics);
   }
 
   void Init() {
     doc << "<h1>Avida Test</h1>";
   }
 
-  ~EvokeInterface() {}
+  ~AvidaWeb() {}
 
   void Animate([[maybe_unused]] const UI::Animate & anim) {
     DEBUG_STACK();
