@@ -23,8 +23,11 @@ private:
 
   size_t max_size = emp::MAX_SIZE_T; // Population cap.
 
-  int ave_cycles_per_org = 30;  // Total cycles to execute per org per update.
-  int CPU_chunk_size = 10;      // Num cycles to execute each time as org is picked.
+  static constexpr int ave_cycles_per_org = 30;  // Total cycles to execute per org per update.
+  static constexpr int CPU_chunk_size = 10;      // Num cycles to execute each time as org is picked.
+
+  // Basic stats
+  int64_t cycles_executed = 0;  // How many CPU cycles have been run so far?
 
   // === HELPER FUNCTIONS ===
   template <class Self>
@@ -77,16 +80,18 @@ private:
 public:
   Population(emp::Random & random) : random(random) { }
 
-  size_t GetSize() const { return orgs.size(); }
-  size_t size() { return orgs.size(); } // For std compatibility.
-  size_t GetNumOrgs() const { return orgs.size(); }
+  [[nodiscard]] size_t GetSize() const { return orgs.size(); }
+  [[nodiscard]] size_t size() { return orgs.size(); } // For std compatibility.
+  [[nodiscard]] size_t GetNumOrgs() const { return orgs.size(); }
 
-  size_t GetMaxSize() const { return max_size; }
+  [[nodiscard]] size_t GetMaxSize() const { return max_size; }
   template <class Self>
   Self & SetMaxSize(this Self & self, size_t in) {
     self.max_size = in;
     return self;
   }
+
+  [[nodiscard]] int64_t GetCyclesExecuted() const { return cycles_executed; }
 
   template <typename FUN_T>
   double GetAveTrait(const FUN_T & fun) {
@@ -130,14 +135,13 @@ public:
   }
 
   // Process a single update for this population, returning the number of CPU cycles used.
-  int ProcessUpdate() {    
+  void ProcessUpdate() {    
     emp_assert(orgs.size(), "Running ProcessUpdate() on an empty Population.");
-    const int cycles = orgs.size() * ave_cycles_per_org;
-    int rounds = cycles / CPU_chunk_size;
-    while (--rounds >= 0) {
+    const int cycles = std::ssize(orgs) * ave_cycles_per_org;
+    for (int rounds = cycles / CPU_chunk_size; rounds; --rounds) {
       const size_t id = speed_map.Index(random.GetDouble(speed_map.GetWeight()));
       orgs[id].Process(CPU_chunk_size);
     }
-    return cycles;
+    cycles_executed += cycles;
   }
 };
