@@ -124,8 +124,11 @@ public:
     pop.Inject(hw_man, "../config/ancestor.org");
   }
 
+  void DoUpdate(Population & pop) {
+    pop.ProcessUpdate();
+  }
+
   void Run(Population & pop) {
-    int64_t total_cycles = 0;
     for (size_t ud = 0; ud < 10000; ++ud) {
       if (ud % 100 == 0) {
         std::cout << "UD:" << ud
@@ -134,10 +137,10 @@ public:
                   << "  Genome0:[" << pop[0].GetGenomeSequence() << "]"
                   << std::endl;
       }
-      total_cycles += pop.ProcessUpdate();
+      DoUpdate(pop);
     }
     std::cout << "Final Pop Size = " << pop.size() << std::endl;
-    std::cout << "Total Cycles = " << total_cycles << std::endl;
+    std::cout << "Total Cycles = " << pop.GetCyclesExecuted() << std::endl;
   }
 
   void Run() {
