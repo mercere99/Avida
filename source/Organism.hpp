@@ -8,26 +8,33 @@
 
 #include "emp/base/Ptr.hpp"
 
-#include "Hardware/HardwareBase.hpp"
 #include "Hardware/HardwareManager.hpp"
 #include "PopPosition.hpp"
 
-class Population;
+template <typename ORG_T> class Population;
 
 /// All organisms in Avida are set up as an Organism class.
+template <typename HW_T>
 class Organism {
+public:
+  using this_t = Organism<HW_T>;
+  using population_t = Population<this_t>;
+  using position_t = PopPosition<population_t>;
 private:
   using id_t = uint64_t;
   static constexpr id_t UNKNOWN_ID = static_cast<id_t>(-1);
 
-  Genome genome;                           // Original genome for this organism.
-  emp::Ptr<HardwareBase> hw_ptr = nullptr; // What hardware is this organism using?
-  PopPosition position;                    // Where is this Organism located?
+  Genome genome;                            // Original genome for this organism.
+  emp::Ptr<HW_T> hw_ptr = nullptr;  // What hardware is this organism using?
+  position_t position;                     // Where is this Organism located?
 
   id_t id = UNKNOWN_ID;          // Unique organism ID.
   uint32_t pos = emp::MAX_4BYTE; // Population position (max -> not in population)
   uint32_t generation = 0;       // Number of ancestral steps back to injected organism.
 public:
+  using hardware_t = HW_T;
+  using manager_t = HardwareType<HW_T>;
+
   Organism(Organism && in)  // Move constructor.
     : genome(std::move(in.genome))
     , hw_ptr(in.hw_ptr)
@@ -43,7 +50,7 @@ public:
     // Make sure hardware knows about its new Organism.
     hw_ptr->SetOrganism(*this);
   } 
-  Organism(HardwareManager & hw_man, Genome genome) // Build organism from components.
+  Organism(manager_t & hw_man, Genome genome) // Build organism from components.
     : genome(genome), hw_ptr(hw_man.Allocate(*this)) { hw_ptr->Reset(genome); }
   Organism(Organism & org_to_clone) // If no offspring genome, assume clone!
     : genome(org_to_clone.genome)
@@ -101,24 +108,24 @@ public:
   [[nodiscard]] uint32_t GetGeneration() const { return generation; }
   Organism & SetGeneration(uint32_t in_gen) { generation = in_gen; return *this; }
 
-  [[nodiscard]] HardwareBase & GetHardware() { emp_assert(hw_ptr); return *hw_ptr; }
-  [[nodiscard]] const HardwareBase & GetHardware() const { emp_assert(hw_ptr); return *hw_ptr; }
+  [[nodiscard]] HW_T & GetHardware() { emp_assert(hw_ptr); return *hw_ptr; }
+  [[nodiscard]] const HW_T & GetHardware() const { emp_assert(hw_ptr); return *hw_ptr; }
 
   [[nodiscard]] bool InPopulation() const { return position.InPopulation(); }
-  [[nodiscard]] bool InPopulation(const Population & pop) const {
+  [[nodiscard]] bool InPopulation(const population_t & pop) const {
     return position.InPopulation(pop);
   }
-  [[nodiscard]] Population & GetPopulation() {
+  [[nodiscard]] population_t & GetPopulation() {
     emp_assert(OK());
     emp_assert(InPopulation());
     return position.GetPopulation();
   }
-  [[nodiscard]] const Population & GetPopulation() const {
+  [[nodiscard]] const population_t & GetPopulation() const {
     emp_assert(OK());
     emp_assert(InPopulation());
     return position.GetPopulation();
   }
-  Organism & SetPopulation(Population & in_pop, uint32_t index) {
+  Organism & SetPopulation(population_t & in_pop, uint32_t index) {
     emp_assert(OK());
     position.Set(in_pop, index);
     return *this;
