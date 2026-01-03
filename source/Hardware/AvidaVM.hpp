@@ -14,7 +14,6 @@
 #include "emp/base/notify.hpp"
 #include "emp/math/math.hpp"
 
-#include "HardwareBase.hpp"
 #include "HardwareManager.hpp"
 #include "InstSet.hpp"
 #include "VMStack.hpp"
@@ -23,8 +22,15 @@
 #include "../Organism.hpp"
 
 /// Default Avida Virtual Machine for use in Avida 5
-class AvidaVM : public HardwareBase {
+class AvidaVM {
+public:
+  using organism_t = Organism<AvidaVM>;
+  using manager_t = HardwareType<AvidaVM>;
+
 private:
+  manager_t & hw_manager;
+  emp::Ptr<organism_t> org_ptr = nullptr;
+
   // Configured values.
   static constexpr size_t NUM_NOPS = 6;           // Num nop modifier instructions used
   static constexpr size_t STACK_DEPTH = 16;       // Num entries on stack before it loops.
@@ -38,8 +44,7 @@ private:
   using inst_id_t = Genome::value_t;              // Type used for inst IDs in a genome.
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM.
   using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU.
-  using manager_t = HardwareType<AvidaVM>;        // Derived type of this HardwareManager
-  using callback_t = std::function<void(Organism &)>; // Special functions added to inst set.
+  using callback_t = std::function<void(organism_t &)>; // Special functions added to inst set.
 
   enum class Nop {
     A = 0, B = 1, C = 2, D = 3, E = 4, F = 5,
@@ -161,13 +166,20 @@ public:
   AvidaVM() = delete;
   AvidaVM(const AvidaVM &) = default;
   AvidaVM(AvidaVM &&) = default;
-  AvidaVM(HardwareManager & hw_manager)
-    : HardwareBase(hw_manager) { Reset(); }
-  AvidaVM(HardwareManager & hw_manager, const Genome & genome)
-    : HardwareBase(hw_manager), genome(genome) { Reset(); }
+  AvidaVM(manager_t & hw_manager) : hw_manager(hw_manager) { Reset(); }
+  AvidaVM(manager_t & hw_manager, const Genome & genome)
+    : hw_manager(hw_manager), genome(genome) { Reset(); }
   // AvidaVM & operator=(const AvidaVM &) = default;
   // AvidaVM & operator=(AvidaVM &&) = default;
 
+  // === Organisms ===
+  
+  [[nodiscard]] organism_t & GetOrganism() { emp_assert(org_ptr); return *org_ptr; }
+  [[nodiscard]] const organism_t & GetOrganism() const { emp_assert(org_ptr); return *org_ptr; }
+  AvidaVM & SetOrganism(organism_t & org) { org_ptr = &org; return *this; }
+
+  [[nodiscard]] manager_t & GetManager() { return hw_manager; }
+  [[nodiscard]] const manager_t & GetManager() const { return hw_manager; }
 
   // === Instructions ===
 
@@ -434,7 +446,7 @@ public:
     // ProcessInst(inst_id);
   }
 
-  void Process(size_t cycles=10) override {
+  void Process(size_t cycles=10) {
     emp_assert(OK());
     for (size_t i = 0; i < cycles; ++i) {
       ProcessInst();
@@ -442,7 +454,7 @@ public:
   }
 
   // Initialize the state of the virtual CPU
-  void Reset() override {
+  void Reset() {
     // Reset Heads
     heads[HEAD_IP] = 0;
     heads[HEAD_G_READ] = 0;
@@ -458,12 +470,12 @@ public:
   }
 
   // Reset with a new genome.
-  void Reset(const Genome & in_genome) override {
+  void Reset(const Genome & in_genome) {
     genome = in_genome;
     Reset();
   }
 
-  Genome DivideGenome(emp::Random & random) override {
+  Genome DivideGenome(emp::Random & random) {
     size_t & head1 = GetHeadArg(HEAD_G_READ);
     size_t & head2 = GetHeadArg(HEAD_G_WRITE);
 
@@ -583,7 +595,7 @@ public:
   }
 
 
-  bool OK(bool check_org_ok=true) const override {
+  bool OK(bool check_org_ok=true) const {
     // @CAO Check hw_manager?
  
     // Check both the organism pointer itself and the organism it's pointing to.
