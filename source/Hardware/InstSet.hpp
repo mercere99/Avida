@@ -12,8 +12,9 @@
 #include <emp/math/Random.hpp>
 #include <emp/tools/String.hpp>
 
-#include "HardwareBase.hpp"
 #include "../Genome.hpp"
+
+template <typename HW_T> class Organism;
 
 // Map of genome instruction to which instruction should be run.
 template <typename VM_T, size_t MAX_SET_SIZE=256, typename INST_RETURN_T=void>
@@ -21,7 +22,7 @@ class InstSet {
 public:
   using inst_id_t = emp::min_uint_type<MAX_SET_SIZE+1>;
   using inst_fun_t = INST_RETURN_T (VM_T::*)();
-  using callback_t = std::function<void(Organism &)>;
+  using callback_t = std::function<void(Organism<VM_T> &)>;
   static constexpr size_t NULL_ID = static_cast<inst_id_t>(-1);
 
 private:
