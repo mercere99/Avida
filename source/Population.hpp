@@ -15,9 +15,12 @@
 #include "Organism.hpp"
 
 /// A Population is a collection of organisms and a structure of how they are connected.
+template <typename ORG_T>
 class Population {
+public:
+  using organism_t = ORG_T;
 private:
-  emp::vector<Organism> orgs{};
+  emp::vector<organism_t> orgs{};
   emp::Random & random;
   emp::UnorderedIndexMap speed_map; // Track how fast each CPU should be going.
 
@@ -61,16 +64,16 @@ private:
 
   // Organism being added to the population; may be birth or injection.
   template <class Self>
-  Self & Insert(this Self & self, Organism && org) {
-    emp_assert(self.org.OK());
-    emp_assert(self.orgs.size() <= max_size);
+  Self & Insert(this Self & self, organism_t && org) {
+    emp_assert(org.OK());
+    emp_assert(self.orgs.size() <= self.max_size);
 
     // See if we must delete an organism before we can add a new one.
     if (self.orgs.size() == self.max_size) self.DeleteOrg();
 
     uint32_t index = self.orgs.size();
     self.orgs.push_back(std::move(org));
-    Organism & new_org = self.orgs.back();
+    organism_t & new_org = self.orgs.back();
     emp_assert(new_org.OK());
     new_org.SetPopulation(self, index);
     self.speed_map.Set(index, new_org.GetMetabolicRate());
@@ -97,12 +100,12 @@ public:
   double GetAveTrait(const FUN_T & fun) {
     if (orgs.empty()) return 0.0;  // An empty population has no generations.
     double total = std::accumulate(orgs.begin(), orgs.end(), 0.0,
-                   [fun](double total, Organism & org){ return total + fun(org); });
+                   [fun](double total, organism_t & org){ return total + fun(org); });
     return total / static_cast<double>(orgs.size());
   }
 
   double GetAveGeneration() {
-    return GetAveTrait([](Organism & org){ return org.GetGeneration(); });
+    return GetAveTrait([](organism_t & org){ return org.GetGeneration(); });
   }
 
   // Access organism by population position.
@@ -112,26 +115,26 @@ public:
     return self.orgs[pos];
   }
 
-  template <class Self, typename T>
-  requires std::same_as<std::remove_cvref_t<T>, Genome>
-  Self & Inject(this Self & self, HardwareManager & hw_man, T && genome) {
-    return self.Insert(Organism{hw_man, std::forward<T>(genome)});
+  template <class Self, typename HW_MANAGER_T, typename GENOME_T>
+  requires std::same_as<std::remove_cvref_t<GENOME_T>, Genome>
+  Self & Inject(this Self & self, HW_MANAGER_T & hw_man, GENOME_T && genome) {
+    return self.Insert(organism_t{hw_man, std::forward<GENOME_T>(genome)});
   }
   
   /// @brief Inject an organism using a genome loaded from a file.
-  /// @param hw_man - The HardwareManager for this CPU type.
+  /// @param hw_man - The hardware manager for this CPU type.
   /// @param filename - The name of the file with the genome information.
   /// @return A reference to this population object.
-  template <class Self>
-  Self & Inject(this Self & self, HardwareManager & hw_man, emp::String filename) {
+  template <class Self, typename HW_MANAGER_T>
+  Self & Inject(this Self & self, HW_MANAGER_T & hw_man, emp::String filename) {
     return self.Inject(hw_man, hw_man.LoadGenome(filename));
   }
 
   template <class Self>
-  Self & DivideOrg(this Self & self, Organism & parent, Genome && offspring_genome) {
+  Self & DivideOrg(this Self & self, organism_t & parent, Genome && offspring_genome) {
     emp_assert(parent.GetGenome().size() > 0);
     emp_assert(offspring_genome.size() > 0);
-    return self.Insert(Organism{parent, offspring_genome});
+    return self.Insert(organism_t{parent, offspring_genome});
   }
 
   // Process a single update for this population, returning the number of CPU cycles used.
