@@ -8,7 +8,7 @@
 
 int main(int argc, char * argv[])
 {
-  Avida avida(emp::ArgsToStrings(argc, argv));
+  Avida<AvidaVM> avida(emp::ArgsToStrings(argc, argv));
   avida.Setup();
   avida.Run();
 }
