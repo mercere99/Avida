@@ -18,16 +18,24 @@
 #include "Population.hpp"
 
 /// Main Avida-control object.
+// @CAO TODO: Allow for multiple HW types in the same Avida run (and perhaps same population)
+template <typename HW_T>
 class Avida {
+public:
+  using hardware_t = HW_T;
+  using manager_t = HardwareType<hardware_t>;
+  using organism_t = Organism<hardware_t>;
+  using population_t = Population<organism_t>; 
+
 private:
-  using hw_man_ptr = emp::Ptr<HardwareManager>;
+  using hw_man_ptr = emp::Ptr<manager_t>;
   
   emp::Random random;
   std::unordered_map<emp::String, hw_man_ptr> hw_man_map;
-  std::unordered_map<emp::String, Population> pop_map;
+  std::unordered_map<emp::String, population_t> pop_map;
 
   // ===== Helper Functions =====
-  void DoDivide(Organism & org) {
+  void DoDivide(organism_t & org) {
     emp_assert(org.OK());
     Genome offspring_genome = org.DivideGenome(random);
     if (offspring_genome.size()) {
@@ -35,8 +43,8 @@ private:
     }  
   }
 
-  void AddCallbacks(HardwareManager & hw_man) {
-    hw_man.AddCallback("DivideCell", [this](Organism & org){ DoDivide(org); });
+  void AddCallbacks(manager_t & hw_man) {
+    hw_man.AddCallback("DivideCell", [this](organism_t & org){ DoDivide(org); });
   }
 
 public:
@@ -55,23 +63,23 @@ public:
     for ( auto [name, ptr] : hw_man_map) ptr.Delete();
   }
 
-  HardwareManager & GetHWManager(emp::String name) {
+  manager_t & GetHWManager(emp::String name) {
     emp_assert( emp::Has(hw_man_map, name) );
     return *hw_man_map[name];
   }
 
   template <typename VM_T>
-  HardwareManager & AddHardwareManager(emp::String name) {
+  manager_t & AddHardwareManager(emp::String name) {
     emp_assert(!emp::Has(hw_man_map, name));
     return *(hw_man_map[name] = emp::NewPtr<HardwareType<VM_T>>());
   }
 
-  Population & GetPopulation(emp::String name) {
+  population_t & GetPopulation(emp::String name) {
     emp_assert( emp::Has(pop_map, name) );    
     return pop_map.find(name)->second;
   }
 
-  Population & AddPopulation(emp::String name) {
+  population_t & AddPopulation(emp::String name) {
     emp_assert(!emp::Has(pop_map, name));
     auto [it, success] = pop_map.emplace(name, random);
     emp_assert(success);
@@ -98,7 +106,7 @@ public:
   template <typename MANAGER_T=AvidaVM>
   void Test(const size_t genome_size = 256, const size_t num_trials = 5000000, size_t run_time=200) {
     // Create the hardware manager.
-    HardwareManager & hw_manager = AddHardwareManager<MANAGER_T>(MANAGER_T::DefaultName());
+    manager_t & hw_manager = AddHardwareManager<MANAGER_T>(MANAGER_T::DefaultName());
     auto inst_set = MANAGER_T::BuildInstSet();
 
     // Load in the default ancestor genome.
@@ -115,20 +123,20 @@ public:
   // Initialize the hardware manager (with AvidVM) and the population (with the default) ancestor.
   void Setup() {
     // Default to the AvidaVM hardware manager.
-    HardwareManager & hw_man = AddHardwareManager<AvidaVM>("AvidaVM");
+    manager_t & hw_man = AddHardwareManager<AvidaVM>("AvidaVM");
     AddCallbacks(hw_man);
 
     // Create a population called "main" and inject a single individual of the default ancestor.
-    Population & pop = AddPopulation("main");
+    population_t & pop = AddPopulation("main");
     pop.SetMaxSize(10000);
     pop.Inject(hw_man, "../config/ancestor.org");
   }
 
-  void DoUpdate(Population & pop) {
-    pop.ProcessUpdate();
-  }
+  void DoUpdate(population_t & pop) { pop.ProcessUpdate(); }
 
-  void Run(Population & pop) {
+  void DoUpdate() { DoUpdate(GetPopulation("main")); }
+
+  void Run(population_t & pop) {
     for (size_t ud = 0; ud < 10000; ++ud) {
       if (ud % 100 == 0) {
         std::cout << "UD:" << ud
@@ -144,7 +152,7 @@ public:
   }
 
   void Run() {
-    Population & pop = AddPopulation("main");
+    population_t & pop = GetPopulation("main");
     Run(pop);
   }
 };
