@@ -15,54 +15,10 @@
 
 #include "InstSet.hpp"
 
-// // Pre-declarations
-// class Organism;
-
-// /// A class to handle a particular configuration of hardware.
-// class HardwareManager {
-// protected:
-//   using hw_ptr_t = emp::Ptr<HardwareBase>;
-//   using feedback_t = std::function<void(Organism & /*org*/)>;
-//   emp::vector< hw_ptr_t > hw_ptrs;  // Pointers to available hardware.
-
-//   virtual hw_ptr_t AllocateNew(Organism & org) = 0;
-// public:
-//   virtual ~HardwareManager() { Clear(); }
-
-//   static std::string DefaultName() { return "Unnamed"; };
-
-//   virtual bool AddCallback(emp::String name, feedback_t fun) = 0;
-
-//   [[nodiscard]] virtual emp::String ToSequence(const Genome & genome) const = 0;
-//   [[nodiscard]] virtual Genome LoadGenome(emp::String filename) = 0;
-
-//   virtual void Mutate(emp::Random & random, Genome & genome) const = 0;
-
-//   [[nodiscard]] hw_ptr_t Allocate(Organism & org) {
-//     if (hw_ptrs.size()) {
-//       hw_ptr_t out = hw_ptrs.back();
-//       hw_ptrs.pop_back();
-//       out->SetOrganism(org);
-//       return out;
-//     }
-//     return AllocateNew(org);
-//   }
-
-//   void Release(hw_ptr_t ptr) {
-//     hw_ptrs.push_back(ptr);
-//   }
-
-//   // Remove current inventory of hardware.
-//   void Clear() {
-//     for (auto ptr : hw_ptrs) ptr.Delete();
-//     hw_ptrs.resize(0);
-//   }
-// };
-
 // A helper class where a particular hardware implementation can be provided and it will
 // automatically build a manager for that hardware.
 template <typename VM_T>
-class HardwareType {
+class HardwareManager {
 private:
   using org_t = Organism<VM_T>;
   using hw_ptr_t = emp::Ptr<VM_T>;
@@ -85,8 +41,8 @@ private:
   }
 
 public:
-  HardwareType() : inst_set(VM_T::BuildInstSet()) { }
-  ~HardwareType() { Clear(); }
+  HardwareManager() : inst_set(VM_T::BuildInstSet()) { }
+  ~HardwareManager() { Clear(); }
 
   static std::string DefaultName() { return VM_T::HardwareName() + "Manager"; }
 
