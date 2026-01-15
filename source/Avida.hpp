@@ -23,7 +23,7 @@ template <typename HW_T>
 class Avida {
 public:
   using hardware_t = HW_T;
-  using manager_t = HardwareType<hardware_t>;
+  using manager_t = HardwareManager<hardware_t>;
   using organism_t = Organism<hardware_t>;
   using population_t = Population<organism_t>; 
 
@@ -71,7 +71,7 @@ public:
   template <typename VM_T>
   manager_t & AddHardwareManager(emp::String name) {
     emp_assert(!emp::Has(hw_man_map, name));
-    return *(hw_man_map[name] = emp::NewPtr<HardwareType<VM_T>>());
+    return *(hw_man_map[name] = emp::NewPtr<HardwareManager<VM_T>>());
   }
 
   population_t & GetPopulation(emp::String name) {

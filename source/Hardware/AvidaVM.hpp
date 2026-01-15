@@ -25,7 +25,7 @@
 class AvidaVM {
 public:
   using organism_t = Organism<AvidaVM>;
-  using manager_t = HardwareType<AvidaVM>;
+  using manager_t = HardwareManager<AvidaVM>;
 
 private:
   manager_t & hw_manager;

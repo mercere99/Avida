@@ -33,7 +33,7 @@ private:
   uint32_t generation = 0;       // Number of ancestral steps back to injected organism.
 public:
   using hardware_t = HW_T;
-  using manager_t = HardwareType<HW_T>;
+  using manager_t = HardwareManager<HW_T>;
 
   Organism(Organism && in)  // Move constructor.
     : genome(std::move(in.genome))
