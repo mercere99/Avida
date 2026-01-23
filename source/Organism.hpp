@@ -13,28 +13,26 @@
 
 template <typename ORG_T> class Population;
 
-/// All organisms in Avida are set up as an Organism class.
 template <typename HW_T>
 class Organism {
 public:
   using this_t = Organism<HW_T>;
   using population_t = Population<this_t>;
   using position_t = PopPosition<population_t>;
+  using hardware_t = HW_T;
+  using genome_t = HW_T::genome_t;
+  using manager_t = HardwareManager<HW_T>;
 private:
   using id_t = uint64_t;
   static constexpr id_t UNKNOWN_ID = static_cast<id_t>(-1);
 
-  Genome genome;                            // Original genome for this organism.
+  genome_t genome;                  // Original genome for this organism.
   emp::Ptr<HW_T> hw_ptr = nullptr;  // What hardware is this organism using?
-  position_t position;                     // Where is this Organism located?
+  position_t position;              // Where is this Organism located?
+  id_t id = UNKNOWN_ID;             // Unique organism ID.
+  uint32_t generation = 0;          // Number of ancestral steps back to injected organism.
 
-  id_t id = UNKNOWN_ID;          // Unique organism ID.
-  uint32_t pos = emp::MAX_4BYTE; // Population position (max -> not in population)
-  uint32_t generation = 0;       // Number of ancestral steps back to injected organism.
 public:
-  using hardware_t = HW_T;
-  using manager_t = HardwareManager<HW_T>;
-
   Organism(Organism && in)  // Move constructor.
     : genome(std::move(in.genome))
     , hw_ptr(in.hw_ptr)
@@ -45,12 +43,11 @@ public:
     // Clean up old pointers (so they don't deallocate on destruction.)
     in.hw_ptr = nullptr;
     in.position.Clear();
-    in.pos = emp::MAX_4BYTE;
 
     // Make sure hardware knows about its new Organism.
     hw_ptr->SetOrganism(*this);
   } 
-  Organism(manager_t & hw_man, Genome genome) // Build organism from components.
+  Organism(manager_t & hw_man, genome_t genome) // Build organism from components.
     : genome(genome), hw_ptr(hw_man.Allocate(*this)) { hw_ptr->Reset(genome); }
   Organism(Organism & org_to_clone) // If no offspring genome, assume clone!
     : genome(org_to_clone.genome)
@@ -59,7 +56,7 @@ public:
   {
     hw_ptr->Reset(org_to_clone.GetGenome());
   }
-  Organism(Organism & parent, Genome offspring_genome) // Provide parent and new genome.
+  Organism(Organism & parent, genome_t offspring_genome) // Provide parent and new genome.
     : genome(offspring_genome)
     , hw_ptr(parent.GetHardware().GetManager().Allocate(*this))
     , generation(parent.generation+1)
@@ -98,7 +95,7 @@ public:
   [[nodiscard]] id_t GetID() const { return id; }
   Organism & SetID(id_t in_id) { id = in_id; return *this; }
 
-  [[nodiscard]] const Genome & GetGenome() const { return genome; }
+  [[nodiscard]] const genome_t & GetGenome() const { return genome; }
   [[nodiscard]] emp::String GetGenomeSequence() const {
     return hw_ptr->GetManager().ToSequence(genome);
   }
@@ -137,7 +134,7 @@ public:
     return *this;
   }
 
-  [[nodiscard]] Genome DivideGenome(emp::Random & random) {
+  [[nodiscard]] genome_t DivideGenome(emp::Random & random) {
     emp_assert(OK());
     return hw_ptr->DivideGenome(random);
   }
