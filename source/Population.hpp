@@ -19,6 +19,7 @@ template <typename ORG_T>
 class Population {
 public:
   using organism_t = ORG_T;
+  using genome_t = organism_t::genome_t;
 private:
   emp::vector<organism_t> orgs{};
   emp::Random & random;
@@ -115,10 +116,9 @@ public:
     return self.orgs[pos];
   }
 
-  template <class Self, typename HW_MANAGER_T, typename GENOME_T>
-  requires std::same_as<std::remove_cvref_t<GENOME_T>, Genome>
-  Self & Inject(this Self & self, HW_MANAGER_T & hw_man, GENOME_T && genome) {
-    return self.Insert(organism_t{hw_man, std::forward<GENOME_T>(genome)});
+  template <class Self, typename HW_MANAGER_T>
+  Self & Inject(this Self & self, HW_MANAGER_T & hw_man, genome_t && genome) {
+    return self.Insert(organism_t{hw_man, std::forward<genome_t>(genome)});
   }
   
   /// @brief Inject an organism using a genome loaded from a file.
@@ -131,9 +131,9 @@ public:
   }
 
   template <class Self>
-  Self & DivideOrg(this Self & self, organism_t & parent, Genome && offspring_genome) {
+  Self & DivideOrg(this Self & self, organism_t & parent, genome_t && offspring_genome) {
     emp_assert(parent.GetGenome().size() > 0);
-    emp_assert(offspring_genome.size() > 0);
+  emp_assert(offspring_genome.size() > 0);
     return self.Insert(organism_t{parent, offspring_genome});
   }
 
