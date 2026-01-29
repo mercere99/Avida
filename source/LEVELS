@@ -5,4 +5,5 @@ LEVEL 2: InstSet      : Genome, HardwareBase
 Level 3: HardwareManager : HardwareBase, InstSet
 Level 4: Organism : HardwareBase, HardwareManager
 Level 5: Population : Organism
-Level 6: [Derived Hardware] (e.g., AvidaVM)  : HardwareBase, HardwareManager, InstSet, Organism
+Avida 6: Avida 
+Level 7: [Derived Hardware] (e.g., AvidaVM)  : HardwareBase, HardwareManager, InstSet, Organism
