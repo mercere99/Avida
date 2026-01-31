@@ -26,6 +26,7 @@ class AvidaVM {
 public:
   using organism_t = Organism<AvidaVM>;
   using manager_t = HardwareManager<AvidaVM>;
+  using genome_t = Genome;
 
 private:
   manager_t & hw_manager;
@@ -41,7 +42,7 @@ private:
   // Configured types.
   using data_t = int;                             // What data type does this VM use?
   using mem_t = emp::array<data_t, MEM_SIZE>;     // Memory is a fixed size.
-  using inst_id_t = Genome::value_t;              // Type used for inst IDs in a genome.
+  using inst_id_t = genome_t::value_t;            // Type used for inst IDs in a genome.
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM.
   using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU.
   using callback_t = std::function<void(organism_t &)>; // Special functions added to inst set.
@@ -68,7 +69,7 @@ private:
 
   // === Hardware ===
 
-  Genome genome;
+  genome_t genome;
   mem_t memory{};
 
   emp::array<size_t, NUM_NOPS> heads;
@@ -167,7 +168,7 @@ public:
   AvidaVM(const AvidaVM &) = default;
   AvidaVM(AvidaVM &&) = default;
   AvidaVM(manager_t & hw_manager) : hw_manager(hw_manager) { Reset(); }
-  AvidaVM(manager_t & hw_manager, const Genome & genome)
+  AvidaVM(manager_t & hw_manager, const genome_t & genome)
     : hw_manager(hw_manager), genome(genome) { Reset(); }
   // AvidaVM & operator=(const AvidaVM &) = default;
   // AvidaVM & operator=(AvidaVM &&) = default;
@@ -470,12 +471,12 @@ public:
   }
 
   // Reset with a new genome.
-  void Reset(const Genome & in_genome) {
+  void Reset(const genome_t & in_genome) {
     genome = in_genome;
     Reset();
   }
 
-  Genome DivideGenome(emp::Random & random) {
+  genome_t DivideGenome(emp::Random & random) {
     size_t & head1 = GetHeadArg(HEAD_G_READ);
     size_t & head2 = GetHeadArg(HEAD_G_WRITE);
 
@@ -485,11 +486,11 @@ public:
     if (head1 >= genome.size() ||  // Start pos cannot be past end of genome
         head1 == head2) {          // Must be space between heads
       ++error_count;
-      return Genome{};
+      return genome_t{};
     }
 
     // Extract the offspring from the genome.
-    Genome offspring = genome.Extract(head1, head2 - head1);
+    genome_t offspring = genome.Extract(head1, head2 - head1);
 
     // Reset the heads.
     head2 = head1;  // Move head2 to the beginning of the extracted position (likely org end)
