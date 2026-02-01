@@ -25,7 +25,8 @@ public:
   using hardware_t = HW_T;
   using manager_t = HardwareManager<hardware_t>;
   using organism_t = Organism<hardware_t>;
-  using population_t = Population<organism_t>; 
+  using population_t = Population<organism_t>;
+  using genome_t = hardware_t::genome_t;
 
 private:
   using hw_man_ptr = emp::Ptr<manager_t>;
@@ -37,7 +38,7 @@ private:
   // ===== Helper Functions =====
   void DoDivide(organism_t & org) {
     emp_assert(org.OK());
-    Genome offspring_genome = org.DivideGenome(random);
+    genome_t offspring_genome = org.DivideGenome(random);
     if (offspring_genome.size()) {
       org.GetPopulation().DivideOrg(org, std::move(offspring_genome));
     }  
@@ -110,7 +111,7 @@ public:
     auto inst_set = MANAGER_T::BuildInstSet();
 
     // Load in the default ancestor genome.
-    Genome genome = inst_set.LoadGenome("../config/ancestor.org");
+    genome_t genome = inst_set.LoadGenome("../config/ancestor.org");
     MANAGER_T org(hw_manager, genome);
     for (size_t trial = 0; trial < num_trials; ++trial) {
       if (trial % 100000 == 0) std::cout << "Trial: " << trial << std::endl; 
