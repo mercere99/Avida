@@ -17,12 +17,15 @@
 template <typename HW_T> class Organism;
 
 // Map of genome instruction to which instruction should be run.
-template <typename VM_T, size_t MAX_SET_SIZE=256, typename INST_RETURN_T=void>
+template <typename HW_T, size_t MAX_SET_SIZE=256, typename INST_RETURN_T=void>
 class InstSet {
 public:
+  using hardware_t = HW_T;
+  using genome_t = HW_T::genome_t;
   using inst_id_t = emp::min_uint_type<MAX_SET_SIZE+1>;
-  using inst_fun_t = INST_RETURN_T (VM_T::*)();
-  using callback_t = std::function<void(Organism<VM_T> &)>;
+  using inst_fun_t = INST_RETURN_T (HW_T::*)();
+  using callback_t = std::function<void(Organism<HW_T> &)>;
+
   static constexpr size_t NULL_ID = static_cast<inst_id_t>(-1);
 
 private:
@@ -105,7 +108,7 @@ public:
   }
 
   // Execute an instruction on a given VM instance
-  void Execute(VM_T & vm, size_t id) const {
+  void Execute(HW_T & vm, size_t id) const {
     emp_assert(id < num_insts, "Calling execute with an invalid inst id.", id, num_insts);
     emp_assert(vm.OK(), "Calling execute on an invalid virtual machine.");
 
@@ -119,7 +122,7 @@ public:
   }
 
   /// Build a genome based on a string sequence.
-  void BuildGenome(Genome & genome, emp::String sequence) {
+  void BuildGenome(genome_t & genome, emp::String sequence) {
     for (char symbol : sequence) {
       genome.Push(GetID(symbol));
     }
@@ -127,7 +130,7 @@ public:
 
   /// Build a random genome of a given length.
   /// By default half of the instructions will be nop modifiers.
-  void BuildGenome(Genome & genome, size_t length, emp::Random & random, double nop_prob=0.5) {
+  void BuildGenome(genome_t & genome, size_t length, emp::Random & random, double nop_prob=0.5) {
     genome.Resize(0);
     const size_t non_nops = num_insts - num_nops;
     for (size_t i = 0; i < length; ++i) {
@@ -140,8 +143,8 @@ public:
     }
   }
 
-  [[nodiscard]] Genome LoadGenome(std::istream & is) {
-    Genome genome;
+  [[nodiscard]] genome_t LoadGenome(std::istream & is) {
+    genome_t genome;
     emp::File file(is);
     file.RemoveComments("//");
     file.CompressWhitespace();
@@ -155,14 +158,14 @@ public:
     return genome;
   }
 
-  [[nodiscard]] Genome LoadGenome(emp::String filename) {
+  [[nodiscard]] genome_t LoadGenome(emp::String filename) {
     std::ifstream is(filename);
     return LoadGenome(is);
   }
 
 
   /// Convert a genome into a simple sequence.
-  [[nodiscard]] emp::String ToSequence(const Genome & genome) const {
+  [[nodiscard]] emp::String ToSequence(const genome_t & genome) const {
     emp::String out;
     out.reserve(genome.size());
     for (auto inst_id : genome) {
