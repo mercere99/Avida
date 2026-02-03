@@ -1,0 +1,10 @@
+Initial Benchmark (10,000 orgs, 10,000 updates)
+
+./Avida  41.23s user 0.09s system 99% cpu 41.351 total
+./Avida  41.85s user 0.08s system 99% cpu 41.941 total
+./Avida  40.78s user 0.14s system 99% cpu 40.938 total
+
+Got rid of HardwareBase base class
+./Avida  39.63s user 0.10s system 99% cpu 39.739 total
+./Avida  34.95s user 0.07s system 99% cpu 35.031 total
+./Avida  36.62s user 0.09s system 99% cpu 36.717 total
