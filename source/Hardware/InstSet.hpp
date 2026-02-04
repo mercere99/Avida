@@ -12,7 +12,7 @@
 #include <emp/math/Random.hpp>
 #include <emp/tools/String.hpp>
 
-#include "../Genome.hpp"
+#include "../core/Genome.hpp"
 
 template <typename HW_T> class Organism;
 

@@ -65,7 +65,7 @@ public:
     genome.erase(genome.begin()+pos, genome.begin()+end_pos);
   }
 
-  // Remove [start_pos, end_pos) from this Genome and return it.
+  // Make a copy of a section of this genome and return it.
   [[nodiscard]] Genome Copy(size_t start_pos, size_t count) {
     const size_t end_pos = start_pos + count;
     emp_assert(start_pos <= size() && count <= size() && end_pos <= size(),

@@ -18,8 +18,8 @@
 #include "InstSet.hpp"
 #include "VMStack.hpp"
 
-#include "../Genome.hpp"
-#include "../Organism.hpp"
+#include "../core/Genome.hpp"
+#include "../core/Organism.hpp"
 
 /// Default Avida Virtual Machine for use in Avida 5
 class AvidaVM {
@@ -596,16 +596,12 @@ public:
   }
 
 
-  bool OK(bool check_org_ok=true) const {
+  bool OK() const {
     // @CAO Check hw_manager?
  
     // Check both the organism pointer itself and the organism it's pointing to.
     if (!org_ptr.OK()) {
       emp::notify::Warning("Invalid organism pointer found in AvidaVM.");
-      return false;
-    }
-    if (check_org_ok && !org_ptr->OK(false)) {
-      emp::notify::Warning("Organism failed OK() check in AvidaVM.");
       return false;
     }
     return true;

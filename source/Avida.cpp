@@ -4,7 +4,7 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  */
 
-#include "Avida.hpp"
+#include "core/Avida.hpp"
 
 int main(int argc, char * argv[])
 {

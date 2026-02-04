@@ -13,8 +13,8 @@
 #include "emp/config/command_line.hpp"
 #include "emp/datastructs/map_utils.hpp"
 
-#include "Hardware/AvidaVM.hpp"
-#include "Hardware/HardwareManager.hpp"
+#include "../Hardware/AvidaVM.hpp"
+#include "../Hardware/HardwareManager.hpp"
 #include "Population.hpp"
 
 /// Main Avida-control object.

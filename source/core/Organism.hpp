@@ -8,7 +8,7 @@
 
 #include "emp/base/Ptr.hpp"
 
-#include "Hardware/HardwareManager.hpp"
+#include "../Hardware/HardwareManager.hpp"
 #include "PopPosition.hpp"
 
 template <typename ORG_T> class Population;
