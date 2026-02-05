@@ -6,11 +6,13 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  */
 
-#include "emp/base/array.hpp"
+#include <cstdint>   // for size_t
+#include <algorithm> // for std::copy and std::back_inserter
+#include <iterator>
+#include <ostream>
+
 #include "emp/base/assert.hpp"
 #include "emp/base/vector.hpp"
-#include "emp/meta/type_traits.hpp"
-#include "emp/meta/TypePack.hpp"
 
 /// @brief A genome with a fixed number of possible states.
 class Genome {
@@ -24,10 +26,10 @@ public:
   Genome() = default;
   Genome(const Genome &) = default;
   Genome(Genome &&) = default;
-  Genome(const emp::vector<value_t> & g) : genome(g) { }
-  Genome(emp::vector<value_t> && g) : genome(std::move(g)) { }
-  Genome(size_t length, value_t default_value=0) : genome(length, default_value) { }
-  ~Genome() { }
+  explicit Genome(const emp::vector<value_t> & g) : genome(g) { }
+  explicit Genome(emp::vector<value_t> && g) : genome(std::move(g)) { }
+  explicit Genome(size_t length, value_t default_value=0) : genome(length, default_value) { }
+  ~Genome() = default;
 
   auto begin() { return genome.begin(); }
   auto begin() const { return genome.begin(); }
@@ -41,9 +43,6 @@ public:
 
   [[nodiscard]] value_t operator[](size_t pos) const { return genome[pos]; }
   [[nodiscard]] value_t & operator[](size_t pos) { return genome[pos]; }
-
-  [[nodiscard]] value_t Get(size_t pos) const { return genome[pos]; }
-  void Set(size_t pos, value_t val) { genome[pos] = val; }
 
   void Push(value_t val) { genome.push_back(val); }
 
@@ -77,8 +76,7 @@ public:
     emp_assert(count <= size() - start_pos);
     const size_t end_pos = start_pos + count;
     Genome out;
-    out.Reserve(count);
-    std::copy(begin() + start_pos, begin() + end_pos, std::back_inserter(out.genome));
+    out.genome.assign(begin()+start_pos, begin()+end_pos);
     return out;
   }
 
@@ -90,13 +88,4 @@ public:
     return out;
   }
 
-  /// Print genome as a series of comma-separated values.
-  void Print(std::ostream & os = std::cout) {
-    bool start = true;
-    for (auto x : genome) {
-      if (!start) os << ",";
-      os << static_cast<size_t>(x);
-      start = false;
-    }
-  }
 };
