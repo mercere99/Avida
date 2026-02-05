@@ -49,27 +49,33 @@ public:
 
   [[nodiscard]] size_t size() const { return genome.size(); }
   Genome & Resize(size_t new_size) {
+    emp_assert(new_size < (1 << 30));  // Sizes of genomes should never be in the billions.
     genome.resize(new_size);
     return *this;
   }
 
-  void Reserve(size_t max_size) { genome.reserve(max_size); }
+  void Reserve(size_t max_size) {
+    emp_assert(max_size < (1 << 30));  // Sizes of genomes should never be in the billions.
+    genome.reserve(max_size);
+  }
 
   template <typename T>
   void Insert(size_t pos, T && value, size_t count=1) {
+    emp_assert(pos <= genome.size());
     genome.insert(genome.begin()+pos, count, std::forward<T>(value));
   }
 
   void Erase(size_t pos, size_t count=1) {
+    emp_assert(pos <= genome.size());
     const size_t end_pos = pos + count;
     genome.erase(genome.begin()+pos, genome.begin()+end_pos);
   }
 
   // Make a copy of a section of this genome and return it.
   [[nodiscard]] Genome Copy(size_t start_pos, size_t count) {
+    emp_assert(start_pos <= size());
+    emp_assert(count <= size() - start_pos);
     const size_t end_pos = start_pos + count;
-    emp_assert(start_pos <= size() && count <= size() && end_pos <= size(),
-               start_pos, end_pos, count);
     Genome out;
     out.Reserve(count);
     std::copy(begin() + start_pos, begin() + end_pos, std::back_inserter(out.genome));
@@ -78,6 +84,7 @@ public:
 
   // Remove [start_pos, end_pos) from this Vector and return it.
   [[nodiscard]] Genome Extract(size_t start_pos, size_t count) {
+    emp_assert(start_pos + count <= genome.size());
     Genome out(Copy(start_pos, count));
     Erase(start_pos, count);
     return out;
