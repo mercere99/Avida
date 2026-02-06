@@ -6,8 +6,10 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  */
 
+#include "emp/base/assert.hpp"
 #include "emp/base/Ptr.hpp"
-#include "emp/math/constants.hpp"
+
+#include <cstdint>  // for uint32_t
 
 template <typename POP_T>
 class PopPosition {
@@ -20,24 +22,46 @@ private:
   pos_t index = npos;
 
 public:
-  POP_T & GetPopulation() { return *pop_ptr; }
-  const POP_T & GetPopulation() const { return *pop_ptr; }
-  PopPosition & SetPopulation(POP_T & pop) { pop_ptr = &pop; return *this;}
+  [[nodiscard]] POP_T & GetPopulation() noexcept {
+    emp_assert(InPopulation());
+    return *pop_ptr;
+  }
+  [[nodiscard]] const POP_T & GetPopulation() const noexcept {
+    emp_assert(InPopulation());
+    return *pop_ptr;
+  }
 
-  pos_t GetIndex() const { return index; }
-  PopPosition & SetIndex(pos_t in) { index = in; return *this; }
+  // Change to a new population; default to index zero of the population.
+  PopPosition & SetPopulation(POP_T & pop) noexcept {
+    pop_ptr = &pop;
+    index = npos;
+    return *this;
+  }
 
-  PopPosition & Set(POP_T & pop, pos_t in) {
+  [[nodiscard]] pos_t GetIndex() const noexcept { return index; }
+  PopPosition & SetIndex(pos_t in) noexcept {
+    emp_assert(InPopulation());
+    index = in;
+    return *this;
+  }
+
+  PopPosition & Set(POP_T & pop, pos_t in) noexcept {
+    emp_assert(in < pop.size());
     pop_ptr = &pop;
     index = in;
     return *this;
   }
 
-  PopPosition & Clear() {
+  PopPosition & Clear() noexcept {
     pop_ptr = nullptr;
+    index = npos;
     return *this;
   }
 
-  bool InPopulation() const { return !pop_ptr.IsNull(); }
-  bool InPopulation(const POP_T & test_pop) const { return pop_ptr == &test_pop; }
+  [[nodiscard]] bool InPopulation() const noexcept { return !pop_ptr.IsNull(); }
+  [[nodiscard]] bool InPopulation(const POP_T & test_pop) const  noexcept {
+    return pop_ptr == &test_pop;
+  }
+
+  explicit operator bool() const noexcept { return InPopulation() && index != npos; }
 };
