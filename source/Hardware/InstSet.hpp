@@ -6,13 +6,15 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  */
 
-#include <emp/base/array.hpp>
-#include <emp/datastructs/Vector.hpp>
-#include <emp/io/File.hpp>
-#include <emp/math/Random.hpp>
-#include <emp/tools/String.hpp>
+#include <fstream>     // std::ifstream
+#include <functional>  // std::function
+#include <istream>
 
-#include "../core/Genome.hpp"
+#include "emp/base/array.hpp"
+#include "emp/datastructs/Vector.hpp"
+#include "emp/io/File.hpp"
+#include "emp/math/Random.hpp"
+#include "emp/tools/String.hpp"
 
 template <typename HW_T> class Organism;
 
@@ -21,12 +23,12 @@ template <typename HW_T, size_t MAX_SET_SIZE=256, typename INST_RETURN_T=void>
 class InstSet {
 public:
   using hardware_t = HW_T;
-  using genome_t = HW_T::genome_t;
+  using genome_t = typename HW_T::genome_t;
   using inst_id_t = emp::min_uint_type<MAX_SET_SIZE+1>;
   using inst_fun_t = INST_RETURN_T (HW_T::*)();
   using callback_t = std::function<void(Organism<HW_T> &)>;
 
-  static constexpr size_t NULL_ID = static_cast<inst_id_t>(-1);
+  static constexpr inst_id_t NULL_ID = static_cast<inst_id_t>(-1);
 
 private:
   struct InstInfo {
@@ -53,8 +55,9 @@ public:
   [[nodiscard]] bool IsCallback(size_t id) const { return info[id].is_callback; }
 
   // Get an ID from a name.
-  [[nodiscard]] inst_id_t GetID(emp::String name) const {
-    for (const auto & inst : info) {
+  [[nodiscard]] inst_id_t GetID(const emp::String & name) const {
+    for (size_t i = 0; i < num_insts; ++i) {
+      const auto & inst = info[i];
       if (inst.name == name) return inst.id;
     }
     return NULL_ID;
@@ -84,11 +87,10 @@ public:
 
     const char symbol = GetNextSymbol();
     inst_id_t id = static_cast<inst_id_t>(num_insts);
-    std::cout << "AddInst: " << name << " " << num_insts << " '" << symbol << "'\n";
 
-    info[num_insts] = InstInfo{name, id, symbol, false};
+    info[num_insts] = InstInfo{name, id, symbol, callback_fun != nullptr};
     funs[num_insts] = fun;
-    if (callback_fun) callback_funs[num_insts] = callback_fun;
+    callback_funs[num_insts] = callback_fun;
     ++num_insts;
   }
 
@@ -114,18 +116,29 @@ public:
 
     if (id < num_nops) return;  // Nops are "no operation" instructions.
 
-    // If this function doesn't exist, assume it is just a callback.
-    if (!funs[id]) callback_funs[id](vm.GetOrganism());
 
-    // Otherwise call the appropriate function.
-    else (vm.*funs[id])();   // Call the instruction on the VM instance
+    if (funs[id]) (vm.*funs[id])();
+    else {
+      // If this function doesn't exist, assume it is just a callback.
+      emp_assert(callback_funs[id], "Instruction has no function or callback.", id);
+      callback_funs[id](vm.GetOrganism());
+    }
+  }
+
+  /// Rebuild an existing genome based on a string sequence.
+  void BuildGenome(genome_t & genome, emp::String sequence) {
+    for (char symbol : sequence) {
+      const auto id = GetID(symbol);
+      emp_assert(id != NULL_ID, "Unknown instruction symbol.", symbol);
+      genome.Push(id);
+    }
   }
 
   /// Build a genome based on a string sequence.
-  void BuildGenome(genome_t & genome, emp::String sequence) {
-    for (char symbol : sequence) {
-      genome.Push(GetID(symbol));
-    }
+  genome_t BuildGenome(emp::String sequence) {
+    genome_t genome;
+    BuildGenome(genome, sequence);
+    return genome;
   }
 
   /// Build a random genome of a given length.
@@ -134,7 +147,6 @@ public:
     genome.Resize(0);
     const size_t non_nops = num_insts - num_nops;
     for (size_t i = 0; i < length; ++i) {
-      // genome.Push(info[random.GetUInt(num_insts)].id);
       if (random.P(nop_prob)) {
         genome.Push(info[random.GetUInt(num_nops)].id);
       } else {
