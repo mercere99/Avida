@@ -9,18 +9,25 @@
 // Hardware managers build new hardware for Organisms and recycle old hardware
 // to speed up organism construction.
 
+#include <cstddef>     // for size_t
+#include <functional>  // for std::function
+
 #include "emp/base/Ptr.hpp"
 #include "emp/base/vector.hpp"
+#include "emp/math/math.hpp"     // for emp::Log2
+#include "emp/math/Random.hpp"
 #include "emp/tools/String.hpp"
 
 #include "InstSet.hpp"
+
+template <typename HW_T> class Organism;
 
 // A helper class where a particular hardware implementation can be provided and it will
 // automatically build a manager for that hardware.
 template <typename HW_T>
 class HardwareManager {
   using hardware_t = HW_T;
-  using genome_t = hardware_t::genome_t;
+  using genome_t = typename hardware_t::genome_t;
   using org_t = Organism<hardware_t>;
 
 private:
@@ -37,7 +44,7 @@ private:
 
   // --- Helper functions --
 
-  hw_ptr_t AllocateNew(org_t & org) {
+  [[nodiscard]] hw_ptr_t AllocateNew(org_t & org) {
     auto out_ptr = emp::NewPtr<hardware_t>(*this);
     out_ptr->SetOrganism(org);
     return out_ptr;
@@ -47,7 +54,7 @@ public:
   HardwareManager() : inst_set(hardware_t::BuildInstSet()) { }
   ~HardwareManager() { Clear(); }
 
-  static std::string DefaultName() { return hardware_t::HardwareName() + "Manager"; }
+  static emp::String DefaultName() { return hardware_t::HardwareName() + "Manager"; }
 
   InstSet<hardware_t> & GetInstSet() { return inst_set; }
   const InstSet<hardware_t> & GetInstSet() const { return inst_set; }
@@ -55,6 +62,7 @@ public:
   [[nodiscard]] hw_ptr_t Allocate(org_t & org) {
     if (hw_ptrs.size()) {
       hw_ptr_t out = hw_ptrs.back();
+      emp_assert(out != nullptr);
       hw_ptrs.pop_back();
       out->SetOrganism(org);
       return out;
@@ -63,16 +71,17 @@ public:
   }
 
   void Release(hw_ptr_t ptr) {
+    emp_assert(ptr != nullptr);
     hw_ptrs.push_back(ptr);
   }
 
   // Remove current inventory of hardware.
   void Clear() {
     for (auto ptr : hw_ptrs) ptr.Delete();
-    hw_ptrs.resize(0);
+    hw_ptrs.clear();
   }
 
-  bool AddCallback(emp::String name, feedback_t fun) {
+  bool AddCallback(const emp::String & name, feedback_t fun) {
     inst_set.AddCallbackInst(name, fun);
     return true;
   }
@@ -82,15 +91,15 @@ public:
   }
 
   // Load an organism from a file.
-  genome_t LoadGenome(emp::String filename) {
+  [[nodiscard]] auto LoadGenome(const emp::String & filename) const {
     return inst_set.LoadGenome(filename);
   }
 
   void Mutate(emp::Random & random, genome_t & genome) const {
-    size_t mut_pos = static_cast<size_t>(emp::Log2(random.GetDouble()) * mut_scale);
+    size_t mut_pos = static_cast<size_t>(emp::Log2(random.GetDoubleNonZero()) * mut_scale);
     while (mut_pos < genome.size()) {
       genome[mut_pos] = inst_set.GetRandom(random);
-      mut_pos += static_cast<size_t>(emp::Log2(random.GetDouble()) * mut_scale) + 1;
+      mut_pos += static_cast<size_t>(emp::Log2(random.GetDoubleNonZero()) * mut_scale) + 1;
     }
   }
 
