@@ -12,8 +12,6 @@
 #include "emp/datastructs/UnorderedIndexMap.hpp"
 #include "emp/math/Random.hpp"
 
-#include "Organism.hpp"
-
 /// A Population is a collection of organisms and a structure of how they are connected.
 template <typename ORG_T>
 class Population {
@@ -76,7 +74,7 @@ private:
     self.orgs.push_back(std::move(org));
     organism_t & new_org = self.orgs.back();
     emp_assert(new_org.OK());
-    new_org.SetPopulation(self, index);
+    new_org.SetPosition({self, index});
     self.speed_map.Set(index, new_org.GetMetabolicRate());
     return self;
   }
@@ -85,7 +83,7 @@ public:
   Population(emp::Random & random) : random(random) { }
 
   [[nodiscard]] size_t GetSize() const { return orgs.size(); }
-  [[nodiscard]] size_t size() { return orgs.size(); } // For std compatibility.
+  [[nodiscard]] size_t size() const { return orgs.size(); } // For std compatibility.
   [[nodiscard]] size_t GetNumOrgs() const { return orgs.size(); }
 
   [[nodiscard]] size_t GetMaxSize() const { return max_size; }
@@ -118,7 +116,7 @@ public:
 
   template <class Self, typename HW_MANAGER_T>
   Self & Inject(this Self & self, HW_MANAGER_T & hw_man, genome_t && genome) {
-    return self.Insert(organism_t{hw_man, std::forward<genome_t>(genome)});
+    return self.Insert(organism_t{hw_man, std::move(genome)});
   }
   
   /// @brief Inject an organism using a genome loaded from a file.
@@ -127,14 +125,20 @@ public:
   /// @return A reference to this population object.
   template <class Self, typename HW_MANAGER_T>
   Self & Inject(this Self & self, HW_MANAGER_T & hw_man, emp::String filename) {
-    return self.Inject(hw_man, hw_man.LoadGenome(filename));
+    auto exp_genome = hw_man.LoadGenome(filename);
+    if (!exp_genome) {
+      emp::notify::Error("Failed to inject from file '", filename, "'.");
+      return self;
+    }
+
+    return self.Inject(hw_man, std::move(*exp_genome));
   }
 
   template <class Self>
   Self & DivideOrg(this Self & self, organism_t & parent, genome_t && offspring_genome) {
     emp_assert(parent.GetGenome().size() > 0);
-  emp_assert(offspring_genome.size() > 0);
-    return self.Insert(organism_t{parent, offspring_genome});
+    emp_assert(offspring_genome.size() > 0);
+    return self.Insert(organism_t{parent, std::move(offspring_genome)});
   }
 
   // Process a single update for this population, returning the number of CPU cycles used.
