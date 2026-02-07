@@ -6,7 +6,12 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  */
 
+#include <cstddef>  // for size_t
+#include <cstdint>  // for uint64_t and uint32_t
+#include <iostream>
+
 #include "emp/base/Ptr.hpp"
+#include "emp/tools/String.hpp"
 
 #include "../Hardware/HardwareManager.hpp"
 #include "PopPosition.hpp"
@@ -20,7 +25,7 @@ public:
   using population_t = Population<this_t>;
   using position_t = PopPosition<population_t>;
   using hardware_t = HW_T;
-  using genome_t = HW_T::genome_t;
+  using genome_t = typename HW_T::genome_t;
   using manager_t = HardwareManager<HW_T>;
 private:
   using id_t = uint64_t;
@@ -33,6 +38,7 @@ private:
   uint32_t generation = 0;          // Number of ancestral steps back to injected organism.
 
 public:
+  Organism(const Organism&) = delete;   // No direct copying of organism is allowed.
   Organism(Organism && in)  // Move constructor.
     : genome(std::move(in.genome))
     , hw_ptr(in.hw_ptr)
@@ -45,10 +51,11 @@ public:
     in.position.Clear();
 
     // Make sure hardware knows about its new Organism.
+    emp_assert(hw_ptr);
     hw_ptr->SetOrganism(*this);
   } 
-  Organism(manager_t & hw_man, genome_t genome) // Build organism from components.
-    : genome(genome), hw_ptr(hw_man.Allocate(*this)) { hw_ptr->Reset(genome); }
+  Organism(manager_t & hw_man, genome_t && in_genome) // Build organism from components.
+    : genome(std::move(in_genome)), hw_ptr(hw_man.Allocate(*this)) { hw_ptr->Reset(genome); }
   Organism(Organism & org_to_clone) // If no offspring genome, assume clone!
     : genome(org_to_clone.genome)
     , hw_ptr(org_to_clone.GetHardware().GetManager().Allocate(*this))
@@ -56,12 +63,12 @@ public:
   {
     hw_ptr->Reset(org_to_clone.GetGenome());
   }
-  Organism(Organism & parent, genome_t offspring_genome) // Provide parent and new genome.
-    : genome(offspring_genome)
+  Organism(Organism & parent, genome_t && offspring_genome) // Provide parent and new genome.
+    : genome(std::move(offspring_genome))
     , hw_ptr(parent.GetHardware().GetManager().Allocate(*this))
     , generation(parent.generation+1)
   {
-    hw_ptr->Reset(offspring_genome);
+    hw_ptr->Reset(genome);
   }
   ~Organism() {
     // Clean up hardware if we have it.
@@ -72,9 +79,15 @@ public:
     }
   }
 
-  Organism & operator=(Organism && in) {
-    emp_assert(in.OK());
+  Organism& operator=(const Organism&) = delete;  // No direct copying of organism is allowed.
 
+  /// Move assignment
+  Organism & operator=(Organism && in) {
+    if (this == &in) return *this;
+  
+    // Release current hardware in this Organism, if any.
+    if (hw_ptr) { hw_ptr->GetManager().Release(hw_ptr); }
+  
     // Move over guts of Organism.
     genome = std::move(in.genome);
     hw_ptr = in.hw_ptr;
@@ -87,6 +100,7 @@ public:
     in.position.Clear();
 
     // Make sure hardware knows about its new Organism.
+    emp_assert(hw_ptr);
     hw_ptr->SetOrganism(*this);
 
     return *this;
@@ -97,6 +111,7 @@ public:
 
   [[nodiscard]] const genome_t & GetGenome() const { return genome; }
   [[nodiscard]] emp::String GetGenomeSequence() const {
+    emp_assert(hw_ptr);
     return hw_ptr->GetManager().ToSequence(genome);
   }
 
@@ -122,9 +137,10 @@ public:
     emp_assert(InPopulation());
     return position.GetPopulation();
   }
-  Organism & SetPopulation(population_t & in_pop, uint32_t index) {
+  Organism & SetPosition(const PopPosition<population_t> & in_pos) {
     emp_assert(OK());
-    position.Set(in_pop, index);
+    emp_assert(in_pos.GetIndex() < in_pos.GetPopulation().size());
+    position = in_pos;
     return *this;
   }
 
@@ -146,8 +162,9 @@ public:
   }
 
   void Print(std::ostream & os = std::cout) {
-    os << "Genome:"; genome.Print(os);
-    os << " hw_ptr:" << hw_ptr 
+    emp_assert(hw_ptr);
+    os << "Genome:" << GetGenomeSequence()
+       << " hw_ptr:" << hw_ptr 
        << " id:" << id
        << " generation:" << generation;
   }
@@ -163,7 +180,7 @@ public:
       emp::notify::Warning("Null hardware pointer in Organism.");
       return false;
     }
-    if (check_hw_ok && !hw_ptr->OK(false)) {
+    if (check_hw_ok && !hw_ptr->OK()) {
       emp::notify::Warning("Organism: Failed hardware OK() check.");
       return false;
     }
