@@ -112,12 +112,12 @@ public:
   [[nodiscard]] double GetAveTrait(const FUN_T & fun) const {
     if (orgs.empty()) return 0.0;  // An empty population has no generations.
     double total = std::accumulate(orgs.begin(), orgs.end(), 0.0,
-                   [&fun](double total, organism_t & org){ return total + fun(org); });
+                   [&fun](double total, const organism_t & org){ return total + fun(org); });
     return total / static_cast<double>(size());
   }
 
   [[nodiscard]] double GetAveGeneration() const {
-    return GetAveTrait([](organism_t & org){ return org.GetGeneration(); });
+    return GetAveTrait([](const organism_t & org){ return org.GetGeneration(); });
   }
 
   // Access organism by population position.
