@@ -7,12 +7,14 @@
  */
 
 #include <algorithm>
-#include <functional>
+#include <cstddef>     // for size_t
+#include <functional>  // for std::function
 #include <utility>
 
 #include "emp/base/array.hpp"
 #include "emp/base/notify.hpp"
 #include "emp/math/math.hpp"
+#include "emp/tools/String.hpp"
 
 #include "HardwareManager.hpp"
 #include "InstSet.hpp"
@@ -42,13 +44,14 @@ private:
   // Configured types.
   using data_t = int;                             // What data type does this VM use?
   using mem_t = emp::array<data_t, MEM_SIZE>;     // Memory is a fixed size.
-  using inst_id_t = genome_t::value_t;            // Type used for inst IDs in a genome.
+  using inst_id_t = typename genome_t::value_t;   // Type used for inst IDs in a genome.
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM.
   using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU.
   using callback_t = std::function<void(organism_t &)>; // Special functions added to inst set.
 
   enum class Nop {
-    A = 0, B = 1, C = 2, D = 3, E = 4, F = 5,
+    A = 0, B = 1, C = 2, D = 3, E = 4, F = 5, // Nops referring to specific stacks or heads
+    FIRST_ARG, SECOND_ARG, NEXT_ARG           // Specialty nops to refer to other arguments
   };
 
   // Heads are assumed to be either on the genome or memory and cannot shift.
@@ -69,8 +72,8 @@ private:
 
   // === Hardware ===
 
-  genome_t genome;
-  mem_t memory{};
+  genome_t genome;  // Genome of this organism, being executed.
+  mem_t memory{};   // Storage of values being manipulated by this organism.
 
   emp::array<size_t, NUM_NOPS> heads;
   emp::array<Stack, NUM_NOPS> stacks;
@@ -92,15 +95,19 @@ private:
     return (pos < genome.size()) ? genome[pos] : 0;
   }
 
-  /// Write to a position in the genome.
+  /// Read from a position in the memory.
   [[nodiscard]] data_t ReadMemory(const size_t pos) const {
     return (pos < memory.size()) ? memory[pos] : 0;
   }
 
   /// Write to the genome (always an insertion)
   void WriteGenome(const size_t pos, inst_id_t id) {
+    if (genome.size() >= MAX_GENOME_SIZE) {
+      ++error_count;
+      return;
+    }
     if (pos < genome.size()) genome.Insert(pos, id);
-    else genome.Push(id);
+    else genome.Push(id); // At or past end, just push on back (most common)
   }
 
   /// Write to the memory
@@ -117,25 +124,64 @@ private:
   void AdvanceIP() { ++IP(); }
 
 
-  // Select the argument based on nop, using default if none available.
+  /// Determine an instruction argument: if next instruction is a Nop, use it; else use default_arg
   [[nodiscard]] inst_id_t GetArg(inst_id_t default_arg) {
+    emp_assert(default_arg < NUM_NOPS);
     inst_id_t out_val = ReadIP();
-    if (out_val < NUM_NOPS) {  // We found a nop.
-      AdvanceIP();
-      return out_val;
-    }
-    return default_arg; // We didn't find a nop.
+    if (out_val >= NUM_NOPS) return default_arg; // Not a Nop
+    AdvanceIP();
+    return out_val;
   }
 
-  [[nodiscard]] size_t GetArg(Nop default_arg) { return GetArg(static_cast<data_t>(default_arg)); }
-  [[nodiscard]] Stack & GetStackArg(Nop default_arg) { return stacks[GetArg(default_arg)]; }
-  [[nodiscard]] Stack & GetStackArg(size_t default_arg) { return stacks[GetArg(default_arg)]; }
-  [[nodiscard]] size_t & GetHeadArg(HeadType default_head) {
-    return heads[GetArg(static_cast<Nop>(default_head))];
+  /// Determine an instruction argument: if next instruction is a Nop, use it; else use DEFAULT_ARG
+  template <Nop DEFAULT_ARG>
+  [[nodiscard]] inst_id_t GetArg() {
+    inst_id_t out_val = ReadIP();
+    if (out_val >= NUM_NOPS) return static_cast<inst_id_t>(DEFAULT_ARG); // Not a Nop
+    AdvanceIP();
+    return out_val;
+  }
+
+  /// Determine TWO instruction arguments: shift to defaults when we are out of Nops.
+  template <Nop DEFAULT_ARG1, Nop DEFAULT_ARG2>
+  [[nodiscard]] auto GetArgs() {
+    static_assert(DEFAULT_ARG1 != Nop::FIRST_ARG,  "First instruction Arg cannot default to itself.");
+    static_assert(DEFAULT_ARG1 != Nop::SECOND_ARG, "First instruction Arg cannot default to later arg.");
+    static_assert(DEFAULT_ARG1 != Nop::NEXT_ARG,   "First instruction Arg cannot refer to previous args.");
+    static_assert(DEFAULT_ARG2 != Nop::SECOND_ARG, "Second instruction Arg cannot default to itself.");
+
+    const inst_id_t arg1 = GetArg<DEFAULT_ARG1>();
+    if constexpr (DEFAULT_ARG2 == Nop::FIRST_ARG) {
+      return std::tuple{arg1, GetArg(arg1)};
+    } else if constexpr (DEFAULT_ARG2 == Nop::NEXT_ARG) {
+      return std::tuple{arg1, GetArg((arg1+1)%NUM_NOPS)};
+    } else {
+      return std::tuple{arg1, GetArg<DEFAULT_ARG2>()};
+    }
+  }
+
+  /// Determine THREE instruction arguments: shift to defaults when we are out of Nops.
+  template <Nop DEFAULT_ARG1, Nop DEFAULT_ARG2, Nop DEFAULT_ARG3>
+  [[nodiscard]] auto GetArgs() {
+    const auto [arg1, arg2] = GetArgs<DEFAULT_ARG1, DEFAULT_ARG2>();
+
+    // Otherwise determine execute a proper tuple based on the third arg:
+    if constexpr (DEFAULT_ARG3 == Nop::FIRST_ARG) {
+      return std::tuple{arg1, arg2, GetArg(arg1)};
+    }
+    else if constexpr (DEFAULT_ARG3 == Nop::SECOND_ARG) {
+      return std::tuple{arg1, arg2, GetArg(arg2)};
+    }
+    else if constexpr (DEFAULT_ARG3 == Nop::NEXT_ARG) {
+      return std::tuple{arg1, arg2, GetArg((arg2+1)%NUM_NOPS)};
+    }
+    else { // Arg3 has a specified default.
+      return std::tuple{arg1, arg2, GetArg<DEFAULT_ARG3>()};
+    }
   }
 
   // Does the current instruction have the specified argument?
-  [[nodiscard]] bool HasArg(inst_id_t arg, size_t max_args=1000) const {
+  [[nodiscard]] bool HasArg(inst_id_t arg, size_t max_args=MAX_GENOME_SIZE) const {
     for (size_t pos = IP() + 1;
          pos < genome.size() && max_args-- && genome[pos] < NUM_NOPS;
          ++pos) {
@@ -147,13 +193,8 @@ private:
   // Is the IP currently at a "Scope" instruction for the target scope?
   [[nodiscard]] bool AtScopeLimit(inst_id_t target_scope) const {
     static const inst_id_t inst_scope_id = GetInstSet().GetID("Scope");
-    // std::cout << "[[ScopeLimit(" << (size_t) target_scope << ");"
-    //           << " Scope=" << (size_t) inst_scope_id
-    //           << " IP=" << IP()
-    //           << " inst=" << (size_t) ReadIP()
-    //           << " hasarg=" << HasArg(target_scope)
-    //           << " result=" << ((ReadIP() == inst_scope_id) && HasArg(target_scope))
-    //           << " ]]\n";
+    emp_assert(inst_scope_id == GetInstSet().GetID("Scope"),
+               "InstSet mismatch for Scope id across AvidaVM instances.");
     return (ReadIP() == inst_scope_id) && HasArg(target_scope, 3);
   }
 
@@ -189,135 +230,167 @@ public:
 
   // Inst: Push value [Nop-A] onto Stack [Nop-A]
   void Inst_Const() {
-    const data_t value = const_vals[GetArg(Nop::A)];
-    GetStackArg(Nop::A).Push(value);
+    // Load arguments
+    const auto [val_id, stack_id] = GetArgs<Nop::A, Nop::A>();
+
+    const data_t value = const_vals[val_id];
+    stacks[stack_id].Push(value);
   }
 
-  // Inst: Y = Value[Nop-A] ; Pop[Nop-A]:Y ; Push[Arg2] X + Y.
+  // Inst: X = Value[Nop-A] ; Y = Pop[Nop-A] ; Push[Arg2]: X + Y.
   void Inst_Offset() {
-    const data_t X = const_vals[GetArg(Nop::A)];
-    size_t Y_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [val_id, Y_id, output_id] = GetArgs<Nop::A, Nop::A, Nop::SECOND_ARG>();
+
+    const data_t X = const_vals[val_id];
     const data_t Y = stacks[Y_id].Pop();
-    GetStackArg(Y_id).Push(X + Y);
+    stacks[output_id].Push(X + Y);
   }
 
-  // Inst: Pop[Nop-A]:X ; Push[Arg1] !X
+  // Inst: X = Pop[Nop-A] ; Push[Arg1] : !X
   void Inst_Not() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    GetStackArg(X_id).Push(!X);
+    stacks[output_id].Push(!X);
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X<<Y
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X<<Y
   void Inst_Shift() {
-    size_t X_id = GetArg(Nop::A);
-    const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
-    GetStackArg(X_id).Push(X << emp::Mod(Y,DATA_BITS));
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
+    const size_t X = stacks[X_id].Pop();
+    const size_t Y = stacks[Y_id].Pop();
+    stacks[output_id].Push(X << (Y % DATA_BITS));
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X + Y
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X + Y
   void Inst_Add() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
-    GetStackArg(X_id).Push(X + Y);
+    const data_t Y = stacks[Y_id].Pop();
+    stacks[output_id].Push(X + Y);
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X - Y
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X - Y
   void Inst_Sub() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
-    GetStackArg(X_id).Push(X - Y);
+    const data_t Y = stacks[Y_id].Pop();
+    stacks[output_id].Push(X - Y);
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X * Y
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X * Y
   void Inst_Mult() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
-    GetStackArg(X_id).Push(X * Y);
+    const data_t Y = stacks[Y_id].Pop();
+    stacks[output_id].Push(X * Y);
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X / Y
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X / Y
   void Inst_Div() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
+    const data_t Y = stacks[Y_id].Pop();
     if (Y == 0) ++error_count;
-    else GetStackArg(X_id).Push(X / Y);
+    else stacks[output_id].Push(X / Y);
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X % Y
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X % Y
   void Inst_Mod() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
+    const data_t Y = stacks[Y_id].Pop();
     if (Y == 0) ++error_count;
-    else GetStackArg(X_id).Push(X % Y);
+    else stacks[output_id].Push(X % Y);
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X ** Y
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X ** Y
   void Inst_Exp() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
-    GetStackArg(X_id).Push(emp::Pow(X, Y));
+    const data_t Y = stacks[Y_id].Pop();
+    stacks[output_id].Push(emp::Pow(X, Y));
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X,Y if X>Y else Y,X
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push back, swapping if X < Y.
   void Inst_Sort() {
-    size_t X_id = GetArg(Nop::A);
-    size_t Y_id = GetArg(X_id);
+    // Load arguments
+    const auto [X_id, Y_id] = GetArgs<Nop::A, Nop::FIRST_ARG>();
+
     data_t X = stacks[X_id].Pop();
     data_t Y = stacks[Y_id].Pop();
     if (X < Y) std::swap(X,Y);
-    GetStackArg(X_id).Push(X);
-    GetStackArg(Y_id).Push(Y);
+    stacks[Y_id].Push(Y);
+    stacks[X_id].Push(X);
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X < Y
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X < Y
   void Inst_TestLess() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
-    GetStackArg(X_id).Push(X < Y);
+    const data_t Y = stacks[Y_id].Pop();
+    stacks[output_id].Push(X < Y);
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X == Y
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X == Y
   void Inst_TestEqu() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
-    GetStackArg(X_id).Push(X == Y);
+    const data_t Y = stacks[Y_id].Pop();
+    stacks[output_id].Push(X == Y);
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] ~(X&Y)  (bitwise)
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : ~(X&Y)  (bitwise)
   void Inst_Nand() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
-    GetStackArg(X_id).Push(~(X & Y));
+    const data_t Y = stacks[Y_id].Pop();
+    stacks[output_id].Push(~(X & Y));
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y ; Push[Arg1] X ^ Y   (bitwise)
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X ^ Y   (bitwise)
   void Inst_Xor() {
-    size_t X_id = GetArg(Nop::A);
+    // Load arguments
+    const auto [X_id, Y_id, output_id] = GetArgs<Nop::A, Nop::FIRST_ARG, Nop::FIRST_ARG>();
+
     const data_t X = stacks[X_id].Pop();
-    const data_t Y = GetStackArg(X_id).Pop();
-    GetStackArg(X_id).Push(X ^ Y);
+    const data_t Y = stacks[Y_id].Pop();
+    stacks[output_id].Push(X ^ Y);
   }
 
-  // Inst: Pop[Nop-A]:X ; if X == 0, skip next instruction
+  // Inst: X = Pop[Nop-A] ; if X == 0, skip next instruction
   void Inst_If() {
-    const data_t X = GetStackArg(Nop::A).Pop();
+    const auto X_id = GetArg<Nop::A>();   // Load argument
+    const data_t X = stacks[X_id].Pop();
     if (!X) AdvanceIP();
   }
 
-  // Inst: Pop[Nop-A]:X ; if X != 0, skip next instruction
+  // Inst: X = Pop[Nop-A] ; if X != 0, skip next instruction
   void Inst_IfNot() {
-    const data_t X = GetStackArg(Nop::A).Pop();
+    const auto X_id = GetArg<Nop::A>();   // Load argument
+    const data_t X = stacks[X_id].Pop();
     if (X) AdvanceIP();
   }
 
@@ -328,7 +401,7 @@ public:
 
   // Inst: Restart Scope [Nop-A]
   void Inst_Continue() {
-    const inst_id_t target_scope = GetArg(Nop::A);
+    const auto target_scope = GetArg<Nop::A>();   // Load argument
     IP() -= 2; // Scan backward for a "Scope" from this position.
 
     // Scan backwards to find beginning of target scope.
@@ -346,7 +419,7 @@ public:
 
   // Inst: Advance to end of Scope [Nop-A]
   void Inst_Break() {
-    const size_t target_scope = GetArg(Nop::A);
+    const auto target_scope = GetArg<Nop::A>();   // Load argument
 
     // Scan find end of target scope.
     while (IP() < genome.size()) {
@@ -361,30 +434,35 @@ public:
 
   // Inst: Discard top entry from [Nop-A] X
   void Inst_StackPop() {
-    GetStackArg(Nop::A).Pop();
+    const auto X_id = GetArg<Nop::A>();   // Load argument
+    stacks[X_id].Pop();
   }
 
   // Inst: Read top of Stack [Nop-A] (no popping) and push a copy on [Arg1]
   void Inst_StackDup() {
-    const size_t stack1_id = GetArg(Nop::A);
-    data_t value = stacks[stack1_id].Top();
-    GetStackArg(stack1_id).Push(value);
+    // Load arguments
+    const auto [read_id, push_id] = GetArgs<Nop::A, Nop::FIRST_ARG>();
+
+    const data_t value = stacks[read_id].Top();
+    stacks[push_id].Push(value);
   }
 
-  // Inst: Pop[Nop-A]:X ; Pop[Arg1]:Y; push X on Stack [Arg2]; push Y on Stack [Arg1]
+  // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1]; push back in reverse order.
   void Inst_StackSwap() {
-    const size_t stack1_id = GetArg(Nop::A);
-    const size_t stack2_id = GetArg(stack1_id);
+    // Load arguments
+    const auto [stack1_id, stack2_id] = GetArgs<Nop::A, Nop::FIRST_ARG>();
+
     const data_t X = stacks[stack1_id].Pop();
     const data_t Y = stacks[stack2_id].Pop();
-    GetStackArg(stack2_id).Push(X);
-    GetStackArg(stack1_id).Push(Y);
+    stacks[stack2_id].Push(X);
+    stacks[stack1_id].Push(Y);
   }
 
-  // Inst: Pop[Nop-A]:X and Push[Arg1+1] X
+  // Inst: X = Pop[Nop-A] and Push[Arg1+1] X
   void Inst_StackMove() {
-    const size_t stack1_id = GetArg(Nop::A);
-    const size_t stack2_id = GetArg((stack1_id+1)%NUM_NOPS);
+    // Load arguments
+    const auto [stack1_id, stack2_id] = GetArgs<Nop::A, Nop::NEXT_ARG>();
+
     if (stack1_id != stack2_id) {
       stacks[stack2_id].Push( stacks[stack1_id].Pop() );
     }
@@ -392,51 +470,60 @@ public:
 
   // Inst: Copy the value from Head [Nop-B] to Head [Nop-C], advancing both
   void Inst_CopyInst() {
-    size_t & read_head = GetHeadArg(HEAD_G_READ);
-    size_t & write_head = GetHeadArg(HEAD_G_WRITE);
-    const inst_id_t inst = ReadGenome(read_head);
-    WriteGenome(write_head, inst);
-    ++read_head;
-    ++write_head;
+    const auto [read_id, write_id] = GetArgs<Nop::B, Nop::C>();
+
+    const inst_id_t inst = ReadGenome(heads[read_id]);
+    WriteGenome(heads[write_id], inst);
+    ++heads[read_id];
+    ++heads[write_id];
   }
 
   // Inst: Read value at Head [Nop-D]:X ; Push X onto stack [Nop-A] ; advance Head.
   void Inst_Load() {
-    size_t & from_head = GetHeadArg(HEAD_M_READ);
-    GetStackArg(Nop::A).Push( ReadMemory(from_head) );
-    ++from_head;
+    const auto [head_id, stack_id] = GetArgs<Nop::D, Nop::A>();
+
+    stacks[stack_id].Push( ReadMemory(heads[head_id]) );
+    ++heads[head_id];
   }
 
   // Inst: Pop[Nop-A] and write the value into Head [NopE] ; advance Head.
   void Inst_Store() {
-    const data_t value = GetStackArg(Nop::A).Pop();
-    size_t & to_head = GetHeadArg(HEAD_M_WRITE);
-    WriteMemory(to_head, value);
-    ++to_head;
+    const auto [stack_id, head_id] = GetArgs<Nop::A, Nop::E>();
+
+    const data_t value = stacks[stack_id].Pop();
+    WriteMemory(heads[head_id], value);
+    ++heads[head_id];
   }
 
   // Inst: Push the position of Head[Nop-F] onto stack [Nop-A]
   void Inst_HeadPos() {
-    const size_t pos = GetHeadArg(HEAD_FLOW);
-    GetStackArg(Nop::A).Push(pos);
+    const auto [head_id, stack_id] = GetArgs<Nop::F, Nop::A>();
+
+    const size_t pos = heads[head_id];
+    stacks[stack_id].Push(pos);
   }
 
   // Inst: Pop stack [Nop-A] and move head[Nop-F] to that position.
   void Inst_SetHead() {
-    const data_t new_pos = GetStackArg(Nop::A).Pop();
-    GetHeadArg(HEAD_FLOW) = new_pos;
+    const auto [stack_id, head_id] = GetArgs<Nop::A, Nop::F>();
+
+    const data_t new_pos = stacks[stack_id].Pop();
+    // Set the specified head to the position identified 
+    heads[head_id] = static_cast<size_t>(new_pos);
   }
 
   // Inst: Jump Head[Nop-A] to Head[Nop-F]
   void Inst_JumpHead() {
-    size_t & jump_head = GetHeadArg(HEAD_IP);
-    jump_head = GetHeadArg(HEAD_FLOW);
+    const auto [jump_id, target_id] = GetArgs<Nop::A, Nop::F>();
+
+    heads[jump_id] = heads[target_id];
   }
   
   // Inst: Shift Head[Nop-F] by the value Pop[Nop-A]
   void Inst_OffsetHead() {
-    size_t & head = GetHeadArg(HEAD_FLOW);
-    head += GetStackArg(Nop::A).Pop();
+    const auto [head_id, stack_id] = GetArgs<Nop::F, Nop::A>();
+
+    heads[head_id] += stacks[stack_id].Pop();
   }
 
   void ProcessInst() {
@@ -477,8 +564,10 @@ public:
   }
 
   genome_t DivideGenome(emp::Random & random) {
-    size_t & head1 = GetHeadArg(HEAD_G_READ);
-    size_t & head2 = GetHeadArg(HEAD_G_WRITE);
+    const auto [head1_id, head2_id] = GetArgs<Nop::B, Nop::C>();
+
+    size_t & head1 = heads[head1_id];
+    size_t & head2 = heads[head2_id];
 
     if (head2 < head1) std::swap(head1, head2);
     if (head2 > genome.size()) head2 = genome.size();
@@ -504,7 +593,7 @@ public:
 
   // === Static Functions for working with Avida VMs ===
 
-  [[nodiscard]] static std::string HardwareName() { return "AvidaVM"; }
+  [[nodiscard]] static emp::String HardwareName() { return "AvidaVM"; }
 
   [[nodiscard]] static inst_set_t BuildInstSet() {    
     inst_set_t inst_set;
@@ -597,8 +686,6 @@ public:
 
 
   bool OK() const {
-    // @CAO Check hw_manager?
- 
     // Check both the organism pointer itself and the organism it's pointing to.
     if (!org_ptr.OK()) {
       emp::notify::Warning("Invalid organism pointer found in AvidaVM.");
