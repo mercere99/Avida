@@ -22,6 +22,13 @@ private:
   pos_t index = npos;
 
 public:
+  PopPosition() = default;
+  PopPosition(const PopPosition &) = default;
+  PopPosition(POP_T & pop, pos_t index) : pop_ptr(&pop), index(index) { }
+
+  // Assignment operator
+  PopPosition & operator=(const PopPosition &) = default;
+
   [[nodiscard]] POP_T & GetPopulation() noexcept {
     emp_assert(InPopulation());
     return *pop_ptr;
