@@ -6,76 +6,232 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  */
 
- // Hardware must have the following member functions:
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <iosfwd>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
-/*
-class HardwareBase {
-protected:
-  HardwareManager & hw_manager;
-  emp::Ptr<Organism> org_ptr = nullptr;
-public:
-  HardwareBase(HardwareManager & hw_manager) : hw_manager(hw_manager) { }
-  virtual ~HardwareBase() { }
+#include "emp/math/Random.hpp"
+#include "emp/tools/String.hpp"
 
-  [[nodiscard]] Organism & GetOrganism() { emp_assert(org_ptr); return *org_ptr; }
-  [[nodiscard]] const Organism & GetOrganism() const { emp_assert(org_ptr); return *org_ptr; }
-  HardwareBase & SetOrganism(Organism & org) { org_ptr = &org; return *this; }
+namespace avida::concepts {
 
-  [[nodiscard]] HardwareManager & GetManager() { return hw_manager; }
-  [[nodiscard]] const HardwareManager & GetManager() const { return hw_manager; }
+  // ===  Helper Concepts  ===
 
-  virtual void Process(size_t cycles=10) = 0;
-  virtual void Reset() = 0;
-  virtual void Reset(const Genome & in_genome) = 0;
-  [[nodiscard]] virtual Genome DivideGenome(emp::Random & random) = 0;
+  template <typename T>
+  concept StringLike =
+    std::convertible_to<T, emp::String> ||
+    std::same_as<std::remove_cvref_t<T>, emp::String>;
 
-  virtual bool OK([[maybe_unused]] bool check_org_ok=true) const { return true; }
-};
- */
+  template <typename E>
+  concept ExpectedLike = requires(E e) {
+    typename E::value_type;
+    typename E::error_type;
+    { bool(e) } -> std::convertible_to<bool>;
+    { *e } -> std::same_as<typename E::value_type&>;
+  };
+
+  template <typename E, typename V, typename Err>
+  concept ExpectedOf =
+    ExpectedLike<E> &&
+    std::same_as<typename E::value_type, V> &&
+    std::same_as<typename E::error_type, Err>;
 
 
-// Hardware manager must have:
+  // ===  Genome  ===
 
-// Pre-declarations
-// class Organism;
+  template <typename G>
+  concept Genome = requires(G genome, const G const_genome, std::size_t pos, std::size_t len, typename G::value_t id, std::ostream& os) {
+    typename G::value_t;
 
-// /// A class to handle a particular configuration of hardware.
-// class HardwareManager {
-// protected:
-//   using hw_ptr_t = emp::Ptr<HardwareBase>;
-//   using feedback_t = std::function<void(Organism & /*org*/)>;
-//   emp::vector< hw_ptr_t > hw_ptrs;  // Pointers to available hardware.
+    { const_genome.size() } -> std::convertible_to<std::size_t>;
+    { const_genome[pos] } -> std::convertible_to<typename G::value_t>;
 
-//   virtual hw_ptr_t AllocateNew(Organism & org) = 0;
-// public:
-//   virtual ~HardwareManager() { Clear(); }
+    { genome.Push(id) } -> std::same_as<void>;
+    { genome.Insert(pos, id) } -> std::same_as<void>;
+    { genome.Extract(pos, len) } -> std::same_as<G>;
 
-//   static std::string DefaultName() { return "Unnamed"; };
+    // Optional conveniences; keep them required only if you rely on them widely.
+    { genome.Clear() } -> std::same_as<void>;
+    { const_genome.Print(os) } -> std::same_as<void>;
+  };
 
-//   virtual bool AddCallback(emp::String name, feedback_t fun) = 0;
 
-//   [[nodiscard]] virtual emp::String ToSequence(const Genome & genome) const = 0;
-//   [[nodiscard]] virtual Genome LoadGenome(emp::String filename) = 0;
+  // ===  InstSet  ===
 
-//   virtual void Mutate(emp::Random & random, Genome & genome) const = 0;
+  template <typename INST_SET_T>
+  concept InstSet = requires(
+    const INST_SET_T inst_set,
+    typename INST_SET_T::hardware_t & hardware,
+    typename INST_SET_T::genome_t & genome,
+    const typename INST_SET_T::genome_t & const_genome,
+    emp::Random & random,
+    emp::String str,
+    char symbol,
+    std::istream & in,
+    std::size_t n
+  ) {
+    typename INST_SET_T::hardware_t;
+    typename INST_SET_T::genome_t;
+    typename INST_SET_T::inst_id_t;
 
-//   [[nodiscard]] hw_ptr_t Allocate(Organism & org) {
-//     if (hw_ptrs.size()) {
-//       hw_ptr_t out = hw_ptrs.back();
-//       hw_ptrs.pop_back();
-//       out->SetOrganism(org);
-//       return out;
-//     }
-//     return AllocateNew(org);
-//   }
+    { inst_set.size() } -> std::convertible_to<std::size_t>;
 
-//   void Release(hw_ptr_t ptr) {
-//     hw_ptrs.push_back(ptr);
-//   }
+    { inst_set.GetName(n) } -> std::same_as<const emp::String&>;
+    { inst_set.GetSymbol(n) } -> std::same_as<char>;
 
-//   // Remove current inventory of hardware.
-//   void Clear() {
-//     for (auto ptr : hw_ptrs) ptr.Delete();
-//     hw_ptrs.resize(0);
-//   }
-// };
+    { inst_set.GetID(str) } -> std::convertible_to<typename INST_SET_T::inst_id_t>;
+    { inst_set.GetID(symbol) } -> std::convertible_to<typename INST_SET_T::inst_id_t>;
+
+    { inst_set.Execute(hardware, n) } -> std::same_as<void>;
+
+    { inst_set.BuildGenome(genome, str) } -> std::same_as<void>;
+    { inst_set.BuildGenome(str) } -> std::same_as<typename INST_SET_T::genome_t>;
+    { inst_set.BuildGenome(genome, n, random, 0.5) } -> std::same_as<void>;
+
+    { inst_set.ToSequence(const_genome) } -> std::same_as<emp::String>;
+
+    { inst_set.LoadGenome(in) } -> std::same_as<std::expected<typename INST_SET_T::genome_t, emp::String>>;
+    { inst_set.LoadGenome(str) }  -> std::same_as<std::expected<typename INST_SET_T::genome_t, emp::String>>;
+  };
+
+
+  // ===  Hardware (VM)  ===
+
+  template <typename HARDWARE_T>
+  concept Hardware = requires(
+      HARDWARE_T hardware,
+      const HARDWARE_T const_hardware,
+      emp::Random & random,
+      std::size_t cycles
+    ) {
+    typename HARDWARE_T::genome_t;
+    typename HARDWARE_T::manager_t;
+    typename HARDWARE_T::organism_t;
+
+    // Core execution
+    { hardware.Process(cycles) } -> std::same_as<void>;
+    { hardware.ProcessStep() } -> std::same_as<void>;
+
+    // Reproduction
+    { hardware.DivideGenome(random) } -> std::same_as<typename HARDWARE_T::genome_t>;
+
+    // Organism linkage
+    { hardware.SetOrganism(std::declval<typename HARDWARE_T::organism_t&>()) } -> std::same_as<HARDWARE_T&>;
+    { hardware.GetOrganism() } -> std::same_as<typename HARDWARE_T::organism_t&>;
+    { const_hardware.GetOrganism() } -> std::same_as<const typename HARDWARE_T::organism_t&>;
+
+    // Manager access
+    { hardware.GetManager() } -> std::same_as<typename HARDWARE_T::manager_t&>;
+    { const_hardware.GetManager() } -> std::same_as<const typename HARDWARE_T::manager_t&>;
+
+    // Health check
+    { const_hardware.OK() } -> std::convertible_to<bool>;
+
+    // Static identity + inst set construction
+    { HARDWARE_T::HardwareName() } -> StringLike;
+    { HARDWARE_T::BuildInstSet() };
+  };
+
+
+  // ===  HardwareManager  ===
+
+  template <typename MANAGER_T>
+  concept HardwareManager = requires(
+      MANAGER_T hardware_manager,
+      const MANAGER_T const_hardware_manager,
+      emp::Random & random,
+      typename MANAGER_T::genome_t & genome,
+      const typename MANAGER_T::genome_t & const_genome,
+      emp::String filename
+    ) {
+    typename MANAGER_T::hardware_t;
+    typename MANAGER_T::genome_t;
+    typename MANAGER_T::org_t;
+    typename MANAGER_T::hw_ptr_t;
+
+    { MANAGER_T::DefaultName() } -> StringLike;
+
+    { hardware_manager.Allocate(std::declval<typename MANAGER_T::org_t&>()) } -> std::same_as<typename MANAGER_T::hw_ptr_t>;
+    { hardware_manager.Release(std::declval<typename MANAGER_T::hw_ptr_t>()) } -> std::same_as<void>;
+
+    { hardware_manager.Mutate(random, genome) } -> std::same_as<void>;
+
+    { const_hardware_manager.ToSequence(const_genome) } -> std::same_as<emp::String>;
+    { const_hardware_manager.LoadGenome(filename) };
+
+    { hardware_manager.GetInstSet() };
+    { const_hardware_manager.GetInstSet() };
+
+    // InstSet type consistency (light check)
+    requires InstSet<std::remove_reference_t<decltype(hardware_manager.GetInstSet())>>;
+  };
+
+
+  // ===  Organism  ===
+
+  template <typename ORG>
+  concept Organism = requires(
+      ORG org,
+      const ORG const_org,
+      emp::Random & random,
+      std::size_t cycles
+    ) {
+    typename ORG::genome_t;
+    typename ORG::hardware_t;
+    typename ORG::population_t;
+    typename ORG::position_t;
+
+    { const_org.GetGenome() } -> std::same_as<const typename ORG::genome_t&>;
+    { const_org.GetGenomeSequence() } -> std::same_as<emp::String>;
+
+    { const_org.GetMetabolicRate() } -> std::convertible_to<double>;
+    { const_org.GetGeneration() } -> std::convertible_to<std::uint32_t>;
+
+    { org.SetPosition(std::declval<const typename ORG::position_t&>()) } -> std::same_as<ORG&>;
+
+    { org.Process(cycles) } -> std::same_as<ORG&>;
+    { org.DivideGenome(random) } -> std::same_as<typename ORG::genome_t>;
+
+    { const_org.OK() } -> std::convertible_to<bool>;
+
+    { org.GetPopulation() } -> std::same_as<typename ORG::population_t&>;
+    { const_org.GetPopulation() } -> std::same_as<const typename ORG::population_t&>;
+  };
+
+
+  // ===  Population  ===
+
+  template <typename POP_T>
+  concept Population = requires(
+      POP_T pop,
+      const POP_T const_pop,
+      std::size_t pos,
+      typename POP_T::organism_t & parent,
+      typename POP_T::genome_t genome,
+      emp::String filename
+    ) {
+    typename POP_T::organism_t;
+    typename POP_T::genome_t;
+
+    { const_pop.size() } -> std::convertible_to<std::size_t>;
+    { pop[pos] } -> std::same_as<typename POP_T::organism_t&>;
+    { const_pop[pos] } -> std::same_as<const typename POP_T::organism_t&>;
+
+    { pop.SetMaxSize(std::size_t{1}) } -> std::same_as<POP_T&>;
+
+    // Hardware manager is templated in your Population; constrain via requires.
+    { pop.Inject(std::declval<typename POP_T::organism_t::manager_t&>(), std::move(genome)) } -> std::same_as<POP_T&>;
+    { pop.Inject(std::declval<typename POP_T::organism_t::manager_t&>(), filename) } -> std::same_as<POP_T&>;
+
+    { pop.DivideOrg(parent, std::move(genome)) } -> std::same_as<POP_T&>;
+
+    { pop.ProcessUpdate() } -> std::same_as<void>;
+
+    // Ensure organism matches.
+    requires Organism<typename POP_T::organism_t>;
+  };
