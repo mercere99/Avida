@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>     // for size_t
 #include <functional>  // for std::function
+#include <tuple>
 #include <utility>
 
 #include "emp/base/array.hpp"
@@ -56,12 +57,12 @@ private:
 
   // Heads are assumed to be either on the genome or memory and cannot shift.
   enum HeadType {
-    HEAD_IP = 0,      // Inst. Pointer (init: 0)
-    HEAD_G_READ = 1,  // Genome Read   (init: 0)
-    HEAD_G_WRITE = 2, // Genome Write  (init: genome size)
-    HEAD_M_READ = 3,  // Memory Read   (init: 0)
-    HEAD_M_WRITE = 4, // Memory Write  (init: 0)
-    HEAD_FLOW = 5,    // Flow Control  (init: 0)
+    HEAD_IP = 0,      // A: Inst. Pointer (init: 0)
+    HEAD_G_READ = 1,  // B: Genome Read   (init: 0)
+    HEAD_G_WRITE = 2, // C: Genome Write  (init: genome size)
+    HEAD_M_READ = 3,  // D: Memory Read   (init: 0)
+    HEAD_M_WRITE = 4, // E: Memory Write  (init: 0)
+    HEAD_FLOW = 5,    // F: Flow Control  (init: 0)
   };
 
   static constexpr data_t const_vals[]{ 1, 2, 4, 16, 256, -1 };
@@ -136,6 +137,8 @@ private:
   /// Determine an instruction argument: if next instruction is a Nop, use it; else use DEFAULT_ARG
   template <Nop DEFAULT_ARG>
   [[nodiscard]] inst_id_t GetArg() {
+    static_assert(static_cast<size_t>(DEFAULT_ARG) < NUM_NOPS,
+                  "GetArg<DEFAULT_ARG>: DEFAULT_ARG must be a real Nop (A..F).");
     inst_id_t out_val = ReadIP();
     if (out_val >= NUM_NOPS) return static_cast<inst_id_t>(DEFAULT_ARG); // Not a Nop
     AdvanceIP();
@@ -145,9 +148,6 @@ private:
   /// Determine TWO instruction arguments: shift to defaults when we are out of Nops.
   template <Nop DEFAULT_ARG1, Nop DEFAULT_ARG2>
   [[nodiscard]] auto GetArgs() {
-    static_assert(DEFAULT_ARG1 != Nop::FIRST_ARG,  "First instruction Arg cannot default to itself.");
-    static_assert(DEFAULT_ARG1 != Nop::SECOND_ARG, "First instruction Arg cannot default to later arg.");
-    static_assert(DEFAULT_ARG1 != Nop::NEXT_ARG,   "First instruction Arg cannot refer to previous args.");
     static_assert(DEFAULT_ARG2 != Nop::SECOND_ARG, "Second instruction Arg cannot default to itself.");
 
     const inst_id_t arg1 = GetArg<DEFAULT_ARG1>();
@@ -526,18 +526,18 @@ public:
     heads[head_id] += stacks[stack_id].Pop();
   }
 
-  void ProcessInst() {
+  void ProcessStep() {
     emp_assert(OK());
     const inst_id_t inst_id = ReadIP();
     AdvanceIP();
     GetInstSet().Execute(*this, inst_id);
-    // ProcessInst(inst_id);
+    // ProcessStep(inst_id);
   }
 
   void Process(size_t cycles=10) {
     emp_assert(OK());
     for (size_t i = 0; i < cycles; ++i) {
-      ProcessInst();
+      ProcessStep();
     }
   }
 
