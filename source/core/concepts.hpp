@@ -235,3 +235,5 @@ namespace avida::concepts {
     // Ensure organism matches.
     requires Organism<typename POP_T::organism_t>;
   };
+
+} // namespace avida::concepts
