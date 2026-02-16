@@ -12,17 +12,25 @@
 #include "emp/base/vector.hpp"
 #include "emp/config/command_line.hpp"
 #include "emp/datastructs/map_utils.hpp"
+#include "emp/meta/TypePack.hpp"
 
 #include "../Hardware/AvidaVM.hpp"
 #include "../Hardware/HardwareManager.hpp"
+#include "concepts.hpp"
 #include "Population.hpp"
 
+template <avida::concepts::Hardware HW_T> struct hardware_filter { };
+
 /// Main Avida-control object.
-// @CAO TODO: Allow for multiple HW types in the same Avida run (and perhaps same population)
-template <typename HW_T>
+// @CAO TODO: Allow for multiple HW types in the same Avida run.
+template <typename... PLUG_IN_Ts>
 class Avida {
 public:
-  using hardware_t = HW_T;
+  // Tease apart types in PLUG_IN_Ts...
+  using plug_in_pack = emp::TypePack<PLUG_IN_Ts...>;
+  using hardware_pack = plug_in_pack::template filter<hardware_filter>;
+
+  using hardware_t = hardware_pack::first_t;
   using manager_t = HardwareManager<hardware_t>;
   using organism_t = Organism<hardware_t>;
   using population_t = Population<organism_t>;
@@ -51,9 +59,18 @@ private:
 public:
   Avida() { }
   Avida(emp::vector<emp::String> args) {
-    size_t arg_id = 1;
-    while (arg_id < args.size()) {      
-      if (args[arg_id].IsOneOf("-h", "--help")) { PrintHelp(args[0], std::cout); }
+    for (size_t i = 1; i < args.size(); ++i) {
+      if (args[i] == "-h" || args[i] == "--help") { PrintHelp(args[0], std::cout); }
+      else if (args[i] == "-s" || args[i] == "--seed") {
+        // Collect the seed.
+        ++i;
+        if (i >= args.size()) { emp::notify::Error("Must specify a random number seed."); }
+        if (!args[i].OnlyDigits()) { emp::notify::Error("Random seed must be set to a whole number."); }
+        random.ResetSeed(args[i].ConvertFromLiteral<uint64_t>());
+      }
+      else {
+        emp::notify::Error("Unknown argument: ", args[i]);
+      }
     }
   }
   ~Avida() {
@@ -61,33 +78,34 @@ public:
     pop_map.clear();
 
     // Delete all of the hardware managers and the hardware they have.
-    for ( auto [name, ptr] : hw_man_map) ptr.Delete();
+    for ( auto & [name, ptr] : hw_man_map) ptr.Delete();
+    hw_man_map.clear();
   }
 
-  manager_t & GetHWManager(emp::String name) {
+  manager_t & GetHWManager(const emp::String & name) {
     emp_assert( emp::Has(hw_man_map, name) );
     return *hw_man_map[name];
   }
 
   template <typename VM_T>
-  manager_t & AddHardwareManager(emp::String name) {
+  manager_t & AddHardwareManager(const emp::String & name) {
     emp_assert(!emp::Has(hw_man_map, name));
     return *(hw_man_map[name] = emp::NewPtr<HardwareManager<VM_T>>());
   }
 
-  population_t & GetPopulation(emp::String name) {
+  population_t & GetPopulation(const emp::String & name) {
     emp_assert( emp::Has(pop_map, name) );    
     return pop_map.find(name)->second;
   }
 
-  population_t & AddPopulation(emp::String name) {
+  population_t & AddPopulation(const emp::String & name) {
     emp_assert(!emp::Has(pop_map, name));
     auto [it, success] = pop_map.emplace(name, random);
     emp_assert(success);
     return it->second;
   }
 
-  void PrintHelp(emp::String exec_name, std::ostream & os) const {
+  void PrintHelp(const emp::String & exec_name, std::ostream & os) const {
     os << "Format: " << exec_name << " [flags]\n"
        << "Allowed flags include:\n"
        << "  --help (or -h) : Print this message.\n"
@@ -98,27 +116,29 @@ public:
   void Trace(AvidaVM & vm, size_t cpu_cycles=200) {
     for (size_t i = 0; i < cpu_cycles; ++i) {
       std::cout << "STEP " << i << ":\n" << vm.StatusString() << std::endl;
-      vm.ProcessInst();
+      vm.ProcessStep();
     }
     std::cout << "STEP " << cpu_cycles << ":\n" << vm.StatusString() << std::endl;
   }
 
   // Generate many random genomes of a given size and try running them.
   template <typename MANAGER_T=AvidaVM>
-  void Test(const size_t genome_size = 256, const size_t num_trials = 5000000, size_t run_time=200) {
+  bool Test(const size_t genome_size = 256, const size_t num_trials = 5000000, size_t run_time=200) {
     // Create the hardware manager.
     manager_t & hw_manager = AddHardwareManager<MANAGER_T>(MANAGER_T::DefaultName());
     auto inst_set = MANAGER_T::BuildInstSet();
 
     // Load in the default ancestor genome.
-    genome_t genome = inst_set.LoadGenome("../config/ancestor.org");
-    MANAGER_T org(hw_manager, genome);
+    auto exp_genome = inst_set.LoadGenome("../config/ancestor.org");
+    if (!exp_genome) return false;
+    organism_t org(hw_manager, *exp_genome);
     for (size_t trial = 0; trial < num_trials; ++trial) {
       if (trial % 100000 == 0) std::cout << "Trial: " << trial << std::endl; 
       // Build a random genome and run it.
-      inst_set.BuildGenome(genome, genome_size, random);
+      inst_set.BuildGenome(*exp_genome, genome_size, random);
       org.Process(run_time);
     }
+    return true;
   }
 
   // Initialize the hardware manager (with AvidVM) and the population (with the default) ancestor.
