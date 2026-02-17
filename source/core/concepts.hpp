@@ -27,19 +27,79 @@ namespace avida::concepts {
     std::convertible_to<T, emp::String> ||
     std::same_as<std::remove_cvref_t<T>, emp::String>;
 
-  template <typename E>
-  concept ExpectedLike = requires(E e) {
-    typename E::value_type;
-    typename E::error_type;
-    { bool(e) } -> std::convertible_to<bool>;
-    { *e } -> std::same_as<typename E::value_type&>;
+  // === Signals ===
+
+  // Class reacts to signal: Update is ending; new one is about to start
+  template <typename T>
+  concept HasBeforeUpdate = requires(T plugin, size_t update_ending) {
+    { plugin.BeforeUpdate(update_ending) } -> std::convertible_to<bool>;
   };
 
-  template <typename E, typename V, typename Err>
-  concept ExpectedOf =
-    ExpectedLike<E> &&
-    std::same_as<typename E::value_type, V> &&
-    std::same_as<typename E::error_type, Err>;
+  // Class reacts to signal: New update has just started.
+  template <typename T>
+  concept HasOnUpdate = requires(T plugin, size_t new_update) {
+    { plugin.OnUpdate(new_update) } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Parent is about to reproduce.
+  template <typename T>
+  concept HasBeforeRepro = requires(T plugin, size_t parent_pos) {
+    { plugin.BeforeRepro(parent_pos) } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Offspring is ready to be placed.
+  template <typename T>
+  concept HasOnOffspringReady = requires(T plugin, typename T::organism_t & offspring, size_t parent_pos) {
+    { plugin.OnOffspringReady(offspring, parent_pos) } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Organism to be injected into pop is ready to be placed.
+  template <typename T>
+  concept HasOnInjectReady = requires(T plugin, typename T::organism_t & inject_org) {
+    { plugin.OnInjectReady(inject_org) } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Placement location has been identified (For birth or inject)
+  template <typename T>
+  concept HasBeforePlacement = requires(T plugin, typename T::organism_t & org, size_t target_pos, size_t parent_pos) {
+    { plugin.BeforePlacement(org, target_pos, parent_pos) } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: New organism has been placed in the population.
+  template <typename T>
+  concept HasOnPlacement = requires(T plugin, size_t placement_pos) {
+    { plugin.OnPlacement(placement_pos) } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Mutate is about to run on an organism.
+  template <typename T>
+  concept HasBeforeMutate = requires(T plugin, typename T::organism_t & org) {
+    { plugin.BeforeMutate(org) } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Organism has had its genome changed due to mutation.
+  template <typename T>
+  concept HasOnMutate = requires(T plugin, typename T::organism_t & org) {
+    { plugin.OnMutate(org) } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Organism is about to die.
+  template <typename T>
+  concept HasBeforeDeath = requires(T plugin, size_t remove_pos) {
+    { plugin.BeforeDeath() } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Run immediately before Avida exits.
+  template <typename T>
+  concept HasBeforeExit = requires(T plugin) {
+    { plugin.BeforeExit() } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Run when the --help option is called at startup.
+  template <typename T>
+  concept HasOnHelp = requires(T plugin) {
+    { plugin.OnHelp() } -> std::convertible_to<bool>;
+  };
 
 
   // ===  Genome  ===
