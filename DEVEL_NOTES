@@ -1,3 +1,38 @@
+variant<vector> + visit            3.999 ms total       2.00 ns/elem   checksum=33526667883744400
+10 vectors (by type)               1.386 ms total       0.69 ns/elem   checksum=33526667883744400
+virtual<Base> via unique_ptr      16.135 ms total       8.07 ns/elem   checksum=33526667883744400
+
+
+
+
+
+
+Next steps:
+- Move Population handling to module?
+- Build alternate VM?
+- Build modules
+  - Genotype tracker
+  - Phylogeny tracker
+  - Logic 9 Environment (or general function environment that takes lambdas?)
+  - Limited resource environment
+  - Event manager
+- Build new Populations (or overlays?)
+  - Grid
+  - Demes
+- Build dynamic organism that uses variant to handle hardware type.
+
+
+I'm working on the new version of Avida.  Most of the main classes are templated.  For example, Organisms are templated based on their virtual hardware type.  Populations are then templated based on the types of organisms they have.  The main Avida class is templated on what feature modules you want active.
+
+OR: Organisms have a variadic of all hardware types.  Perhaps another variadic for all niche types they might be in?
+
+ONE population.
+
+OrganismSet can be used to represent IDs any group of organisms.
+
+
+
+
 ========== Traits ========
 On birth, how are traits handled?
 - Reset to default value
