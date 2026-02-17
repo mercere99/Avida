@@ -29,6 +29,7 @@ public:
   // Tease apart types in PLUG_IN_Ts...
   using plug_in_pack = emp::TypePack<PLUG_IN_Ts...>;
   using hardware_pack = plug_in_pack::template filter<hardware_filter>;
+  static_assert(hardware_pack::GetSize() == 1, "Currently, only one hardware type allowed.");
 
   using hardware_t = hardware_pack::first_t;
   using manager_t = HardwareManager<hardware_t>;
@@ -40,8 +41,8 @@ private:
   using hw_man_ptr = emp::Ptr<manager_t>;
   
   emp::Random random;
+  population_t population{random};
   std::unordered_map<emp::String, hw_man_ptr> hw_man_map;
-  std::unordered_map<emp::String, population_t> pop_map;
 
   // ===== Helper Functions =====
   void DoDivide(organism_t & org) {
@@ -74,8 +75,7 @@ public:
     }
   }
   ~Avida() {
-    // Close down the populations, moving all of the hardware to the managers for deletion.
-    pop_map.clear();
+    population.Clear();
 
     // Delete all of the hardware managers and the hardware they have.
     for ( auto & [name, ptr] : hw_man_map) ptr.Delete();
@@ -91,18 +91,6 @@ public:
   manager_t & AddHardwareManager(const emp::String & name) {
     emp_assert(!emp::Has(hw_man_map, name));
     return *(hw_man_map[name] = emp::NewPtr<HardwareManager<VM_T>>());
-  }
-
-  population_t & GetPopulation(const emp::String & name) {
-    emp_assert( emp::Has(pop_map, name) );    
-    return pop_map.find(name)->second;
-  }
-
-  population_t & AddPopulation(const emp::String & name) {
-    emp_assert(!emp::Has(pop_map, name));
-    auto [it, success] = pop_map.emplace(name, random);
-    emp_assert(success);
-    return it->second;
   }
 
   void PrintHelp(const emp::String & exec_name, std::ostream & os) const {
@@ -148,32 +136,24 @@ public:
     AddCallbacks(hw_man);
 
     // Create a population called "main" and inject a single individual of the default ancestor.
-    population_t & pop = AddPopulation("main");
-    pop.SetMaxSize(10000);
-    pop.Inject(hw_man, "../config/ancestor.org");
+    population.SetMaxSize(10000);
+    population.Inject(hw_man, "../config/ancestor.org");
   }
 
-  void DoUpdate(population_t & pop) { pop.ProcessUpdate(); }
+  void DoUpdate() { population.ProcessUpdate(); }
 
-  void DoUpdate() { DoUpdate(GetPopulation("main")); }
-
-  void Run(population_t & pop) {
-    for (size_t ud = 0; ud < 10000; ++ud) {
+  void Run(size_t ud_count=10000) {
+    for (size_t ud = 0; ud < ud_count; ++ud) {
       if (ud % 100 == 0) {
         std::cout << "UD:" << ud
-                  << "  Pop Size:" << pop.size()
-                  << "  Generation: " << pop.GetAveGeneration()
-                  << "  Genome0:[" << pop[0].GetGenomeSequence() << "]"
+                  << "  Pop Size:" << population.size()
+                  << "  Generation: " << population.GetAveGeneration()
+                  << "  Genome0:[" << population[0].GetGenomeSequence() << "]"
                   << std::endl;
       }
-      DoUpdate(pop);
+      DoUpdate();
     }
-    std::cout << "Final Pop Size = " << pop.size() << std::endl;
-    std::cout << "Total Cycles = " << pop.GetCyclesExecuted() << std::endl;
-  }
-
-  void Run() {
-    population_t & pop = GetPopulation("main");
-    Run(pop);
+    std::cout << "Final Pop Size = " << population.size() << std::endl;
+    std::cout << "Total Cycles = " << population.GetCyclesExecuted() << std::endl;
   }
 };
