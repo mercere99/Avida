@@ -4,7 +4,50 @@ Initial Benchmark (10,000 orgs, 10,000 updates)
 ./Avida  41.85s user 0.08s system 99% cpu 41.941 total
 ./Avida  40.78s user 0.14s system 99% cpu 40.938 total
 
-Got rid of HardwareBase base class
+=> Got rid of HardwareBase base class
 ./Avida  39.63s user 0.10s system 99% cpu 39.739 total
 ./Avida  34.95s user 0.07s system 99% cpu 35.031 total
 ./Avida  36.62s user 0.09s system 99% cpu 36.717 total
+
+=> Added setting of random number seeds.
+UD:9900  Pop Size:10000  Generation: 321.594  Genome0:[HcxdEhfBwzbydxbLqcphtxtJpaHCqirKcxaFFzvCDLEdhrfhCuheHmIDesGfayaHIfgatEDghlsfmctgefJsLuEFiHEpbzBEeEdw]
+Total Cycles = 2948085030
+./Avida -s 100  44.58s user 0.10s system 99% cpu 44.705 total
+./Avida -s 100  42.24s user 0.08s system 99% cpu 42.330 total
+./Avida -s 100  42.28s user 0.08s system 99% cpu 42.364 total
+
+UD:9900  Pop Size:10000  Generation: 418.761  Genome0:[hfcavaddxbLwhtgbGHnwGsDvHtdfFFcAnLkAhaxhxnswheznBuEfvApHcxdE]
+Total Cycles = 2947982400
+./Avida -s 101  45.54s user 0.08s system 99% cpu 45.624 total
+
+UD:9900  Pop Size:10000  Generation: 397.294  Genome0:[tHcxdEhfBxvaydxjLHaAtJGzkkakrjhJwapEfnlfvshbzwH]
+Total Cycles = 2947588560
+./Avida -s 102  46.80s user 0.13s system 99% cpu 46.996 total
+./Avida -s 102  45.63s user 0.11s system 99% cpu 45.758 total
+
+
+=> Updated behavior of sort to always push back onto the original stacks, but in sorted order.
+UD:9900  Pop Size:10000  Generation: 555.171  Genome0:[EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEdEEEEEDEEEEEEEEEEEEEEEEEEEEEEEEEEfEEEjEadEEfgwxdEhfEwzbydxbLyELE]
+Total Cycles = 2948135700
+./Avida -s 100  39.19s user 0.10s system 99% cpu 39.315 total
+./Avida -s 100  37.46s user 0.09s system 99% cpu 37.562 total
+./Avida -s 100  40.72s user 0.13s system 99% cpu 40.912 total
+
+
+=> Cleanup on instructions executed; simpler, but slightly different.
+UD:9900  Pop Size:10000  Generation: 1209.78  Genome0:[EcbEEEEEEEEEiEwzgEyxdajLI]
+Total Cycles = 2948879910
+./Avida -s 100  38.71s user 0.08s system 99% cpu 38.800 total
+./Avida -s 100  39.46s user 0.12s system 99% cpu 39.612 total
+
+=> Collapsed down to a single population:
+./Avida -s 100  41.94s user 0.10s system 99% cpu 42.112 total
+./Avida -s 100  40.06s user 0.08s system 99% cpu 40.158 total
+
+Generation: 576.973
+./Avida -s 101  49.10s user 0.12s system 99% cpu 49.318 total
+./Avida -s 101  47.17s user 0.08s system 99% cpu 47.267 total
+
+Generation: 603.39
+./Avida -s 102  45.14s user 0.09s system 99% cpu 45.258 total
+./Avida -s 102  44.68s user 0.09s system 99% cpu 44.796 total
