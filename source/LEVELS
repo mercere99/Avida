@@ -1,9 +1,8 @@
 LEVEL 0: Genome
-         PopPosition
-LEVEL 1: HardwareBase : Genome (Keeps reference to HardwareManager, but doesn't use it directly)
-LEVEL 2: InstSet      : Genome, HardwareBase
-Level 3: HardwareManager : HardwareBase, InstSet
-Level 4: Organism : HardwareBase, HardwareManager
-Level 5: Population : Organism
-Avida 6: Avida 
-Level 7: [Derived Hardware] (e.g., AvidaVM)  : HardwareBase, HardwareManager, InstSet, Organism
+         InstSet     (template parameter: Hardware type)
+         PopPosition (template parameter: Population type)
+         Population  (template parameter: Organism type)
+Level 1: HardwareManager : InstSet
+Level 2: Organism        : HardwareManager
+Level 3: [Derived Hardware] (e.g., AvidaVM)  : HardwareManager, InstSet, Organism
+Avida 4: Avida           : AvidaVM, HardwareManager, Population
