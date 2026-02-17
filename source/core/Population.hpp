@@ -127,6 +127,10 @@ public:
     return self.orgs[pos];
   }
 
+  void Clear() {
+    orgs.clear();
+  }
+
   template <class Self, typename HW_MANAGER_T>
   Self & Inject(this Self & self, HW_MANAGER_T & hw_man, genome_t && genome) {
     return self.Insert(organism_t{hw_man, std::move(genome)});
