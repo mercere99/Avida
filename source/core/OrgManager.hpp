@@ -6,3 +6,6 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  */
 
+namespace avida {
+  
+} // namespace avida

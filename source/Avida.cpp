@@ -6,9 +6,11 @@
 
 #include "core/Avida.hpp"
 
+using namespace avida;
+
 int main(int argc, char * argv[])
 {
   Avida<AvidaVM> avida(emp::ArgsToStrings(argc, argv));
   avida.Setup();
-  avida.Run();
+  avida.Run(10000);
 }
