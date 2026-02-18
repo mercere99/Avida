@@ -14,27 +14,21 @@
 #include "emp/tools/String.hpp"
 
 #include "../Hardware/HardwareManager.hpp"
-#include "PopPosition.hpp"
-
-template <typename ORG_T> class Population;
 
 template <typename HW_T>
 class Organism {
 public:
   using this_t = Organism<HW_T>;
-  using population_t = Population<this_t>;
-  using position_t = PopPosition<population_t>;
   using hardware_t = HW_T;
   using genome_t = typename HW_T::genome_t;
   using manager_t = HardwareManager<HW_T>;
 private:
-  using id_t = uint64_t;
-  static constexpr id_t UNKNOWN_ID = static_cast<id_t>(-1);
+  static constexpr size_t UNKNOWN_ID = static_cast<size_t>(-1);
 
   genome_t genome;                  // Original genome for this organism.
   emp::Ptr<HW_T> hw_ptr = nullptr;  // What hardware is this organism using?
-  position_t position;              // Where is this Organism located?
-  id_t id = UNKNOWN_ID;             // Unique organism ID.
+  size_t position = UNKNOWN_ID;     // Where is this Organism located?
+  size_t id = UNKNOWN_ID;           // Unique organism ID.
   uint32_t generation = 0;          // Number of ancestral steps back to injected organism.
 
 public:
@@ -48,7 +42,8 @@ public:
   {
     // Clean up old pointers (so they don't deallocate on destruction.)
     in.hw_ptr = nullptr;
-    in.position.Clear();
+    in.position = UNKNOWN_ID;
+    in.id = UNKNOWN_ID;
 
     // Make sure hardware knows about its new Organism.
     emp_assert(hw_ptr);
@@ -97,7 +92,8 @@ public:
 
     // Clean up old pointers (so they don't deallocate on destruction.)
     in.hw_ptr = nullptr;
-    in.position.Clear();
+    in.position = UNKNOWN_ID;
+    in.id = UNKNOWN_ID;
 
     // Make sure hardware knows about its new Organism.
     emp_assert(hw_ptr);
@@ -106,8 +102,11 @@ public:
     return *this;
   }
 
-  [[nodiscard]] id_t GetID() const { return id; }
-  Organism & SetID(id_t in_id) { id = in_id; return *this; }
+  [[nodiscard]] size_t GetPosition() const { return position; }
+  Organism & SetPosition(size_t in_position) { position = in_position; return *this; }
+
+  [[nodiscard]] size_t GetID() const { return id; }
+  Organism & SetID(size_t in_id) { id = in_id; return *this; }
 
   [[nodiscard]] const genome_t & GetGenome() const { return genome; }
   [[nodiscard]] emp::String GetGenomeSequence() const {
@@ -122,27 +121,6 @@ public:
 
   [[nodiscard]] HW_T & GetHardware() { emp_assert(hw_ptr); return *hw_ptr; }
   [[nodiscard]] const HW_T & GetHardware() const { emp_assert(hw_ptr); return *hw_ptr; }
-
-  [[nodiscard]] bool InPopulation() const { return position.InPopulation(); }
-  [[nodiscard]] bool InPopulation(const population_t & pop) const {
-    return position.InPopulation(pop);
-  }
-  [[nodiscard]] population_t & GetPopulation() {
-    emp_assert(OK());
-    emp_assert(InPopulation());
-    return position.GetPopulation();
-  }
-  [[nodiscard]] const population_t & GetPopulation() const {
-    emp_assert(OK());
-    emp_assert(InPopulation());
-    return position.GetPopulation();
-  }
-  Organism & SetPosition(const PopPosition<population_t> & in_pos) {
-    emp_assert(OK());
-    emp_assert(in_pos.GetIndex() < in_pos.GetPopulation().size());
-    position = in_pos;
-    return *this;
-  }
 
   Organism & Process(size_t cycles) {
     emp_assert(OK());
