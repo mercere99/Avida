@@ -6,11 +6,15 @@
 
 #include "core/Avida.hpp"
 
+#include "Modules/LogModule.hpp"
+
 using namespace avida;
 
 int main(int argc, char * argv[])
 {
-  Avida<AvidaVM> avida(emp::ArgsToStrings(argc, argv));
+  using avida_t = Avida<AvidaVM, LogModule>;
+  avida_t avida(emp::ArgsToStrings(argc, argv));
   avida.Setup();
+  avida.GetPlugIn<LogModule>().SetOutFile("avida.log");
   avida.Run(10000);
 }
