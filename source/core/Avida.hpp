@@ -30,30 +30,28 @@ namespace avida {
   template <concepts::Hardware HW_T> struct hardware_filter { };
 
   /// Main Avida-control object.
-  template <typename... PLUG_IN_Ts>
+  template <typename HARDWARE_T, template <typename> typename... PLUG_IN_Ts>
   class Avida {
   public:
-    // Tease apart types in PLUG_IN_Ts...
-    using plug_in_pack = emp::TypePack<PLUG_IN_Ts...>;
-    using hardware_pack = plug_in_pack::template filter<hardware_filter>;
-    static_assert(hardware_pack::GetSize() == 1, "Currently, only one hardware type allowed.");
+    using this_t = Avida<HARDWARE_T, PLUG_IN_Ts...>;   // @CAO TODO: Allow a special case where HARDWARE_T is a variant?
 
-    using hardware_t = hardware_pack::first_t;      // Type of general hardware for all organisms
+    using hardware_t = HARDWARE_T;                  // Type of general hardware for all organisms
     using manager_t = HardwareManager<hardware_t>;  // Type of manager to recycle hardware
     using organism_t = Organism<hardware_t>;        // Type for each individual organism
     using biota_t = emp::vector<organism_t>;        // Collection of all current organisms in Avida
     using genome_t = hardware_t::genome_t;          // Type of genomes used in organisms
 
-  private:
-    using hw_man_ptr = emp::Ptr<manager_t>;
-    
+  private:    
+    std::tuple<PLUG_IN_Ts<this_t>...> plug_ins;
+
     emp::Random random;
     biota_t biota{};
     emp::BitVector occupied{};
-    std::unordered_map<emp::String, hw_man_ptr> hw_man_map{};
+    std::unordered_map< emp::String, emp::Ptr<manager_t> > hw_man_map{};
     size_t org_count = 0;
 
     //======> @CAO - move this block to plug-in?
+    size_t update = 0;                                // Times update was run on this population
     emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
     int32_t pop_cap = 10000;                          // Population size limit (default: 10,000 orgs)
     static constexpr int32_t ave_cycles_per_org = 30; // Total cycles to execute per org per update.
@@ -112,9 +110,33 @@ namespace avida {
       hw_man.AddCallback("DivideCell", [this](organism_t & org){ DoDivide(org); });
     }
 
+    
+
+    // === Signals ===
+    void TriggerSignal(auto signal_fun) {
+      std::apply([&signal_fun](auto &... p){ (signal_fun(p), ...); }, plug_ins);
+    }
+
+    void Signal_BeforeUpdate(size_t update) {
+      TriggerSignal([update](auto & plug_in){
+        if constexpr (requires { plug_in.BeforeUpdate(update); }) {
+          plug_in.BeforeUpdate(update);
+        }
+      });
+    }
+
+    void Signal_OnUpdate(size_t update) {
+      TriggerSignal([update](auto & plug_in){
+        if constexpr (requires { plug_in.OnUpdate(update); }) {
+          plug_in.OnUpdate(update);
+        }
+      });
+    }
+
+
   public:
-    Avida() { }
-    Avida(emp::vector<emp::String> args) {
+    Avida() : plug_ins(PLUG_IN_Ts<this_t>{*this}...) { }
+    Avida(emp::vector<emp::String> args) : Avida() {
       for (size_t i = 1; i < args.size(); ++i) {
         if (args[i] == "-h" || args[i] == "--help") { PrintHelp(args[0], std::cout); }
         else if (args[i] == "-s" || args[i] == "--seed") {
@@ -150,6 +172,14 @@ namespace avida {
       return GetAveTrait([](const organism_t & org){ return org.GetGeneration(); });
     }
 
+    template <typename PLUG_IN_T>
+    [[nodiscard]] PLUG_IN_T & GetPlugIn() { return std::get<PLUG_IN_T>(plug_ins); }
+
+    template <template <typename> typename PLUG_IN_T>
+    [[nodiscard]] PLUG_IN_T<this_t> & GetPlugIn() { return std::get<PLUG_IN_T<this_t>>(plug_ins); }
+
+    template <size_t INDEX>
+    [[nodiscard]] auto & GetPlugIn() { return std::get<INDEX>(plug_ins); }
 
     manager_t & GetHWManager(const emp::String & name) {
       emp_assert( emp::Has(hw_man_map, name) );
@@ -228,12 +258,16 @@ namespace avida {
     // Process a single update for Avida
     void DoUpdate() {
       emp_assert(GetNumOrgs() > 0, "Running DoUpdate() with no organisms.");
+      Signal_BeforeUpdate(update);
+      ++update;
+      Signal_OnUpdate(update);
       const int32_t cycles = GetNumOrgs() * ave_cycles_per_org;
       for (int32_t rounds = cycles / CPU_chunk_size; rounds; --rounds) {
         const size_t id = speed_map.Index(random.GetDouble(speed_map.GetWeight()));
         biota[id].Process(CPU_chunk_size);
       }
       cycles_executed += cycles;
+
     }
 
     void Run(size_t ud_count=10000) {
