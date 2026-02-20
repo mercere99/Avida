@@ -31,8 +31,8 @@ namespace avida::concepts {
 
   // Class reacts to signal: Update is ending; new one is about to start
   template <typename T>
-  concept HasBeforeUpdate = requires(T plugin, size_t update_ending) {
-    { plugin.BeforeUpdate(update_ending) } -> std::convertible_to<bool>;
+  concept HasBeforeUpdate = requires(T plugin, size_t old_update) {
+    { plugin.BeforeUpdate(old_update) } -> std::convertible_to<bool>;
   };
 
   // Class reacts to signal: New update has just started.
@@ -73,14 +73,14 @@ namespace avida::concepts {
 
   // Class reacts to signal: Mutate is about to run on an organism.
   template <typename T>
-  concept HasBeforeMutate = requires(T plugin, typename T::organism_t & org) {
-    { plugin.BeforeMutate(org) } -> std::convertible_to<bool>;
+  concept HasBeforeMutate = requires(T plugin, size_t org_pos) {
+    { plugin.BeforeMutate(org_pos) } -> std::convertible_to<bool>;
   };
 
   // Class reacts to signal: Organism has had its genome changed due to mutation.
   template <typename T>
-  concept HasOnMutate = requires(T plugin, typename T::organism_t & org) {
-    { plugin.OnMutate(org) } -> std::convertible_to<bool>;
+  concept HasOnMutate = requires(T plugin, size_t org_pos) {
+    { plugin.OnMutate(org_pos) } -> std::convertible_to<bool>;
   };
 
   // Class reacts to signal: Organism is about to die.
