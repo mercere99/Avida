@@ -8,7 +8,6 @@
  *  This is the main controller class for Avida.
  * 
  *  DEVELOPER notes:
- *  - Create a driver plug-in module 
  *  - Move signals to their own class?
  *  - Shift to a byte-sized occupied "flag" (with other info?)
  *  - Allow hardware variant to form special type of organism that can use any listed hardware.
@@ -34,7 +33,7 @@ namespace avida {
   template <typename HARDWARE_T, template <typename> typename... PLUG_IN_Ts>
   class Avida {
   public:
-    static_assert(sizeof...(PLUG_IN_Ts) > 0, "At least one Avida plug-in required to manage run.")
+    static_assert(sizeof...(PLUG_IN_Ts) > 0, "At least one Avida plug-in required to manage run.");
     using this_t = Avida<HARDWARE_T, PLUG_IN_Ts...>;
 
     using hardware_t = HARDWARE_T;                  // Type of general hardware for all organisms
@@ -53,12 +52,6 @@ namespace avida {
     size_t org_count = 0;       // Current number of active organisms
 
     std::unordered_map< emp::String, emp::Ptr<manager_t> > hw_man_map{};
-
-    //======> @CAO - move this block to plug-in?
-    emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
-    static constexpr int32_t ave_cycles_per_org = 30; // Total cycles to execute per org per update.
-    static constexpr int32_t CPU_chunk_size = 10;     // Num cycles executed each time org is picked.
-    int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
     // ===== Helper Functions =====
     void PlaceOrganism(organism_t && org_to_place) {
@@ -79,7 +72,6 @@ namespace avida {
       ++org_count;
       organism_t & placed_org = biota[index];  // org_to_place was moved out; grab new location.
       placed_org.SetPosition(index);
-      speed_map.Set(index, placed_org.GetMetabolicRate());
 
       Signal_OnPlacement(placed_org);
     }
@@ -139,7 +131,11 @@ namespace avida {
     }
     ~Avida() { Exit(); }
 
+    // === Basic Accessors ===
+
     [[nodiscard]] int32_t GetNumOrgs() const { return org_count; }
+
+    [[nodiscard]] emp::Random & GetRandom() { return random; }
 
     template <typename FUN_T>
     [[nodiscard]] double GetAveTrait(const FUN_T & fun) const {
@@ -264,7 +260,6 @@ namespace avida {
 
       Signal_BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
       biota[delete_id].SignalDeath();       // Notify organism before deletion.
-      speed_map.Set(delete_id, 0.0);        // Set old index speed to 0; don't shrink speed_map
       occupied.Clear(delete_id);
       --org_count;
     }
@@ -288,13 +283,10 @@ namespace avida {
       Signal_OnUpdateEnd(update);
       ++update;
       Signal_OnUpdateStart(update);
-      const int32_t cycles = GetNumOrgs() * ave_cycles_per_org;
-      for (int32_t rounds = cycles / CPU_chunk_size; rounds; --rounds) {
-        const size_t id = speed_map.Index(random.GetDouble(speed_map.GetWeight()));
-        biota[id].Process(CPU_chunk_size);
-      }
-      cycles_executed += cycles;
+    }
 
+    void ProcessOrg(size_t id, int32_t num_cycles) {
+      biota[id].Process(num_cycles);
     }
 
     void Run() { while (true) DoUpdate(); }

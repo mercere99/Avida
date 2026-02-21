@@ -22,7 +22,13 @@ namespace avida {
     AVIDA_T & avida;
 
     int32_t pop_cap = 10000;    // Population size limit (default: 10,000 orgs)
-    size_t last_update = 1000; // How many updated should the run go for?
+    size_t last_update = 10000; // How many updated should the run go for?
+
+    // CPU Execution Management
+    emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
+    static constexpr int32_t ave_cycles_per_org = 30; // Total cycles to execute per org per update.
+    static constexpr int32_t CPU_chunk_size = 10;     // Num cycles executed each time org is picked.
+    int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
   public:
     BasicModule(AVIDA_T & avida) : avida(avida) { }
@@ -31,14 +37,24 @@ namespace avida {
     // === Signal Listeners ===
 
     bool OnUpdateStart(size_t new_update) {
+      // Test if this run should finish.
       if (new_update > last_update) {
         avida.Exit();
         exit(0);
       }
+
+      // Execute all organisms for this update.
+      const int32_t cycles = avida.GetNumOrgs() * ave_cycles_per_org;
+      for (int32_t rounds = cycles / CPU_chunk_size; rounds; --rounds) {
+        const size_t id = speed_map.Index(avida.GetRandom().GetDouble(speed_map.GetWeight()));
+        avida.ProcessOrg(id, CPU_chunk_size);
+      }
+      cycles_executed += cycles;
+
       return true;
     }
 
-    bool OnUpdateEnd([[maybe_unused]] size_t old_update) {
+    bool OnUpdateEnd(size_t old_update) {
       if (old_update % 100 == 0) {
         std::cout << "UD:" << old_update
                   << "  PopSize:" << avida.GetNumOrgs()
@@ -73,7 +89,8 @@ namespace avida {
     }
 
     template <concepts::Organism ORG_T>
-    bool OnPlacement([[maybe_unused]] ORG_T & org) {
+    bool OnPlacement(ORG_T & org) {
+      speed_map.Set(org.GetPosition(), org.GetMetabolicRate());
       return true;
     }
 
@@ -88,7 +105,8 @@ namespace avida {
     }
 
     template <concepts::Organism ORG_T>
-    bool BeforeDeath([[maybe_unused]] ORG_T & org) {
+    bool BeforeDeath(ORG_T & org) {
+      speed_map.Set(org.GetPosition(), 0.0);  // Set old index speed to 0; don't shrink speed_map
       return true;
     }
 
