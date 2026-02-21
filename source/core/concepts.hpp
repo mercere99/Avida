@@ -41,16 +41,17 @@ namespace avida::concepts {
     { plugin.OnUpdate(new_update) } -> std::convertible_to<bool>;
   };
 
-  // Class reacts to signal: Parent is about to reproduce.
+  // Class reacts to signal: Parent is about to (try to) reproduce.
   template <typename T>
-  concept HasBeforeRepro = requires(T plugin, size_t parent_pos) {
-    { plugin.BeforeRepro(parent_pos) } -> std::convertible_to<bool>;
+  concept HasBeforeRepro = requires(T plugin, typename T::organism_t & parent) {
+    { plugin.BeforeRepro(parent) } -> std::convertible_to<bool>;
   };
 
   // Class reacts to signal: Offspring is ready to be placed.
   template <typename T>
-  concept HasOnOffspringReady = requires(T plugin, typename T::organism_t & offspring, size_t parent_pos) {
-    { plugin.OnOffspringReady(offspring, parent_pos) } -> std::convertible_to<bool>;
+  concept HasOnOffspringReady = requires(T plugin, typename T::organism_t & offspring,
+                                         typename T::organism_t &  parent) {
+    { plugin.OnOffspringReady(offspring, parent) } -> std::convertible_to<bool>;
   };
 
   // Class reacts to signal: Organism to be injected into pop is ready to be placed.
@@ -234,66 +235,27 @@ namespace avida::concepts {
 
   // ===  Organism  ===
 
-  template <typename ORG>
+  template <typename ORG_T>
   concept Organism = requires(
-      ORG org,
-      const ORG const_org,
+      ORG_T org,
+      const ORG_T const_org,
       emp::Random & random,
+      std::size_t position,
       std::size_t cycles
     ) {
-    typename ORG::genome_t;
-    typename ORG::hardware_t;
-    typename ORG::population_t;
-    typename ORG::position_t;
+    typename ORG_T::genome_t;
+    typename ORG_T::hardware_t;
 
-    { const_org.GetGenome() } -> std::same_as<const typename ORG::genome_t&>;
+    { const_org.GetGenome() } -> std::same_as<const typename ORG_T::genome_t&>;
     { const_org.GetGenomeSequence() } -> std::same_as<emp::String>;
 
     { const_org.GetMetabolicRate() } -> std::convertible_to<double>;
     { const_org.GetGeneration() } -> std::convertible_to<std::uint32_t>;
 
-    { org.SetPosition(std::declval<const typename ORG::position_t&>()) } -> std::same_as<ORG&>;
+    { org.SetPosition(position) } -> std::same_as<ORG_T&>;
 
-    { org.Process(cycles) } -> std::same_as<ORG&>;
-    { org.DivideGenome(random) } -> std::same_as<typename ORG::genome_t>;
-
-    { const_org.OK() } -> std::convertible_to<bool>;
-
-    { org.GetPopulation() } -> std::same_as<typename ORG::population_t&>;
-    { const_org.GetPopulation() } -> std::same_as<const typename ORG::population_t&>;
-  };
-
-
-  // ===  Population  ===
-
-  template <typename POP_T>
-  concept Population = requires(
-      POP_T pop,
-      const POP_T const_pop,
-      std::size_t pos,
-      typename POP_T::organism_t & parent,
-      typename POP_T::genome_t genome,
-      emp::String filename
-    ) {
-    typename POP_T::organism_t;
-    typename POP_T::genome_t;
-
-    { const_pop.size() } -> std::convertible_to<std::size_t>;
-    { pop[pos] } -> std::same_as<typename POP_T::organism_t&>;
-    { const_pop[pos] } -> std::same_as<const typename POP_T::organism_t&>;
-
-    { pop.SetMaxSize(std::size_t{1}) } -> std::same_as<POP_T&>;
-
-    // Hardware manager is templated in your Population; constrain via requires.
-    { pop.Inject(std::declval<typename POP_T::organism_t::manager_t&>(), std::move(genome)) } -> std::same_as<POP_T&>;
-    { pop.Inject(std::declval<typename POP_T::organism_t::manager_t&>(), filename) } -> std::same_as<POP_T&>;
-
-    { pop.DivideOrg(parent, std::move(genome)) } -> std::same_as<POP_T&>;
-
-    { pop.ProcessUpdate() } -> std::same_as<void>;
-
-    // Ensure organism matches.
-    requires Organism<typename POP_T::organism_t>;
+    { org.Process(cycles) } -> std::same_as<ORG_T&>;
+    { org.DivideGenome(random) } -> std::same_as<typename ORG_T::genome_t>;
   };
 
 } // namespace avida::concepts
