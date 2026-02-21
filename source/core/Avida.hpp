@@ -8,9 +8,10 @@
  *  This is the main controller class for Avida.
  * 
  *  DEVELOPER notes:
- *  - consider keeping occupied count (pop size) separate from occupied BitVector.
- *  - consider an open cells stack to check for empty positions.
- *  - if both of the above can be done, we can shift to a byte-sized occupied "flag" (with other info?)
+ *  - Create macro for Signal_ functions
+ *  - Create a driver plug-in module 
+ *  - Move signals to their own class?
+ *  - Shift to a byte-sized occupied "flag" (with other info?)
  */
 
 #include "emp/base/Ptr.hpp"
@@ -63,8 +64,9 @@ namespace avida {
     void DeleteOrg(size_t delete_id) {
       emp_assert(delete_id < biota.size());
 
-      biota[delete_id].SignalDeath();  // Signal org prior to deletion.
-      speed_map.Set(delete_id, 0.0);   // Set old index speed to 0; don't shrink speed_map
+      Signal_BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
+      biota[delete_id].SignalDeath();       // Notify organism before deletion.
+      speed_map.Set(delete_id, 0.0);        // Set old index speed to 0; don't shrink speed_map
       occupied.Clear(delete_id);
       --org_count;
     }
@@ -73,13 +75,17 @@ namespace avida {
     void DeleteOrg() {
       emp_assert(GetNumOrgs() > 0); // Must have something to delete!
       size_t delete_id = random.GetUInt32(biota.size());
-      if (occupied[delete_id]) DeleteOrg(delete_id);
+      if (occupied[delete_id]) {
+        DeleteOrg(delete_id);
+      }
       else DeleteOrg(); // Our random choice did not work... try again!
     }
 
-    void PlaceOrganism(organism_t && org) {
+    void PlaceOrganism(organism_t && org_to_place) {
       emp_assert(occupied.size() == biota.size());
       emp_assert(org_count.CountOnes() == org_count);
+
+      Signal_BeforePlacement(org_to_place);
 
       // See if we must delete an organism before we can add a new one.
       if (GetNumOrgs() == pop_cap) DeleteOrg();
@@ -87,22 +93,28 @@ namespace avida {
       size_t index = occupied.FindZero();
       if (index == emp::BitVector::npos) {
         index = occupied.PushBack(true);
-        biota.emplace_back(std::move(org));
+        biota.emplace_back(std::move(org_to_place));
       } else {
         occupied.Set(index);
-        biota[index] = std::move(org);
+        biota[index] = std::move(org_to_place);
       }
 
       ++org_count;
-      biota[index].SetPosition(index);
-      speed_map.Set(index, biota[index].GetMetabolicRate());
+      organism_t & placed_org = biota[index];  // org_to_place was moved out; grab new location.
+      placed_org.SetPosition(index);
+      speed_map.Set(index, placed_org.GetMetabolicRate());
+
+      Signal_OnPlacement(placed_org);
     }
 
     void DoDivide(organism_t & parent_org) {
       emp_assert(parent_org.OK());
+      Signal_BeforeRepro(parent_org);
       genome_t offspring_genome = parent_org.DivideGenome(random);
       if (offspring_genome.size()) {
-        PlaceOrganism( organism_t{parent_org, std::move(offspring_genome)} );
+        organism_t offspring{parent_org, std::move(offspring_genome)};
+        Signal_OnOffspringReady(offspring, parent_org);
+        PlaceOrganism( std::move(offspring) );
       }  
     }
 
@@ -117,6 +129,8 @@ namespace avida {
       std::apply([&signal_fun](auto &... p){ (signal_fun(p), ...); }, plug_ins);
     }
 
+    // AVIDA_TRIGGER_SIGNAL(&org, OnPlacement(org));
+
     void Signal_BeforeUpdate(size_t update) {
       TriggerSignal([update](auto & plug_in){
         if constexpr (requires { plug_in.BeforeUpdate(update); }) {
@@ -130,6 +144,72 @@ namespace avida {
         if constexpr (requires { plug_in.OnUpdate(update); }) {
           plug_in.OnUpdate(update);
         }
+      });
+    }
+
+    void Signal_BeforeRepro(organism_t & parent_org) {
+      TriggerSignal([&parent_org](auto & plug_in){
+        if constexpr (requires { plug_in.BeforeRepro(parent_org); }) {
+          plug_in.BeforeRepro(parent_org);
+        }
+      });
+    }
+
+    void Signal_OnOffspringReady(organism_t & offspring, organism_t & parent_org) {
+      TriggerSignal([&offspring, &parent_org](auto & plug_in){
+        if constexpr (requires { plug_in.OnOffspringReady(offspring, parent_org); }) {
+          plug_in.OnOffspringReady(offspring, parent_org);
+        }
+      });
+    }
+
+    void Signal_OnInjectReady(organism_t & org) {
+      TriggerSignal([&org](auto & plug_in){
+        if constexpr (requires { plug_in.OnInjectReady(org); }) plug_in.OnInjectReady(org);
+      });
+    }
+
+    void Signal_BeforePlacement(organism_t & org) {
+      TriggerSignal([&org](auto & plug_in){
+        if constexpr (requires { plug_in.BeforePlacement(org); }) plug_in.BeforePlacement(org);
+      });
+    }
+
+    void Signal_OnPlacement(organism_t & org) {
+      TriggerSignal([&org](auto & plug_in){
+        if constexpr (requires { plug_in.OnPlacement(org); }) plug_in.OnPlacement(org);
+      });
+    }
+
+    // @CAO TODO: Call this
+    void Signal_BeforeMutate(organism_t & org) {
+      TriggerSignal([&org](auto & plug_in){
+        if constexpr (requires { plug_in.BeforeMutate(org); }) plug_in.BeforeMutate(org);
+      });
+    }
+
+    // @CAO TODO: Call this
+    void Signal_OnMutate(organism_t & org) {
+      TriggerSignal([&org](auto & plug_in){
+        if constexpr (requires { plug_in.OnMutate(org); }) plug_in.OnMutate(org);
+      });
+    }
+
+    void Signal_BeforeDeath(organism_t & org) {
+      TriggerSignal([&org](auto & plug_in){
+        if constexpr (requires { plug_in.BeforeDeath(org); }) plug_in.BeforeDeath(org);
+      });
+    }
+
+    void Signal_BeforeExit() {
+      TriggerSignal([](auto & plug_in){
+        if constexpr (requires { plug_in.BeforeExit(); }) plug_in.BeforeExit();
+      });
+    }
+
+    void Signal_OnHelp() {
+      TriggerSignal([](auto & plug_in){
+        if constexpr (requires { plug_in.OnHelp(); }) plug_in.OnHelp();
       });
     }
 
@@ -152,6 +232,7 @@ namespace avida {
       }
     }
     ~Avida() {
+      Signal_BeforeExit();  // Notify plug-ins of deletion.
       biota.clear();
 
       // Delete all of the hardware managers and the hardware they have.
@@ -192,11 +273,12 @@ namespace avida {
       return *(hw_man_map[name] = emp::NewPtr<HardwareManager<VM_T>>());
     }
 
-    void PrintHelp(const emp::String & exec_name, std::ostream & os) const {
+    void PrintHelp(const emp::String & exec_name, std::ostream & os) {
       os << "Format: " << exec_name << " [flags]\n"
         << "Allowed flags include:\n"
         << "  --help (or -h) : Print this message.\n"
         << std::endl;
+      Signal_OnHelp();  // Allow plug-ins to provide help information.
       exit(0);
     }
 
@@ -240,7 +322,9 @@ namespace avida {
     }
 
     void Inject(manager_t & hw_man, genome_t && genome) {
-      return PlaceOrganism(organism_t{hw_man, std::move(genome)});
+      organism_t inject_org{hw_man, std::move(genome)};
+      Signal_OnInjectReady(inject_org);
+      return PlaceOrganism(std::move(inject_org));
     }
     
     /// @brief Inject an organism using a genome loaded from a file.
