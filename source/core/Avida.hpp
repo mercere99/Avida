@@ -8,7 +8,6 @@
  *  This is the main controller class for Avida.
  * 
  *  DEVELOPER notes:
- *  - Move signals to their own class?
  *  - Shift to a byte-sized occupied "flag" (with other info?)
  *  - Allow hardware variant to form special type of organism that can use any listed hardware.
  */
@@ -23,7 +22,9 @@
 
 #include "../Hardware/AvidaVM.hpp"
 #include "../Hardware/HardwareManager.hpp"
+
 #include "concepts.hpp"
+#include "PlugInManager.hpp"
 
 namespace avida {
 
@@ -42,8 +43,8 @@ namespace avida {
     using biota_t = emp::vector<organism_t>;        // Collection of all current organisms in Avida
     using genome_t = hardware_t::genome_t;          // Type of genomes used in organisms
 
-  private:    
-    std::tuple<PLUG_IN_Ts<this_t>...> plug_ins;
+  private:
+    PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
 
     size_t update = 0;          // Times update was run on this population
     emp::Random random;         // Central random number generator
@@ -58,7 +59,7 @@ namespace avida {
       emp_assert(occupied.size() == biota.size());
       emp_assert(org_count.CountOnes() == org_count);
 
-      Signal_BeforePlacement(org_to_place);
+      plug_ins.BeforePlacement(org_to_place);
 
       size_t index = occupied.FindZero();    // Find empty position in biota.
       if (index == emp::BitVector::npos) {   // If no empty position available, add one.
@@ -73,48 +74,16 @@ namespace avida {
       organism_t & placed_org = biota[index];  // org_to_place was moved out; grab new location.
       placed_org.SetPosition(index);
 
-      Signal_OnPlacement(placed_org);
+      plug_ins.OnPlacement(placed_org);
     }
 
     void AddCallbacks(manager_t & hw_man) {
       hw_man.AddCallback("DivideCell", [this](organism_t & org){ DivideOrg(org); });
     }
 
-
-    // === Signals ===
-    void TriggerSignal(auto signal_fun) {
-      std::apply([&signal_fun](auto &... p){ (signal_fun(p), ...); }, plug_ins);
-    }
-
-    #define AVIDA_SIGNAL_DEF(TRIGGER, ...)                                 \
-      TriggerSignal([__VA_ARGS__](auto & plug_in) {                        \
-        if constexpr (requires { plug_in.TRIGGER; }) { plug_in.TRIGGER; }  \
-      });
-
-    void Signal_OnUpdateStart(size_t update) { AVIDA_SIGNAL_DEF(OnUpdateStart(update), update); }
-    void Signal_OnUpdateEnd(size_t update) { AVIDA_SIGNAL_DEF(OnUpdateEnd(update), update); }
-
-    void Signal_BeforeRepro(organism_t & parent) { AVIDA_SIGNAL_DEF(BeforeRepro(parent), &parent); }
-
-    void Signal_OnOffspringReady(organism_t & offspring, organism_t & parent) {
-      AVIDA_SIGNAL_DEF(OnOffspringReady(offspring, parent), &offspring, &parent);
-    }
-
-    void Signal_OnInjectReady(organism_t & org) { AVIDA_SIGNAL_DEF(OnInjectReady(org), &org); }
-    void Signal_BeforePlacement(organism_t & org) { AVIDA_SIGNAL_DEF(BeforePlacement(org), &org); }
-    void Signal_OnPlacement(organism_t & org) { AVIDA_SIGNAL_DEF(OnPlacement(org), &org); }
-    void Signal_BeforeDeath(organism_t & org) { AVIDA_SIGNAL_DEF(BeforeDeath(org), &org); }
-
-    // @CAO TODO: Call these
-    void Signal_BeforeMutate(organism_t & org) { AVIDA_SIGNAL_DEF(BeforeMutate(org), &org); }
-    void Signal_OnMutate(organism_t & org) { AVIDA_SIGNAL_DEF(OnMutate(org), &org); }
-
-    void Signal_BeforeExit() { AVIDA_SIGNAL_DEF(BeforeExit(), ); }
-    void Signal_OnHelp() { AVIDA_SIGNAL_DEF(OnHelp(), ); }
-
   public:
-    Avida() : plug_ins(PLUG_IN_Ts<this_t>{*this}...) { }
-    Avida(emp::vector<emp::String> args) : Avida() {
+    Avida() : plug_ins(*this) { }
+    Avida(emp::vector<emp::String> args) : plug_ins(*this) {
       for (size_t i = 1; i < args.size(); ++i) {
         if (args[i] == "-h" || args[i] == "--help") { PrintHelp(args[0], std::cout); }
         else if (args[i] == "-s" || args[i] == "--seed") {
@@ -133,9 +102,18 @@ namespace avida {
 
     // === Basic Accessors ===
 
-    [[nodiscard]] int32_t GetNumOrgs() const { return org_count; }
-
+    [[nodiscard]] size_t GetUpdate() const { return update; }
     [[nodiscard]] emp::Random & GetRandom() { return random; }
+    [[nodiscard]] auto & GetOrg(this auto & self, size_t id) {
+      emp_assert(IsOccupied(id));
+      return self.biota[id];
+    }
+    [[nodiscard]] auto & GetFirstOrg(this auto & self) {
+      emp_assert(GetNumOrgs() > 0);
+      return self.biota[self.occupied.FindOne()];
+    }
+    [[nodiscard]] bool IsOccupied(size_t id) const { return } { return occupied[id]; }
+    [[nodiscard]] int32_t GetNumOrgs() const { return org_count; }
 
     template <typename FUN_T>
     [[nodiscard]] double GetAveTrait(const FUN_T & fun) const {
@@ -148,14 +126,17 @@ namespace avida {
       return GetAveTrait([](const organism_t & org){ return org.GetGeneration(); });
     }
 
+    // Get a plug-in by realized type.
     template <typename PLUG_IN_T>
-    [[nodiscard]] PLUG_IN_T & GetPlugIn() { return std::get<PLUG_IN_T>(plug_ins); }
+    [[nodiscard]] auto & GetPlugIn() { return plug_ins.template Get<PLUG_IN_T>(); }
 
+    // Get a plug-in by template type.
     template <template <typename> typename PLUG_IN_T>
-    [[nodiscard]] PLUG_IN_T<this_t> & GetPlugIn() { return std::get<PLUG_IN_T<this_t>>(plug_ins); }
+    [[nodiscard]] auto & GetPlugIn() { return plug_ins.template Get<PLUG_IN_T>(); }
 
+    // Get a plug-in by position.
     template <size_t INDEX>
-    [[nodiscard]] auto & GetPlugIn() { return std::get<INDEX>(plug_ins); }
+    [[nodiscard]] auto & GetPlugIn() { return plug_ins.template Get<INDEX>(); }
 
     manager_t & GetHWManager(const emp::String & name) {
       emp_assert( emp::Has(hw_man_map, name) );
@@ -173,7 +154,7 @@ namespace avida {
         << "Allowed flags include:\n"
         << "  --help (or -h) : Print this message.\n"
         << std::endl;
-      Signal_OnHelp();  // Allow plug-ins to provide help information.
+      plug_ins.OnHelp();  // Allow plug-ins to provide help information.
       exit(0);
     }
 
@@ -221,12 +202,9 @@ namespace avida {
 
     // ====== Organism Management ======
 
-    [[nodiscard]] auto & GetOrg(this auto & self, size_t id) { return self.biota[id]; }
-    [[nodiscard]] auto & GetFirstOrg(this auto & self) { return self.biota[self.occupied.FindOne()]; }
-
     void Inject(manager_t & hw_man, genome_t && genome) {
       organism_t inject_org{hw_man, std::move(genome)};
-      Signal_OnInjectReady(inject_org);
+      plug_ins.OnInjectReady(inject_org);
       return PlaceOrganism(std::move(inject_org));
     }
     
@@ -245,11 +223,11 @@ namespace avida {
     // Collect an offspring from a designated parent organism.
     void DivideOrg(organism_t & parent_org) {
       emp_assert(parent_org.OK());
-      Signal_BeforeRepro(parent_org);
+      plug_ins.BeforeRepro(parent_org);
       genome_t offspring_genome = parent_org.DivideGenome(random);
       if (offspring_genome.size()) {
         organism_t offspring{parent_org, std::move(offspring_genome)};
-        Signal_OnOffspringReady(offspring, parent_org);
+        plug_ins.OnOffspringReady(offspring, parent_org);
         PlaceOrganism( std::move(offspring) );
       }
     }
@@ -257,8 +235,9 @@ namespace avida {
     // Delete an organism at a specific position in the biota.
     void DeleteOrg(size_t delete_id) {
       emp_assert(delete_id < biota.size());
+      emp_assert(IsOccupied(delete_id));
 
-      Signal_BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
+      plug_ins.BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
       biota[delete_id].SignalDeath();       // Notify organism before deletion.
       occupied.Clear(delete_id);
       --org_count;
@@ -268,9 +247,7 @@ namespace avida {
     void DeleteOrg() {
       emp_assert(GetNumOrgs() > 0); // Must have something to delete!
       size_t delete_id = random.GetUInt32(biota.size());
-      if (occupied[delete_id]) {
-        DeleteOrg(delete_id);
-      }
+      if (IsOccupied(delete_id)) DeleteOrg(delete_id);
       else DeleteOrg(); // Our random choice did not work... try again!
     }
 
@@ -280,9 +257,9 @@ namespace avida {
     // Process a single update for Avida
     void DoUpdate() {
       emp_assert(GetNumOrgs() > 0, "Running DoUpdate() with no organisms.");
-      Signal_OnUpdateEnd(update);
+      plug_ins.OnUpdateEnd(update);
       ++update;
-      Signal_OnUpdateStart(update);
+      plug_ins.OnUpdateStart(update);
     }
 
     void ProcessOrg(size_t id, int32_t num_cycles) {
@@ -292,7 +269,7 @@ namespace avida {
     void Run() { while (true) DoUpdate(); }
 
     void Exit() {
-      Signal_BeforeExit();  // Notify plug-ins of deletion.
+      plug_ins.BeforeExit();  // Notify plug-ins of exit.
       biota.clear();
 
       // Delete all of the hardware managers and the hardware they have.
