@@ -8,7 +8,6 @@
  *  This is the main controller class for Avida.
  * 
  *  DEVELOPER notes:
- *  - Create macro for Signal_ functions
  *  - Create a driver plug-in module 
  *  - Move signals to their own class?
  *  - Shift to a byte-sized occupied "flag" (with other info?)
@@ -129,90 +128,31 @@ namespace avida {
       std::apply([&signal_fun](auto &... p){ (signal_fun(p), ...); }, plug_ins);
     }
 
-    // AVIDA_TRIGGER_SIGNAL(&org, OnPlacement(org));
-
-    void Signal_BeforeUpdate(size_t update) {
-      TriggerSignal([update](auto & plug_in){
-        if constexpr (requires { plug_in.BeforeUpdate(update); }) {
-          plug_in.BeforeUpdate(update);
-        }
+    #define AVIDA_SIGNAL_DEF(TRIGGER, ...)                                 \
+      TriggerSignal([__VA_ARGS__](auto & plug_in) {                        \
+        if constexpr (requires { plug_in.TRIGGER; }) { plug_in.TRIGGER; }  \
       });
+
+    void Signal_BeforeUpdate(size_t update) { AVIDA_SIGNAL_DEF(BeforeUpdate(update), update); }
+    void Signal_OnUpdate(size_t update) { AVIDA_SIGNAL_DEF(OnUpdate(update), update); }
+
+    void Signal_BeforeRepro(organism_t & parent) { AVIDA_SIGNAL_DEF(BeforeRepro(parent), &parent); }
+
+    void Signal_OnOffspringReady(organism_t & offspring, organism_t & parent) {
+      AVIDA_SIGNAL_DEF(OnOffspringReady(offspring, parent), &offspring, &parent);
     }
 
-    void Signal_OnUpdate(size_t update) {
-      TriggerSignal([update](auto & plug_in){
-        if constexpr (requires { plug_in.OnUpdate(update); }) {
-          plug_in.OnUpdate(update);
-        }
-      });
-    }
+    void Signal_OnInjectReady(organism_t & org) { AVIDA_SIGNAL_DEF(OnInjectReady(org), &org); }
+    void Signal_BeforePlacement(organism_t & org) { AVIDA_SIGNAL_DEF(BeforePlacement(org), &org); }
+    void Signal_OnPlacement(organism_t & org) { AVIDA_SIGNAL_DEF(OnPlacement(org), &org); }
+    void Signal_BeforeDeath(organism_t & org) { AVIDA_SIGNAL_DEF(BeforeDeath(org), &org); }
 
-    void Signal_BeforeRepro(organism_t & parent_org) {
-      TriggerSignal([&parent_org](auto & plug_in){
-        if constexpr (requires { plug_in.BeforeRepro(parent_org); }) {
-          plug_in.BeforeRepro(parent_org);
-        }
-      });
-    }
+    // @CAO TODO: Call these
+    void Signal_BeforeMutate(organism_t & org) { AVIDA_SIGNAL_DEF(BeforeMutate(org), &org); }
+    void Signal_OnMutate(organism_t & org) { AVIDA_SIGNAL_DEF(OnMutate(org), &org); }
 
-    void Signal_OnOffspringReady(organism_t & offspring, organism_t & parent_org) {
-      TriggerSignal([&offspring, &parent_org](auto & plug_in){
-        if constexpr (requires { plug_in.OnOffspringReady(offspring, parent_org); }) {
-          plug_in.OnOffspringReady(offspring, parent_org);
-        }
-      });
-    }
-
-    void Signal_OnInjectReady(organism_t & org) {
-      TriggerSignal([&org](auto & plug_in){
-        if constexpr (requires { plug_in.OnInjectReady(org); }) plug_in.OnInjectReady(org);
-      });
-    }
-
-    void Signal_BeforePlacement(organism_t & org) {
-      TriggerSignal([&org](auto & plug_in){
-        if constexpr (requires { plug_in.BeforePlacement(org); }) plug_in.BeforePlacement(org);
-      });
-    }
-
-    void Signal_OnPlacement(organism_t & org) {
-      TriggerSignal([&org](auto & plug_in){
-        if constexpr (requires { plug_in.OnPlacement(org); }) plug_in.OnPlacement(org);
-      });
-    }
-
-    // @CAO TODO: Call this
-    void Signal_BeforeMutate(organism_t & org) {
-      TriggerSignal([&org](auto & plug_in){
-        if constexpr (requires { plug_in.BeforeMutate(org); }) plug_in.BeforeMutate(org);
-      });
-    }
-
-    // @CAO TODO: Call this
-    void Signal_OnMutate(organism_t & org) {
-      TriggerSignal([&org](auto & plug_in){
-        if constexpr (requires { plug_in.OnMutate(org); }) plug_in.OnMutate(org);
-      });
-    }
-
-    void Signal_BeforeDeath(organism_t & org) {
-      TriggerSignal([&org](auto & plug_in){
-        if constexpr (requires { plug_in.BeforeDeath(org); }) plug_in.BeforeDeath(org);
-      });
-    }
-
-    void Signal_BeforeExit() {
-      TriggerSignal([](auto & plug_in){
-        if constexpr (requires { plug_in.BeforeExit(); }) plug_in.BeforeExit();
-      });
-    }
-
-    void Signal_OnHelp() {
-      TriggerSignal([](auto & plug_in){
-        if constexpr (requires { plug_in.OnHelp(); }) plug_in.OnHelp();
-      });
-    }
-
+    void Signal_BeforeExit() { AVIDA_SIGNAL_DEF(BeforeExit(), ); }
+    void Signal_OnHelp() { AVIDA_SIGNAL_DEF(OnHelp(), ); }
 
   public:
     Avida() : plug_ins(PLUG_IN_Ts<this_t>{*this}...) { }
