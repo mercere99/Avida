@@ -11,6 +11,7 @@
  *  - Create a driver plug-in module 
  *  - Move signals to their own class?
  *  - Shift to a byte-sized occupied "flag" (with other info?)
+ *  - Allow hardware variant to form special type of organism that can use any listed hardware.
  */
 
 #include "emp/base/Ptr.hpp"
@@ -33,7 +34,8 @@ namespace avida {
   template <typename HARDWARE_T, template <typename> typename... PLUG_IN_Ts>
   class Avida {
   public:
-    using this_t = Avida<HARDWARE_T, PLUG_IN_Ts...>;   // @CAO TODO: Allow a special case where HARDWARE_T is a variant?
+    static_assert(sizeof...(PLUG_IN_Ts) > 0, "At least one Avida plug-in required to manage run.")
+    using this_t = Avida<HARDWARE_T, PLUG_IN_Ts...>;
 
     using hardware_t = HARDWARE_T;                  // Type of general hardware for all organisms
     using manager_t = HardwareManager<hardware_t>;  // Type of manager to recycle hardware
@@ -54,44 +56,19 @@ namespace avida {
 
     //======> @CAO - move this block to plug-in?
     emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
-    int32_t pop_cap = 10000;                          // Population size limit (default: 10,000 orgs)
     static constexpr int32_t ave_cycles_per_org = 30; // Total cycles to execute per org per update.
     static constexpr int32_t CPU_chunk_size = 10;     // Num cycles executed each time org is picked.
     int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
     // ===== Helper Functions =====
-    // Delete an organism at a specific position in the biota.
-    void DeleteOrg(size_t delete_id) {
-      emp_assert(delete_id < biota.size());
-
-      Signal_BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
-      biota[delete_id].SignalDeath();       // Notify organism before deletion.
-      speed_map.Set(delete_id, 0.0);        // Set old index speed to 0; don't shrink speed_map
-      occupied.Clear(delete_id);
-      --org_count;
-    }
-
-    // Delete a random (occupied) organism position.
-    void DeleteOrg() {
-      emp_assert(GetNumOrgs() > 0); // Must have something to delete!
-      size_t delete_id = random.GetUInt32(biota.size());
-      if (occupied[delete_id]) {
-        DeleteOrg(delete_id);
-      }
-      else DeleteOrg(); // Our random choice did not work... try again!
-    }
-
     void PlaceOrganism(organism_t && org_to_place) {
       emp_assert(occupied.size() == biota.size());
       emp_assert(org_count.CountOnes() == org_count);
 
       Signal_BeforePlacement(org_to_place);
 
-      // See if we must delete an organism before we can add a new one.
-      if (GetNumOrgs() == pop_cap) DeleteOrg();
-
-      size_t index = occupied.FindZero();
-      if (index == emp::BitVector::npos) {
+      size_t index = occupied.FindZero();    // Find empty position in biota.
+      if (index == emp::BitVector::npos) {   // If no empty position available, add one.
         index = occupied.PushBack(true);
         biota.emplace_back(std::move(org_to_place));
       } else {
@@ -107,19 +84,8 @@ namespace avida {
       Signal_OnPlacement(placed_org);
     }
 
-    void DoDivide(organism_t & parent_org) {
-      emp_assert(parent_org.OK());
-      Signal_BeforeRepro(parent_org);
-      genome_t offspring_genome = parent_org.DivideGenome(random);
-      if (offspring_genome.size()) {
-        organism_t offspring{parent_org, std::move(offspring_genome)};
-        Signal_OnOffspringReady(offspring, parent_org);
-        PlaceOrganism( std::move(offspring) );
-      }  
-    }
-
     void AddCallbacks(manager_t & hw_man) {
-      hw_man.AddCallback("DivideCell", [this](organism_t & org){ DoDivide(org); });
+      hw_man.AddCallback("DivideCell", [this](organism_t & org){ DivideOrg(org); });
     }
 
 
@@ -133,8 +99,8 @@ namespace avida {
         if constexpr (requires { plug_in.TRIGGER; }) { plug_in.TRIGGER; }  \
       });
 
-    void Signal_BeforeUpdate(size_t update) { AVIDA_SIGNAL_DEF(BeforeUpdate(update), update); }
-    void Signal_OnUpdate(size_t update) { AVIDA_SIGNAL_DEF(OnUpdate(update), update); }
+    void Signal_OnUpdateStart(size_t update) { AVIDA_SIGNAL_DEF(OnUpdateStart(update), update); }
+    void Signal_OnUpdateEnd(size_t update) { AVIDA_SIGNAL_DEF(OnUpdateEnd(update), update); }
 
     void Signal_BeforeRepro(organism_t & parent) { AVIDA_SIGNAL_DEF(BeforeRepro(parent), &parent); }
 
@@ -171,14 +137,7 @@ namespace avida {
         }
       }
     }
-    ~Avida() {
-      Signal_BeforeExit();  // Notify plug-ins of deletion.
-      biota.clear();
-
-      // Delete all of the hardware managers and the hardware they have.
-      for ( auto & [name, ptr] : hw_man_map) ptr.Delete();
-      hw_man_map.clear();
-    }
+    ~Avida() { Exit(); }
 
     [[nodiscard]] int32_t GetNumOrgs() const { return org_count; }
 
@@ -250,6 +209,9 @@ namespace avida {
       return true;
     }
 
+
+    // ====== Configuration Management ======
+
     // Initialize the hardware manager (with AvidVM) and the biota (with the default) ancestor.
     void Setup() {
       // Default to the AvidaVM hardware manager.
@@ -257,9 +219,14 @@ namespace avida {
       AddCallbacks(hw_man);
 
       // Inject a single individual of the default ancestor.
-      pop_cap = 10000;
       Inject(hw_man, "../config/ancestor.org");
     }
+
+
+    // ====== Organism Management ======
+
+    [[nodiscard]] auto & GetOrg(this auto & self, size_t id) { return self.biota[id]; }
+    [[nodiscard]] auto & GetFirstOrg(this auto & self) { return self.biota[self.occupied.FindOne()]; }
 
     void Inject(manager_t & hw_man, genome_t && genome) {
       organism_t inject_org{hw_man, std::move(genome)};
@@ -279,12 +246,48 @@ namespace avida {
       return Inject(hw_man, std::move(*exp_genome));
     }
 
+    // Collect an offspring from a designated parent organism.
+    void DivideOrg(organism_t & parent_org) {
+      emp_assert(parent_org.OK());
+      Signal_BeforeRepro(parent_org);
+      genome_t offspring_genome = parent_org.DivideGenome(random);
+      if (offspring_genome.size()) {
+        organism_t offspring{parent_org, std::move(offspring_genome)};
+        Signal_OnOffspringReady(offspring, parent_org);
+        PlaceOrganism( std::move(offspring) );
+      }
+    }
+
+    // Delete an organism at a specific position in the biota.
+    void DeleteOrg(size_t delete_id) {
+      emp_assert(delete_id < biota.size());
+
+      Signal_BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
+      biota[delete_id].SignalDeath();       // Notify organism before deletion.
+      speed_map.Set(delete_id, 0.0);        // Set old index speed to 0; don't shrink speed_map
+      occupied.Clear(delete_id);
+      --org_count;
+    }
+
+    // Delete a random (occupied) organism position.
+    void DeleteOrg() {
+      emp_assert(GetNumOrgs() > 0); // Must have something to delete!
+      size_t delete_id = random.GetUInt32(biota.size());
+      if (occupied[delete_id]) {
+        DeleteOrg(delete_id);
+      }
+      else DeleteOrg(); // Our random choice did not work... try again!
+    }
+
+
+    // ====== Run Management ======
+
     // Process a single update for Avida
     void DoUpdate() {
       emp_assert(GetNumOrgs() > 0, "Running DoUpdate() with no organisms.");
-      Signal_BeforeUpdate(update);
+      Signal_OnUpdateEnd(update);
       ++update;
-      Signal_OnUpdate(update);
+      Signal_OnUpdateStart(update);
       const int32_t cycles = GetNumOrgs() * ave_cycles_per_org;
       for (int32_t rounds = cycles / CPU_chunk_size; rounds; --rounds) {
         const size_t id = speed_map.Index(random.GetDouble(speed_map.GetWeight()));
@@ -294,19 +297,15 @@ namespace avida {
 
     }
 
-    void Run(size_t ud_count=10000) {
-      for (size_t ud = 0; ud < ud_count; ++ud) {
-        if (ud % 100 == 0) {
-          std::cout << "UD:" << ud
-                    << "  Pop Size:" << GetNumOrgs()
-                    << "  Generation: " << GetAveGeneration()
-                    << "  Genome0:[" << biota[0].GetGenomeSequence() << "]"
-                    << std::endl;
-        }
-        DoUpdate();
-      }
-      std::cout << "Final Pop Size = " << biota.size() << std::endl;
-      std::cout << "Total Cycles = "   << cycles_executed << std::endl;
+    void Run() { while (true) DoUpdate(); }
+
+    void Exit() {
+      Signal_BeforeExit();  // Notify plug-ins of deletion.
+      biota.clear();
+
+      // Delete all of the hardware managers and the hardware they have.
+      for ( auto & [name, ptr] : hw_man_map) ptr.Delete();
+      hw_man_map.clear();
     }
   };
 
