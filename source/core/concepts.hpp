@@ -29,16 +29,16 @@ namespace avida::concepts {
 
   // === Signals ===
 
-  // Class reacts to signal: Update is ending; new one is about to start
-  template <typename T>
-  concept HasBeforeUpdate = requires(T plugin, size_t old_update) {
-    { plugin.BeforeUpdate(old_update) } -> std::convertible_to<bool>;
-  };
-
   // Class reacts to signal: New update has just started.
   template <typename T>
-  concept HasOnUpdate = requires(T plugin, size_t new_update) {
-    { plugin.OnUpdate(new_update) } -> std::convertible_to<bool>;
+  concept HasOnUpdateStart = requires(T plugin, size_t new_update) {
+    { plugin.OnUpdateStart(new_update) } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Update is ending; new one is about to start
+  template <typename T>
+  concept HasOnUpdateEnd = requires(T plugin, size_t old_update) {
+    { plugin.OnUpdateEnd(old_update) } -> std::convertible_to<bool>;
   };
 
   // Class reacts to signal: Parent is about to (try to) reproduce.
@@ -68,26 +68,26 @@ namespace avida::concepts {
 
   // Class reacts to signal: New organism has been placed in the population.
   template <typename T>
-  concept HasOnPlacement = requires(T plugin, size_t placement_pos) {
-    { plugin.OnPlacement(placement_pos) } -> std::convertible_to<bool>;
+  concept HasOnPlacement = requires(T plugin, typename T::organism_t & org) {
+    { plugin.OnPlacement(org) } -> std::convertible_to<bool>;
   };
 
   // Class reacts to signal: Mutate is about to run on an organism.
   template <typename T>
-  concept HasBeforeMutate = requires(T plugin, size_t org_pos) {
-    { plugin.BeforeMutate(org_pos) } -> std::convertible_to<bool>;
+  concept HasBeforeMutate = requires(T plugin, typename T::organism_t & org) {
+    { plugin.BeforeMutate(org) } -> std::convertible_to<bool>;
   };
 
   // Class reacts to signal: Organism has had its genome changed due to mutation.
   template <typename T>
-  concept HasOnMutate = requires(T plugin, size_t org_pos) {
-    { plugin.OnMutate(org_pos) } -> std::convertible_to<bool>;
+  concept HasOnMutate = requires(T plugin, typename T::organism_t & org) {
+    { plugin.OnMutate(org) } -> std::convertible_to<bool>;
   };
 
   // Class reacts to signal: Organism is about to die.
   template <typename T>
-  concept HasBeforeDeath = requires(T plugin, size_t remove_pos) {
-    { plugin.BeforeDeath() } -> std::convertible_to<bool>;
+  concept HasBeforeDeath = requires(T plugin, typename T::organism_t & org) {
+    { plugin.BeforeDeath(org) } -> std::convertible_to<bool>;
   };
 
   // Class reacts to signal: Run immediately before Avida exits.

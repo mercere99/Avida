@@ -47,12 +47,12 @@ namespace avida {
 
     // === Signal Listeners ===
 
-    bool BeforeUpdate(size_t old_update) {
-      return Log("Ending update:", old_update, " <==");
+    bool OnUpdateStart(size_t new_update) {
+      return Log("==> Starting update:", new_update, "; Num orgs = ", avida.GetNumOrgs());
     }
 
-    bool OnUpdate(size_t new_update) {
-      return Log("==> Starting update:", new_update, "; Num orgs = ", avida.GetNumOrgs());
+    bool OnUpdateEnd(size_t old_update) {
+      return Log("Ending update:", old_update, " <==");
     }
 
     template <concepts::Organism ORG_T>
