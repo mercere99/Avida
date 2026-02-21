@@ -45,31 +45,58 @@ namespace avida {
       os_ptr.NewDerived<std::ofstream>(filename);
     }
 
-    bool BeforeUpdate(size_t old_update) { return Log("Ending update:", old_update); }
-    bool OnUpdate(size_t new_update) { return Log("Starting update:", new_update); }
-    bool BeforeRepro(size_t parent_pos) { return Log("Org ", parent_pos, "about to replicate"); }
+    // === Signal Listeners ===
 
-    template <concepts::Organism ORG_T>
-    bool OffspringReady(ORG_T & offspring, size_t parent_pos) {
-      return Log("Offspring ready from ", parent_pos, " : ", offspring.GetGenomeSequence());
+    bool BeforeUpdate(size_t old_update) {
+      return Log("Ending update:", old_update, " <==");
+    }
+
+    bool OnUpdate(size_t new_update) {
+      return Log("==> Starting update:", new_update, "; Num orgs = ", avida.GetNumOrgs());
     }
 
     template <concepts::Organism ORG_T>
-    bool InjectReady(ORG_T & inject_org) {
+    bool BeforeRepro(ORG_T & parent) {
+      return Log("Org at ", parent.GetPosition(), " about to replicate");
+    }
+
+    template <concepts::Organism ORG_T>
+    bool OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
+      return Log("Offspring ready from ", parent.GetPosition(), " : ", offspring.GetGenomeSequence());
+    }
+
+    template <concepts::Organism ORG_T>
+    bool OnInjectReady(ORG_T & inject_org) {
       return Log("Organism Injection ready : ", inject_org.GetGenomeSequence());
     }
 
     template <concepts::Organism ORG_T>
-    bool BeforePlacement(ORG_T & org, size_t target_pos, size_t parent_pos) {
-      return Log("Organism (", org.GetID(), ") about to be placed at position ", target_pos,
-                 " (with parent at position ", parent_pos, ")");
+    bool BeforePlacement(ORG_T & org) {
+      return Log("Organism (", org.GetID(), ") about to be placed into population)");
     }
 
-    bool OnPlacement(size_t pos) { return Log("Welcome new or at position ", pos, "!"); }
-    bool BeforeMutate(size_t pos) { return Log("Org at position ", pos, " about to mutate!"); }
-    bool OnMutate(size_t pos) { return Log("Org at position ", pos, " has been mutated!"); }
-    bool BeforeDeath(size_t pos) { return Log("Org at position ", pos, " about to DIE!"); }
+    template <concepts::Organism ORG_T>
+    bool OnPlacement(ORG_T & org) {
+      return Log("Welcome new or at position ", org.GetPosition(), "!");
+    }
+
+    template <concepts::Organism ORG_T>
+    bool BeforeMutate(ORG_T & org) {
+      return Log("Org at position ", org.GetPosition(), " about to mutate!");
+    }
+
+    template <concepts::Organism ORG_T>
+    bool OnMutate(ORG_T & org) {
+      return Log("Org at position ", org.GetPosition(), " has been mutated!");
+    }
+
+    template <concepts::Organism ORG_T>
+    bool BeforeDeath(ORG_T & org) {
+      return Log("Org at position ", org.GetPosition(), " about to DIE!");
+    }
+
     bool BeforeExit() { return Log("Program about to exit..."); }
+    
     bool OnHelp() { return Log("Help has been requested!"); }
   };
 
