@@ -77,7 +77,7 @@ namespace avida {
 
     template <concepts::Organism ORG_T>
     bool OnPlacement(ORG_T & org) {
-      return Log("Welcome new or at position ", org.GetPosition(), "!");
+      return Log("New org placed as position ", org.GetPosition(), "!");
     }
 
     template <concepts::Organism ORG_T>
@@ -96,7 +96,7 @@ namespace avida {
     }
 
     bool BeforeExit() { return Log("Program about to exit..."); }
-    
+
     bool OnHelp() { return Log("Help has been requested!"); }
   };
 

@@ -658,8 +658,10 @@ namespace avida {
       return GetInstSet().GetSymbol(ReadIP());
     }
 
+    [[nodiscard]] emp::String GetGenomeString() const { return GetInstSet().ToSequence(genome); }
+
     [[nodiscard]] emp::String StatusString() const {
-      emp::String out = GetInstSet().ToSequence(genome);
+      emp::String out = GetGenomeString();
       if (IP() < out.size()) {
         out.insert(IP(), ">");
       }

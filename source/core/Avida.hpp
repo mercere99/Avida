@@ -44,14 +44,15 @@ namespace avida {
   private:    
     std::tuple<PLUG_IN_Ts<this_t>...> plug_ins;
 
-    emp::Random random;
-    biota_t biota{};
-    emp::BitVector occupied{};
+    size_t update = 0;          // Times update was run on this population
+    emp::Random random;         // Central random number generator
+    biota_t biota{};            // Collection of all current organisms
+    emp::BitVector occupied{};  // Which organisms in biota are active?
+    size_t org_count = 0;       // Current number of active organisms
+
     std::unordered_map< emp::String, emp::Ptr<manager_t> > hw_man_map{};
-    size_t org_count = 0;
 
     //======> @CAO - move this block to plug-in?
-    size_t update = 0;                                // Times update was run on this population
     emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
     int32_t pop_cap = 10000;                          // Population size limit (default: 10,000 orgs)
     static constexpr int32_t ave_cycles_per_org = 30; // Total cycles to execute per org per update.
@@ -121,7 +122,6 @@ namespace avida {
       hw_man.AddCallback("DivideCell", [this](organism_t & org){ DoDivide(org); });
     }
 
-    
 
     // === Signals ===
     void TriggerSignal(auto signal_fun) {
