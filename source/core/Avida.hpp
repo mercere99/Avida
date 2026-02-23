@@ -8,7 +8,6 @@
  *  This is the main controller class for Avida.
  * 
  *  DEVELOPER notes:
- *  - Shift to a byte-sized occupied "flag" (with other info?)
  *  - Allow hardware variant to form special type of organism that can use any listed hardware.
  */
 
@@ -112,7 +111,7 @@ namespace avida {
       emp_assert(GetNumOrgs() > 0);
       return self.biota[self.occupied.FindOne()];
     }
-    [[nodiscard]] bool IsOccupied(size_t id) const { return } { return occupied[id]; }
+    [[nodiscard]] bool IsOccupied(size_t id) const { return occupied[id]; }
     [[nodiscard]] int32_t GetNumOrgs() const { return org_count; }
 
     template <typename FUN_T>
@@ -151,10 +150,13 @@ namespace avida {
 
     void PrintHelp(const emp::String & exec_name, std::ostream & os) {
       os << "Format: " << exec_name << " [flags]\n"
-        << "Allowed flags include:\n"
-        << "  --help (or -h) : Print this message.\n"
-        << std::endl;
-      plug_ins.OnHelp();  // Allow plug-ins to provide help information.
+         << "Allowed flags include:\n"
+         << "  --help (or -h) : Print this message.\n"
+         << "\n"
+         << "Current plug-ins: " << emp::MakeList(plug_ins.GetNames(), ", ")
+         << std::endl;
+      
+      plug_ins.OnHelp();  // Allow plug-ins to provide help information.      
       exit(0);
     }
 
