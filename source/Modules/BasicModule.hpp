@@ -5,13 +5,14 @@
  *
  *  This module configures and runs a standard avida population.
  *  - One well-mixed population
+ *  - A scheduler that allocates based on metabolic rate
+ *  - A limit on the number of updates run
  */
 
 #include <cstddef>   // for size_t
 #include <fstream>
 #include <iostream>
 
-#include "../core/Avida.hpp"
 #include "../core/concepts.hpp"
 
 namespace avida {
@@ -33,6 +34,9 @@ namespace avida {
   public:
     BasicModule(AVIDA_T & avida) : avida(avida) { }
     ~BasicModule() { }
+
+    constexpr static std::string GetName() { return "BasicModule"; }
+    constexpr static std::string GetType() { return "Population Manager"; }
 
     // === Signal Listeners ===
 

@@ -3,8 +3,7 @@
  *  Copyright (C) Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
- *  This module configures and runs a standard avida population.
- *  - One well-mixed population
+ *  This is a starter plug-in module, with all of the signals listed, but none set to do anything.
  */
 
 #include <cstddef>   // for size_t
@@ -17,13 +16,16 @@
 namespace avida {
 
   template <typename AVIDA_T>
-  class BasicModule {
+  class ModuleTemplate {
   private:
     AVIDA_T & avida;
 
   public:
-    BasicModule(AVIDA_T & avida) : avida(avida) { }
-    ~BasicModule() { }
+    ModuleTemplate(AVIDA_T & avida) : avida(avida) { }
+    ~ModuleTemplate() { }
+
+    constexpr static std::string GetName() { static_assert(false, "Must output a module name."); }
+    constexpr static std::string GetName() { static_assert(false, "Must output a module type."); }
 
     // === Signal Listeners ===
 

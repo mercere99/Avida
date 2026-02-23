@@ -36,6 +36,11 @@ namespace avida {
     LogModule(AVIDA_T & avida) : avida(avida) { }
     ~LogModule() { if (filename.size()) os_ptr.Delete(); }
 
+    constexpr static std::string GetName() { return "LogModule"; }
+    constexpr static std::string GetType() { return "Analysis Tool"; }
+
+    // === Configuration Helpers ===
+
     void SetOutFile(std::string name) {
       emp_assert(name.size() > 0);
 
