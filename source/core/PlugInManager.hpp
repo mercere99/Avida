@@ -39,6 +39,20 @@ namespace avida {
     template <size_t INDEX>
     [[nodiscard]] auto & Get() { return std::get<INDEX>(plug_ins); }
 
+    // Get the names of all of the plug-ins
+    emp::vector<emp::String> GetNames() {
+      emp::vector<emp::String> out;
+      std::apply([&out](auto &... p){ out = { p.GetName()... }; }, plug_ins);
+      return out;
+    }
+
+    // Get the types of all of the plug-ins
+    emp::vector<emp::String> GetTypes() {
+      emp::vector<emp::String> out;
+      std::apply([&out](auto &... p){ out = { p.GetType()... }; }, plug_ins);
+      return out;
+    }
+
     // Build out all of the individual signals.
 
     // Start with a signal generator macro.
