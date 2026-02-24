@@ -4,13 +4,11 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
  *  This module configures and runs a standard avida population.
- *  - One well-mixed population
  *  - A scheduler that allocates based on metabolic rate
  *  - A limit on the number of updates run
  */
 
 #include <cstddef>   // for size_t
-#include <fstream>
 #include <iostream>
 
 #include "../core/concepts.hpp"
@@ -18,11 +16,10 @@
 namespace avida {
 
   template <typename AVIDA_T>
-  class BasicModule {
+  class RunStandard {
   private:
     AVIDA_T & avida;
 
-    int32_t pop_cap = 10000;    // Population size limit (default: 10,000 orgs)
     size_t last_update = 10000; // How many updated should the run go for?
 
     // CPU Execution Management
@@ -32,11 +29,11 @@ namespace avida {
     int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
   public:
-    BasicModule(AVIDA_T & avida) : avida(avida) { }
-    ~BasicModule() { }
+    RunStandard(AVIDA_T & avida) : avida(avida) { }
+    ~RunStandard() { }
 
-    constexpr static std::string GetName() { return "BasicModule"; }
-    constexpr static std::string GetType() { return "Population Manager"; }
+    constexpr static std::string GetName() { return "RunStandard"; }
+    constexpr static std::string GetType() { return "Execution Manager"; }
 
     // === Signal Listeners ===
 
@@ -70,41 +67,8 @@ namespace avida {
     }
 
     template <concepts::Organism ORG_T>
-    bool BeforeRepro([[maybe_unused]] ORG_T & parent) {
-      return true;
-    }
-
-    template <concepts::Organism ORG_T>
-    bool OnOffspringReady([[maybe_unused]] ORG_T & offspring, [[maybe_unused]] ORG_T & parent) {
-      return true;
-    }
-
-    template <concepts::Organism ORG_T>
-    bool OnInjectReady([[maybe_unused]] ORG_T & inject_org) {
-      return true;
-    }
-
-    template <concepts::Organism ORG_T>
-    bool BeforePlacement([[maybe_unused]] ORG_T & org) {
-      // See if we must delete an organism to make room for the new one.
-      if (avida.GetNumOrgs() == pop_cap) avida.DeleteOrg();
-
-      return true;
-    }
-
-    template <concepts::Organism ORG_T>
     bool OnPlacement(ORG_T & org) {
       speed_map.Set(org.GetPosition(), org.GetMetabolicRate());
-      return true;
-    }
-
-    template <concepts::Organism ORG_T>
-    bool BeforeMutate([[maybe_unused]] ORG_T & org) {
-      return true;
-    }
-
-    template <concepts::Organism ORG_T>
-    bool OnMutate([[maybe_unused]] ORG_T & org) {
       return true;
     }
 
@@ -114,16 +78,6 @@ namespace avida {
       return true;
     }
 
-    bool BeforeExit() {      
-      std::cout << "Final Pop Size = " << avida.GetNumOrgs() << std::endl;
-//      std::cout << "Total Cycles = "   << cycles_executed << std::endl;
-      return true;
-    }
-    
-    bool OnHelp() {
-      return true;
-      
-    }
   };
 
 
