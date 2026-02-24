@@ -7,14 +7,16 @@
 #include "core/Avida.hpp"
 
 #include "Modules/LogModule.hpp"
+#include "Modules/PopWellMixed.hpp"
+#include "Modules/RunStandard.hpp"
 
 using namespace avida;
 
 int main(int argc, char * argv[])
 {
-  using avida_t = Avida<AvidaVM, LogModule>;
+  using avida_t = Avida<AvidaVM, PopWellMixed, RunStandard>;
   avida_t avida(emp::ArgsToStrings(argc, argv));
+  // avida.GetPlugIn<LogModule>().SetOutFile("avida.log");
   avida.Setup();
-  avida.GetPlugIn<LogModule>().SetOutFile("avida.log");
-  avida.Run(10000);
+  avida.Run();
 }
