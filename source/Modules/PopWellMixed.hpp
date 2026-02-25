@@ -11,36 +11,30 @@
 #include <cstddef>   // for size_t
 #include <iostream>
 
-#include "../core/concepts.hpp"
+#include "../core/Avida.hpp"
 
-namespace avida {
+template <typename AVIDA_T>
+class PopWellMixed : public ModuleBase<AVIDA_T> {
+private:
+  AVIDA_T & avida;
 
-  template <typename AVIDA_T>
-  class PopWellMixed {
-  private:
-    AVIDA_T & avida;
+  int32_t pop_cap = 10000;    // Population size limit (default: 10,000 orgs)
 
-    int32_t pop_cap = 10000;    // Population size limit (default: 10,000 orgs)
+public:
+  PopWellMixed(AVIDA_T & avida)
+    : ModuleBase<AVIDA_T>("PopWellMixed", "PopManager", "Manage a well-mixed population")
+    , avida(avida) { }
+  ~PopWellMixed() { }
 
-  public:
-    PopWellMixed(AVIDA_T & avida) : avida(avida) { }
-    ~PopWellMixed() { }
+  // === Signal Listeners ===
 
-    constexpr static std::string GetName() { return "PopWellMixed"; }
-    constexpr static std::string GetType() { return "Population Manager"; }
+  // If we have a population cap, delete organisms rather than let population get overfull.
+  template <concepts::Organism ORG_T>
+  bool BeforePlacement([[maybe_unused]] ORG_T & org) {
+    // See if we must delete an organism to make room for the new one.
+    if (avida.GetNumOrgs() == pop_cap) avida.DeleteOrg();
 
-    // === Signal Listeners ===
+    return true;
+  }
 
-    // If we have a population cap, delete organisms rather than let population get overfull.
-    template <concepts::Organism ORG_T>
-    bool BeforePlacement([[maybe_unused]] ORG_T & org) {
-      // See if we must delete an organism to make room for the new one.
-      if (avida.GetNumOrgs() == pop_cap) avida.DeleteOrg();
-
-      return true;
-    }
-
-  };
-
-
-} // namespace avida
+};

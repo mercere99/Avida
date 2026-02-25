@@ -13,20 +13,21 @@
 #include "../core/Avida.hpp"
 
 template <typename AVIDA_T>
-class ModuleTemplate : public ModuleBase<AVIDA_T> {
+class TrackGeneration : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
 
 public:
-  ModuleTemplate(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("ModuleName", "ModuleType", "Module description text"), avida(avida) { }
-  ~ModuleTemplate() { }
+  TrackGeneration(AVIDA_T & avida)
+    : ModuleBase<AVIDA_T>("TrackGeneration", "Analysis", "Monitor lineage length.")
+    , avida(avida) { }
+  ~TrackGeneration() { }
 
   // === Phenotypic Traits ===
 
-  // struct Phenotype {
-  //   AVIDA_TRAIT(size_t, generation, "Number of offspring in chain since inject");
-  // };
+  struct Phenotype {
+    AVIDA_TRAIT(size_t, generation, "Number of offspring in chain since inject");
+  };
 
   // === Signal Listeners ===
 

@@ -11,74 +11,67 @@
 #include <cstddef>   // for size_t
 #include <iostream>
 
-#include "../core/concepts.hpp"
+#include "../core/Avida.hpp"
 
-namespace avida {
+template <typename AVIDA_T>
+class RunStandard : public ModuleBase<AVIDA_T> {
+private:
+  AVIDA_T & avida;
 
-  template <typename AVIDA_T>
-  class RunStandard {
-  private:
-    AVIDA_T & avida;
+  size_t last_update = 10000; // How many updated should the run go for?
 
-    size_t last_update = 10000; // How many updated should the run go for?
+  // CPU Execution Management
+  emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
+  static constexpr int32_t ave_cycles_per_org = 30; // Total cycles to execute per org per update.
+  static constexpr int32_t CPU_chunk_size = 10;     // Num cycles executed each time org is picked.
+  int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
-    // CPU Execution Management
-    emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
-    static constexpr int32_t ave_cycles_per_org = 30; // Total cycles to execute per org per update.
-    static constexpr int32_t CPU_chunk_size = 10;     // Num cycles executed each time org is picked.
-    int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
+public:
+  RunStandard(AVIDA_T & avida)
+    : ModuleBase<AVIDA_T>("RunStandard", "Execution", "Execute organisms based on metabolic rate.")
+    , avida(avida) { }
+  ~RunStandard() { }
 
-  public:
-    RunStandard(AVIDA_T & avida) : avida(avida) { }
-    ~RunStandard() { }
+  // === Signal Listeners ===
 
-    constexpr static std::string GetName() { return "RunStandard"; }
-    constexpr static std::string GetType() { return "Execution Manager"; }
-
-    // === Signal Listeners ===
-
-    bool OnUpdateStart(size_t new_update) {
-      // Test if this run should finish.
-      if (new_update > last_update) {
-        avida.Exit();
-        exit(0);
-      }
-
-      // Execute all organisms for this update.
-      const int32_t cycles = avida.GetNumOrgs() * ave_cycles_per_org;
-      for (int32_t rounds = cycles / CPU_chunk_size; rounds; --rounds) {
-        const size_t id = speed_map.Index(avida.GetRandom().GetDouble(speed_map.GetWeight()));
-        avida.ProcessOrg(id, CPU_chunk_size);
-      }
-      cycles_executed += cycles;
-
-      return true;
+  bool OnUpdateStart(size_t new_update) {
+    // Test if this run should finish.
+    if (new_update > last_update) {
+      avida.Exit();
+      exit(0);
     }
 
-    bool OnUpdateEnd(size_t old_update) {
-      if (old_update % 100 == 0) {
-        std::cout << "UD:" << old_update
-                  << "  PopSize:" << avida.GetNumOrgs()
-                  << "  Generation: " << avida.GetAveGeneration()
-                  << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
-                  << std::endl;
-      }
-      return true;
+    // Execute all organisms for this update.
+    const int32_t cycles = avida.GetNumOrgs() * ave_cycles_per_org;
+    for (int32_t rounds = cycles / CPU_chunk_size; rounds; --rounds) {
+      const size_t id = speed_map.Index(avida.GetRandom().GetDouble(speed_map.GetWeight()));
+      avida.ProcessOrg(id, CPU_chunk_size);
     }
+    cycles_executed += cycles;
 
-    template <concepts::Organism ORG_T>
-    bool OnPlacement(ORG_T & org) {
-      speed_map.Set(org.GetPosition(), org.GetMetabolicRate());
-      return true;
+    return true;
+  }
+
+  bool OnUpdateEnd(size_t old_update) {
+    if (old_update % 100 == 0) {
+      std::cout << "UD:" << old_update
+                << "  PopSize:" << avida.GetNumOrgs()
+                << "  Generation: " << avida.GetAveGeneration()
+                << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
+                << std::endl;
     }
+    return true;
+  }
 
-    template <concepts::Organism ORG_T>
-    bool BeforeDeath(ORG_T & org) {
-      speed_map.Set(org.GetPosition(), 0.0);  // Set old index speed to 0; don't shrink speed_map
-      return true;
-    }
+  template <concepts::Organism ORG_T>
+  bool OnPlacement(ORG_T & org) {
+    speed_map.Set(org.GetPosition(), org.GetMetabolicRate());
+    return true;
+  }
 
-  };
-
-
-} // namespace avida
+  template <concepts::Organism ORG_T>
+  bool BeforeDeath(ORG_T & org) {
+    speed_map.Set(org.GetPosition(), 0.0);  // Set old index speed to 0; don't shrink speed_map
+    return true;
+  }
+};
