@@ -7,5 +7,7 @@
 *.wasm.map
 *.worker.js
 
+bak/
+
 # Avida specific
 source/Avida
