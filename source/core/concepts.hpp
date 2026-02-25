@@ -18,7 +18,7 @@
 #include "emp/math/Random.hpp"
 #include "emp/tools/String.hpp"
 
-namespace avida::concepts {
+namespace concepts {
 
   // ===  Helper Concepts  ===
 
@@ -258,4 +258,4 @@ namespace avida::concepts {
     { org.DivideGenome(random) } -> std::same_as<typename ORG_T::genome_t>;
   };
 
-} // namespace avida::concepts
+} // namespace concepts

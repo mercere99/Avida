@@ -10,45 +10,42 @@
 
 #include "emp/tools/String.hpp"
 
-namespace avida {
-  template <typename DATA_T, size_t STACK_DEPTH>
-  struct VMStack {
-    emp::array<DATA_T, STACK_DEPTH> stack{0};
-    size_t stack_pos = 0;
+template <typename DATA_T, size_t STACK_DEPTH>
+struct VMStack {
+  emp::array<DATA_T, STACK_DEPTH> stack{0};
+  size_t stack_pos = 0;
 
-    void Reset() {
-      for (auto & entry : stack) entry = 0;
-      stack_pos = 0;
-    }
+  void Reset() {
+    for (auto & entry : stack) entry = 0;
+    stack_pos = 0;
+  }
 
-    void Push(DATA_T value) {
-      stack[stack_pos] = value;
-      stack_pos = (stack_pos+1) % STACK_DEPTH;
-    }
-    DATA_T Pop() {
-      --stack_pos;
-      if (stack_pos > STACK_DEPTH) stack_pos = STACK_DEPTH-1; // Loop if needed.
-      return stack[stack_pos];
-    }
+  void Push(DATA_T value) {
+    stack[stack_pos] = value;
+    stack_pos = (stack_pos+1) % STACK_DEPTH;
+  }
+  DATA_T Pop() {
+    --stack_pos;
+    if (stack_pos > STACK_DEPTH) stack_pos = STACK_DEPTH-1; // Loop if needed.
+    return stack[stack_pos];
+  }
 
-    [[nodiscard]] DATA_T Top() const {
-      return stack[stack_pos ? (stack_pos - 1) : STACK_DEPTH-1];
-    }
+  [[nodiscard]] DATA_T Top() const {
+    return stack[stack_pos ? (stack_pos - 1) : STACK_DEPTH-1];
+  }
 
-    [[nodiscard]] emp::String ToString() const {
-      emp::String out;
-      bool printing = false;
-      for (size_t i = 0; i < STACK_DEPTH; ++i) {
-        if (printing) out += ',';
-        auto value = stack[(i+stack_pos)%STACK_DEPTH];
-        if (printing || value != 0) {
-          printing = true;
-          out.Append(value);
-        }
+  [[nodiscard]] emp::String ToString() const {
+    emp::String out;
+    bool printing = false;
+    for (size_t i = 0; i < STACK_DEPTH; ++i) {
+      if (printing) out += ',';
+      auto value = stack[(i+stack_pos)%STACK_DEPTH];
+      if (printing || value != 0) {
+        printing = true;
+        out.Append(value);
       }
-      return out;
     }
+    return out;
+  }
 
-  };
-
-} // namespace avida
+};

@@ -10,8 +10,6 @@
 #include "Modules/PopWellMixed.hpp"
 #include "Modules/RunStandard.hpp"
 
-using namespace avida;
-
 int main(int argc, char * argv[])
 {
   using avida_t = Avida<AvidaVM, PopWellMixed, RunStandard>;
