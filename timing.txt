@@ -51,3 +51,22 @@ Generation: 576.973
 Generation: 603.39
 ./Avida -s 102  45.14s user 0.09s system 99% cpu 45.258 total
 ./Avida -s 102  44.68s user 0.09s system 99% cpu 44.796 total
+
+
+UD:9900  Pop Size:10000  Generation: 544.796  Genome0:[KmwinnLorjGlAKvxCoyFuBfaFaAcqfrAxJykpBpBAcJgamDEdeEHaHcxdEhfElzbydxb]
+Total Cycles = 2944846290
+./Avida -s 1000  49.16s user 0.08s system 99% cpu 49.254 total
+./Avida -s 1000  50.99s user 0.12s system 99% cpu 51.141 total
+
+UD:9900  Pop Size:10000  Generation: 429.916  Genome0:[IrgcxdEhfEwzEfdFsLyupuBGdFIijogbtHvCIaqLezbzzErehvcqtAvCwpaGovvdxaLJjfiHpeaJazjaILgLyvhpijlgIqmrFmcGalAdthqDtsEkdtJttEhujFLuGhlkIbwDvquhrcKkzHuGGC]
+Total Cycles = 2948879910
+./Avida -s 100  49.07s user 0.07s system 99% cpu 49.158 total
+./Avida -s 100  46.67s user 0.08s system 99% cpu 46.756 total
+
+
+=== LOTS of refactoring ===
+(signals to own class; move functionality to BasicModule)
+UD:10000  PopSize:10000  Generation: 433.597  Genome0:[LccgcxdEhfEwzEydGzLEpCuhjzEDiCEluhixqwCfgIvzpktrIyCtjGGdhmaFgAHzdxaLJalBJdCfzypDhvbtwEIhclLbleperKlFcGuAlDhnEGEytdcbxqaIDFxqftGGhFKzfJbGkIduEoGdHg]
+./Avida -s 100  47.65s user 0.08s system 99% cpu 47.742 total
+./Avida -s 100  46.73s user 0.08s system 99% cpu 46.814 total
+./Avida -s 100  47.24s user 0.08s system 99% cpu 47.336 total
