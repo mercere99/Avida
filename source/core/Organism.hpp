@@ -13,56 +13,46 @@
 #include "emp/base/Ptr.hpp"
 #include "emp/tools/String.hpp"
 
+#include "OrganismBase.hpp"
 #include "../Hardware/HardwareManager.hpp"
 
-template <typename HW_T>
-class Organism {
+template <typename HW_T, typename PHENOTYPE_T>
+class Organism : public OrganismBase {
 public:
-  using this_t = Organism<HW_T>;
+  using this_t = Organism<HW_T, PHENOTYPE_T>;
   using hardware_t = HW_T;
   using genome_t = typename HW_T::genome_t;
   using manager_t = HardwareManager<HW_T>;
+  using phenotype_t = PHENOTYPE_T;
 private:
-  static constexpr size_t UNKNOWN_ID = static_cast<size_t>(-1);
-
   genome_t genome;                  // Original genome for this organism.
+  phenotype_t phenotype;            // Current phenotype for this organism.
   emp::Ptr<HW_T> hw_ptr = nullptr;  // What hardware is this organism using?
-  size_t position = UNKNOWN_ID;     // Where is this Organism located?
-  size_t id = UNKNOWN_ID;           // Unique organism ID.
-  uint32_t generation = 0;          // Number of ancestral steps back to injected organism.
 
 public:
   Organism(const Organism&) = delete;   // No direct copying of organism is allowed.
-  Organism(Organism && in)  // Move constructor.
-    : genome(std::move(in.genome))
+  Organism(Organism && in) : OrganismBase(std::move(in)) // Move constructor.
+    , genome(std::move(in.genome))
+    , phenotype(std::move(in.phenotype))
     , hw_ptr(in.hw_ptr)
-    , position(in.position)
-    , id(in.id)
-    , generation(in.generation)
   {
-    // Clean up old pointers (so they don't deallocate on destruction.)
-    in.hw_ptr = nullptr;
-    in.position = UNKNOWN_ID;
-    in.id = UNKNOWN_ID;
-
-    // Make sure hardware knows about its new Organism.
     emp_assert(hw_ptr);
-    hw_ptr->SetOrganism(*this);
+    in.hw_ptr = nullptr;        // Clean up old pointers (so they don't deallocate on destruction.)
+    hw_ptr->SetOrganism(*this); // Let hardware know about its new Organism.
   } 
   Organism(manager_t & hw_man, genome_t && in_genome) // Build organism from components.
     : genome(std::move(in_genome)), hw_ptr(hw_man.Allocate(*this)) { hw_ptr->Reset(genome); }
   Organism(Organism & org_to_clone) // If no offspring genome, assume clone!
     : genome(org_to_clone.genome)
     , hw_ptr(org_to_clone.GetHardware().GetManager().Allocate(*this))
-    , generation(org_to_clone.generation)
   {
     hw_ptr->Reset(org_to_clone.GetGenome());
   }
   Organism(Organism & parent, genome_t && offspring_genome) // Provide parent and new genome.
     : genome(std::move(offspring_genome))
     , hw_ptr(parent.GetHardware().GetManager().Allocate(*this))
-    , generation(parent.generation+1)
   {
+    generation = parent.generation + 1;
     hw_ptr->Reset(genome);
   }
   ~Organism() {
@@ -113,6 +103,9 @@ public:
     emp_assert(hw_ptr);
     return hw_ptr->GetManager().ToSequence(genome);
   }
+
+  [[nodiscard]] phenotype_t & GetPhenotype() { return phenotype; }
+  [[nodiscard]] const phenotype_t & GetPhenotype() const { return phenotype; }
 
   [[nodiscard]] double GetMetabolicRate() const { return genome.size(); }
 
