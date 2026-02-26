@@ -43,10 +43,13 @@ class Avida {
 public:
   static_assert(sizeof...(PLUG_IN_Ts) > 0, "At least one Avida plug-in required to manage run.");
   using this_t = Avida<HARDWARE_T, PLUG_IN_Ts...>;
+  using plug_in_pack_t = emp::TypePack<PLUG_IN_Ts<this_t>...>;
 
+  using pheno_pack_t = plug_in_pack_t::template filter<pheno_member>::template wrap<pheno_member>;
+  using phenotype_t = merge_from_TypePack<pheno_pack_t>;
   using hardware_t = HARDWARE_T;                  // Type of general hardware for all organisms
   using manager_t = HardwareManager<hardware_t>;  // Type of manager to recycle hardware
-  using organism_t = Organism<hardware_t>;        // Type for each individual organism
+  using organism_t = Organism<hardware_t, phenotype_t>;        // Type for each individual organism
   using biota_t = emp::vector<organism_t>;        // Collection of all current organisms in Avida
   using genome_t = hardware_t::genome_t;          // Type of genomes used in organisms
 
@@ -85,7 +88,7 @@ private:
   }
 
   void AddCallbacks(manager_t & hw_man) {
-    hw_man.AddCallback("DivideCell", [this](organism_t & org){ DivideOrg(org); });
+    hw_man.AddCallback("DivideCell", [this](OrganismBase & org){ DivideOrg(org); });
   }
 
 public:
@@ -241,6 +244,7 @@ public:
       PlaceOrganism( std::move(offspring) );
     }
   }
+  void DivideOrg(OrganismBase & parent_org) { DivideOrg( static_cast<organism_t&>(parent_org) ); }
 
   // Delete an organism at a specific position in the biota.
   void DeleteOrg(size_t delete_id) {
