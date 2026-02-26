@@ -18,6 +18,17 @@
 #include "emp/meta/TypeID.hpp"
 #include "emp/tools/String.hpp"
 
+// Retrieve a Phenotype member from a plug-in module.
+template <typename T> using pheno_member = typename T::Phenotype;
+
+// Convert a type pack of phenotypes into a single, merged phenotype.
+template <typename T> struct merge_from_TypePack;
+
+template <typename... Ts>
+struct merge_from_TypePack<emp::TypePack<Ts...>> {
+  struct merged_t : Ts... { };
+};
+
 #define AVIDA_TRAIT(TYPE, NAME, DESC)                                                       \
   static_assert(requires { typename AVIDA_T; }, "AVIDA_T must be defined to create trait"); \
   TYPE NAME{};                                                                              \
