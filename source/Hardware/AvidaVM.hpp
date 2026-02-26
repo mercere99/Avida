@@ -27,13 +27,12 @@
 /// Default Avida Virtual Machine for use in Avida 5
 class AvidaVM {
 public:
-  using organism_t = Organism<AvidaVM>;
   using manager_t = HardwareManager<AvidaVM>;
   using genome_t = Genome;
 
 private:
   manager_t & hw_manager;
-  emp::Ptr<organism_t> org_ptr = nullptr;
+  emp::Ptr<OrganismBase> org_ptr = nullptr;
 
   // Configured values.
   static constexpr size_t NUM_NOPS = 6;           // Num nop modifier instructions used
@@ -48,7 +47,7 @@ private:
   using inst_id_t = typename genome_t::value_t;   // Type used for inst IDs in a genome.
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM.
   using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU.
-  using callback_t = std::function<void(organism_t &)>; // Special functions added to inst set.
+  using callback_t = std::function<void(OrganismBase &)>; // Special functions added to inst set.
 
   enum class Nop {
     A = 0, B = 1, C = 2, D = 3, E = 4, F = 5, // Nops referring to specific stacks or heads
@@ -216,9 +215,9 @@ public:
 
   // === Organisms ===
   
-  [[nodiscard]] organism_t & GetOrganism() { emp_assert(org_ptr); return *org_ptr; }
-  [[nodiscard]] const organism_t & GetOrganism() const { emp_assert(org_ptr); return *org_ptr; }
-  AvidaVM & SetOrganism(organism_t & org) { org_ptr = &org; return *this; }
+  [[nodiscard]] OrganismBase & GetOrganism() { emp_assert(org_ptr); return *org_ptr; }
+  [[nodiscard]] const OrganismBase & GetOrganism() const { emp_assert(org_ptr); return *org_ptr; }
+  AvidaVM & SetOrganism(OrganismBase & org) { org_ptr = &org; return *this; }
 
   [[nodiscard]] manager_t & GetManager() { return hw_manager; }
   [[nodiscard]] const manager_t & GetManager() const { return hw_manager; }

@@ -16,7 +16,7 @@
 #include "emp/math/Random.hpp"
 #include "emp/tools/String.hpp"
 
-template <typename HW_T> class Organism;
+#include "../core/OrganismBase.hpp"
 
 // Map of genome instruction to which instruction should be run.
 template <typename HW_T, size_t MAX_SET_SIZE=256, typename INST_RETURN_T=void>
@@ -26,7 +26,7 @@ public:
   using genome_t = typename HW_T::genome_t;
   using inst_id_t = emp::min_uint_type<MAX_SET_SIZE+1>;
   using inst_fun_t = INST_RETURN_T (HW_T::*)();
-  using callback_t = std::function<void(Organism<HW_T> &)>;
+  using callback_t = std::function<void(OrganismBase &)>;
 
   static constexpr inst_id_t NULL_ID = static_cast<inst_id_t>(-1);
 

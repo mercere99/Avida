@@ -19,20 +19,20 @@
 #include "emp/tools/String.hpp"
 
 #include "InstSet.hpp"
-
-template <typename HW_T> class Organism;
+#include "../core/OrganismBase.hpp"
 
 // A helper class where a particular hardware implementation can be provided and it will
 // automatically build a manager for that hardware.
 template <typename HW_T>
 class HardwareManager {
+public:
   using hardware_t = HW_T;
   using genome_t = typename hardware_t::genome_t;
-  using org_t = Organism<hardware_t>;
+  using inst_set_t = InstSet<hardware_t>;
 
 private:
   using hw_ptr_t = emp::Ptr<hardware_t>;
-  using feedback_t = std::function<void(org_t & /*org*/)>;
+  using feedback_t = std::function<void(OrganismBase & /*org*/)>;
 
   emp::vector< hw_ptr_t > hw_ptrs;  // Pointers to available hardware.
 
@@ -44,7 +44,7 @@ private:
 
   // --- Helper functions --
 
-  [[nodiscard]] hw_ptr_t AllocateNew(org_t & org) {
+  [[nodiscard]] hw_ptr_t AllocateNew(OrganismBase & org) {
     auto out_ptr = emp::NewPtr<hardware_t>(*this);
     out_ptr->SetOrganism(org);
     return out_ptr;
@@ -56,10 +56,10 @@ public:
 
   static emp::String DefaultName() { return hardware_t::HardwareName() + "Manager"; }
 
-  InstSet<hardware_t> & GetInstSet() { return inst_set; }
-  const InstSet<hardware_t> & GetInstSet() const { return inst_set; }
+  inst_set_t & GetInstSet() { return inst_set; }
+  const inst_set_t & GetInstSet() const { return inst_set; }
 
-  [[nodiscard]] hw_ptr_t Allocate(org_t & org) {
+  [[nodiscard]] hw_ptr_t Allocate(OrganismBase & org) {
     if (hw_ptrs.size()) {
       hw_ptr_t out = hw_ptrs.back();
       emp_assert(out != nullptr);
