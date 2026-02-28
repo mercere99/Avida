@@ -80,4 +80,5 @@ public:
   void BeforeExit() { AVIDA_SIGNAL_DEF(BeforeExit(), ); }
   void OnHelp() { AVIDA_SIGNAL_DEF(OnHelp(), ); }
   
+  void RegisterTraits() { AVIDA_SIGNAL_DEF(RegisterTraits(), ); }
 };
