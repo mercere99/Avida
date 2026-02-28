@@ -8,15 +8,25 @@
  *  This is the main controller class for Avida.
  * 
  *  DEVELOPER notes:
- *  - Pull "generation" into a "Track Generation" module.
- *  - Add a "TrackGenotype" module
- *  - Add a PopGrid module
- *  - Add a PrintGrid module that prints grid every X updates AND requires PopGrid module
- *  - Add an EnvironmentLogic9 environment 
+ *  - Add module TrackGenotype
+ *  - Add module PopGrid
+ *  - Add module PrintGrid that prints grid every X updates AND requires PopGrid module
+ *  - Add module EnvironmentLogic9 (it should register tasks and trigger OnTask as needed)
+ *  - Add module OutputManager for printing to screen or files
+ *  - Add module Reactions that listens for OnTask to provide rewards
+ *  - Add module LimitedResources that listens for OnTask
+ *  - Add module PopulationDemes
+ *  - Add module PhylogenyTracker
+ *  - Add module EventManager for dynamic events (population bottlenecks, environment changes, etc.)
+ *
  *  - Improve command-line options; pass on to modules to deal with too.
  *  - Help should have an optional argument to get help for/from specific modules.
- *  - Make a master list of module types (with rules on how each type should be managed.)
+ *  - Make a master list of module TYPES with rules on how each type should be managed (e.g., one pop manager, any number of analysis modules)
  *  - Allow hardware variant to form special type of organism that can use any listed hardware.
+ *  - Configuration options need to be, well, configurable
+ *  - Test out alternative VM
+ * 
+ *  - Longer term: Simple language that compiles to Avida modules.
  */
 
 #include "emp/base/Ptr.hpp"
