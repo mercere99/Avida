@@ -29,16 +29,16 @@ struct merge_from_TypePack<emp::TypePack<Ts...>> {
   struct merged_t : Ts... { };
 };
 
-#define AVIDA_TRAIT(TYPE, NAME, DESC)                                                       \
-  static_assert(requires { typename AVIDA_T; }, "AVIDA_T must be defined to create trait"); \
-  TYPE NAME{};                                                                              \
-  static inline TraitRegister<TYPE, AVIDA_T> NAME ## _register_                             \
-    {#NAME, DESC, __FILE__, __LINE__,                                                       \
-     [](AVIDA_T::typename phenotype_t & phenotype) -> TYPE & { return phenotype.NAME; }};
+#define AVIDA_REGISTER_TRAIT(NAME, DESC)                                   \
+  avida.template RegisterTrait<decltype(Phenotype::NAME)>(                 \
+     #NAME, DESC, __FILE__, __LINE__,                                      \
+     [](AVIDA_T::phenotype_t & p) -> auto & { return p.NAME; },            \
+     [](const AVIDA_T::phenotype_t & p) -> const auto & { return p.NAME; } \
+  );
 
 
 template <typename AVIDA_T>
-class TraitRegisterBase {
+class TraitBase {
 protected:
   emp::String name;      // Unique name for this trait in the phenotype.
   emp::String desc;      // Full description of this trait.
@@ -48,8 +48,9 @@ protected:
   using phenotype_t = typename AVIDA_T::phenotype_t;
 
 public:
-  TraitRegisterBase(const emp::String & name, const emp::String & desc)
-    : name(name), desc(desc) { }
+  TraitBase(const emp::String & name, const emp::String & desc, emp::String filename, size_t line)
+    : name(name), desc(desc), filename(filename), line(line) { }
+  virtual ~TraitBase() = default;
 
   [[nodiscard]] emp::String GetName() const { return name; }
   [[nodiscard]] emp::String GetDesc() const { return desc; }
@@ -58,60 +59,86 @@ public:
   [[nodiscard]] emp::String GetLocation() const { return emp::MakeString(filename, ':', line); }
 
   [[nodiscard]] virtual emp::TypeID GetTypeID() const = 0;
-  [[nodiscard]] virtual double AsDouble(phenotype_t &) const = 0;
-  [[nodiscard]] virtual emp::String AsString(phenotype_t &) const = 0;
+  [[nodiscard]] virtual double AsDouble(const phenotype_t &) const = 0;
+  [[nodiscard]] virtual emp::String AsString(const phenotype_t &) const = 0;
 };
 
 template <typename TRAIT_T, typename AVIDA_T>
-class TraitRegister : public TraitRegisterBase<AVIDA_T> {
+class Trait : public TraitBase<AVIDA_T> {
 private:
-  using base_t = TraitRegisterBase<AVIDA_T>;
+  using base_t = TraitBase<AVIDA_T>;
   using phenotype_t = typename AVIDA_T::phenotype_t;
-  using access_fun_t = std::function<TRAIT_T &(phenotype_t &)>;
+  using get_fun_t = std::function<TRAIT_T &(phenotype_t &)>;
+  using cget_fun_t = std::function<const TRAIT_T &(const phenotype_t &)>;
 
-  access_fun_t access_fun;
+  get_fun_t get_fun;
+  cget_fun_t cget_fun;
 
 public:
-  TraitRegister(const emp::String & name, const emp::String & desc,
-                const emp::String filename, size_t line, access_fun_t access_fun)
-    : base_t(name,desc,filename,line), access_fun(std::move(access_fun))
-  {
-    AVIDA_T::GetTraitManager().Register(*this);
-  }
+  using trait_t = TRAIT_T;
 
-  [[nodiscard]] TRAIT_T & Get(phenotype_t & p) { return access_fun(p); }
-  [[nodiscard]] const access_fun_t & GetAccessFun() const { return access_fun; }
+  Trait(const emp::String & name, const emp::String & desc,
+        const emp::String & filename, size_t line,
+        get_fun_t get_fun, cget_fun_t cget_fun)
+    : base_t(name,desc,filename,line)
+    , get_fun(std::move(get_fun)), cget_fun(std::move(cget_fun)) {}
+
+  [[nodiscard]] TRAIT_T & Get(phenotype_t & p) { return get_fun(p); }
+  [[nodiscard]] const TRAIT_T & Get(const phenotype_t & p) { return cget_fun(p); }
+  [[nodiscard]] const get_fun_t & GetAccessFun() const { return get_fun; }
+  [[nodiscard]] const cget_fun_t & GetConstAccessFun() const { return cget_fun; }
 
   [[nodiscard]] emp::TypeID GetTypeID() const override { return emp::GetTypeID<TRAIT_T>(); }
-  [[nodiscard]] double AsDouble(phenotype_t & p) const override {
+  [[nodiscard]] double AsDouble(const phenotype_t & p) const override {
     if constexpr (std::convertible_to<TRAIT_T, double>) {
-      return static_cast<double>(access_fun(p));
+      return static_cast<double>(cget_fun(p));
     } else {
       emp::notify::Error("Cannot convert trait '", base_t::name, "' to type double (is type ",
                          GetTypeID(), ")");
+      return 0.0;
     }
   }
-  [[nodiscard]] emp::String AsString(phenotype_t & p) const override {
-    emp::MakeString(access_fun(p));
+  [[nodiscard]] emp::String AsString(const phenotype_t & p) const override {
+    return emp::MakeString(cget_fun(p));
   }
 };
 
 template <typename AVIDA_T>
 class TraitManager {
 private:
-  using register_base_t = TraitRegisterBase<AVIDA_T>;
-  emp::RobinHoodMap<emp::String, emp::Ptr<register_base_t>> trait_map;
+  using trait_base_t = TraitBase<AVIDA_T>;
+  emp::RobinHoodMap<emp::String, emp::Ptr<trait_base_t>> trait_map;
 
 public:
+  ~TraitManager() { Clear(); }
+
+  const trait_base_t & Get(const emp::String & name) const {
+    auto trait_ptr = trait_map.FindValue(name, nullptr);
+    emp_assert(trait_ptr, "Requesting an invalid trait name", name);
+    return *trait_ptr;
+  }
+
   template <typename TRAIT_T>
-  void Register(TraitRegister<TRAIT_T, AVIDA_T> & trait_reg) {
-    const emp::String & name = trait_reg.GetName();
+  void Register(const emp::String & name, const emp::String & desc,
+                const emp::String & filename, size_t line,
+                auto get_fun, auto cget_fun)
+  {
+    std::cout << "Registering trait '" << name << "'." << std::endl;
+
+    using reg_t = Trait<TRAIT_T, AVIDA_T>;
+    emp::Ptr<reg_t> reg_ptr =
+      emp::NewPtr<reg_t>(name, desc, filename, line, std::move(get_fun), std::move(cget_fun));
 
     // Make sure that we are not redefining a trait.
     if (trait_map.contains(name)) {
       emp::notify::Error("Phenotype trait '", name, "' defined multiple times: ",
-                          trait_map[name]->GetLocation(), " and ", trait_reg.GetLocation());
+                          trait_map[name]->GetLocation(), " and ", reg_ptr->GetLocation());
     }
-    trait_map[name] = &trait_reg;
+    trait_map[name] = reg_ptr;
+  }
+
+  void Clear() {
+    for (auto [name, ptr] : trait_map) ptr.Delete();
+    trait_map.clear();
   }
 };
