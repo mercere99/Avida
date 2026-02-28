@@ -9,12 +9,12 @@
 #include "Modules/LogModule.hpp"
 #include "Modules/PopWellMixed.hpp"
 #include "Modules/RunStandard.hpp"
+#include "Modules/TrackGeneration.hpp"
 
 int main(int argc, char * argv[])
 {
-  using avida_t = Avida<AvidaVM, PopWellMixed, RunStandard>;
+  using avida_t = Avida<AvidaVM, PopWellMixed, RunStandard, TrackGeneration>;
   avida_t avida(emp::ArgsToStrings(argc, argv));
   // avida.GetPlugIn<LogModule>().SetOutFile("avida.log");
-  avida.Setup();
   avida.Run();
 }
