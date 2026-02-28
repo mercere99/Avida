@@ -46,15 +46,17 @@ public:
   using plug_in_pack_t = emp::TypePack<PLUG_IN_Ts<this_t>...>;
 
   using pheno_pack_t = plug_in_pack_t::template filter<pheno_member>::template wrap<pheno_member>;
-  using phenotype_t = merge_from_TypePack<pheno_pack_t>;
+  using phenotype_t = merge_from_TypePack<pheno_pack_t>::merged_t;
   using hardware_t = HARDWARE_T;                  // Type of general hardware for all organisms
-  using manager_t = HardwareManager<hardware_t>;  // Type of manager to recycle hardware
+  using hw_manager_t = HardwareManager<hardware_t>;  // Type of manager to recycle hardware
   using organism_t = Organism<hardware_t, phenotype_t>;        // Type for each individual organism
   using biota_t = emp::vector<organism_t>;        // Collection of all current organisms in Avida
   using genome_t = hardware_t::genome_t;          // Type of genomes used in organisms
 
 private:
   PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
+  hw_manager_t hw_manager;
+  TraitManager<this_t> trait_man;
 
   size_t update = 0;          // Times update was run on this population
   emp::Random random;         // Central random number generator
@@ -62,12 +64,13 @@ private:
   emp::BitVector occupied{};  // Which organisms in biota are active?
   size_t org_count = 0;       // Current number of active organisms
 
-  std::unordered_map< emp::String, emp::Ptr<manager_t> > hw_man_map{};
+  enum class RunState { INITIALIZING, RUNNING, PAUSED, EXITING, ERROR };
+  RunState run_state = RunState::INITIALIZING;
 
   // ===== Helper Functions =====
   void PlaceOrganism(organism_t && org_to_place) {
     emp_assert(occupied.size() == biota.size());
-    emp_assert(org_count.CountOnes() == org_count);
+    emp_assert(occupied.CountOnes() == org_count);
 
     plug_ins.BeforePlacement(org_to_place);
 
@@ -87,13 +90,10 @@ private:
     plug_ins.OnPlacement(placed_org);
   }
 
-  void AddCallbacks(manager_t & hw_man) {
-    hw_man.AddCallback("DivideCell", [this](OrganismBase & org){ DivideOrg(org); });
-  }
-
 public:
-  Avida() : plug_ins(*this) { }
+  Avida() : plug_ins(*this) { plug_ins.RegisterTraits(); }
   Avida(emp::vector<emp::String> args) : plug_ins(*this) {
+    plug_ins.RegisterTraits();
     for (size_t i = 1; i < args.size(); ++i) {
       if (args[i] == "-h" || args[i] == "--help") { PrintHelp(args[0], std::cout); }
       else if (args[i] == "-s" || args[i] == "--seed") {
@@ -115,21 +115,26 @@ public:
   [[nodiscard]] size_t GetUpdate() const { return update; }
   [[nodiscard]] emp::Random & GetRandom() { return random; }
   [[nodiscard]] auto & GetOrg(this auto & self, size_t id) {
-    emp_assert(IsOccupied(id));
+    emp_assert(self.IsOccupied(id));
     return self.biota[id];
   }
   [[nodiscard]] auto & GetFirstOrg(this auto & self) {
-    emp_assert(GetNumOrgs() > 0);
+    emp_assert(self.GetNumOrgs() > 0);
     return self.biota[self.occupied.FindOne()];
   }
   [[nodiscard]] bool IsOccupied(size_t id) const { return occupied[id]; }
   [[nodiscard]] int32_t GetNumOrgs() const { return org_count; }
 
-  template <typename FUN_T>
+  template <std::invocable<const organism_t &> FUN_T>
   [[nodiscard]] double GetAveTrait(const FUN_T & fun) const {
     double total = 0.0;    
     for (size_t index : occupied) total += fun(biota[index]);
     return total / GetNumOrgs();
+  }
+
+  [[nodiscard]] double GetAveTrait(const emp::String & name) const {
+    const auto & trait = trait_man.Get(name);
+    return GetAveTrait([&trait](const organism_t & org){ return trait.AsDouble(org.GetPhenotype()); });
   }
 
   [[nodiscard]] double GetAveGeneration() const {
@@ -148,17 +153,6 @@ public:
   template <size_t INDEX>
   [[nodiscard]] auto & GetPlugIn() { return plug_ins.template Get<INDEX>(); }
 
-  manager_t & GetHWManager(const emp::String & name) {
-    emp_assert( emp::Has(hw_man_map, name) );
-    return *hw_man_map[name];
-  }
-
-  template <typename VM_T>
-  manager_t & AddHardwareManager(const emp::String & name) {
-    emp_assert(!emp::Has(hw_man_map, name));
-    return *(hw_man_map[name] = emp::NewPtr<HardwareManager<VM_T>>());
-  }
-
   void PrintHelp(const emp::String & exec_name, std::ostream & os) {
     os << "Format: " << exec_name << " [flags]\n"
         << "Allowed flags include:\n"
@@ -168,7 +162,7 @@ public:
         << std::endl;
     
     plug_ins.OnHelp();  // Allow plug-ins to provide help information.      
-    exit(0);
+    Exit();
   }
 
   void Trace(AvidaVM & vm, size_t cpu_cycles=200) {
@@ -183,7 +177,6 @@ public:
   template <typename MANAGER_T=AvidaVM>
   bool Test(const size_t genome_size = 256, const size_t num_trials = 5000000, size_t run_time=200) {
     // Create the hardware manager.
-    manager_t & hw_manager = AddHardwareManager<MANAGER_T>(MANAGER_T::DefaultName());
     auto inst_set = MANAGER_T::BuildInstSet();
 
     // Load in the default ancestor genome.
@@ -204,33 +197,40 @@ public:
 
   // Initialize the hardware manager (with AvidVM) and the biota (with the default) ancestor.
   void Setup() {
-    // Default to the AvidaVM hardware manager.
-    manager_t & hw_man = AddHardwareManager<AvidaVM>("AvidaVM");
-    AddCallbacks(hw_man);
+    if (run_state != RunState::INITIALIZING) return;
+
+    // Add callbacks for the current hardware manager.
+    hw_manager.AddCallback("DivideCell", [this](OrganismBase & org){ DivideOrg(org); });
 
     // Inject a single individual of the default ancestor.
-    Inject(hw_man, "../config/ancestor.org");
+    Inject("../config/ancestor.org");
   }
 
+  template <typename TRAIT_T>
+  void RegisterTrait(const emp::String & name, const emp::String & desc,
+                     const emp::String & filename, size_t line,
+                     auto get_fun, auto cget_fun)
+  {
+    trait_man.template Register<TRAIT_T>(name, desc, filename, line, get_fun, cget_fun);
+  }
 
   // ====== Organism Management ======
 
-  void Inject(manager_t & hw_man, genome_t && genome) {
-    organism_t inject_org{hw_man, std::move(genome)};
+  void Inject(genome_t && genome) {
+    organism_t inject_org{hw_manager, std::move(genome)};
     plug_ins.OnInjectReady(inject_org);
     return PlaceOrganism(std::move(inject_org));
   }
   
   /// @brief Inject an organism using a genome loaded from a file.
-  /// @param hw_man - The hardware manager for this CPU type.
   /// @param filename - The name of the file with the genome information.
-  void Inject(manager_t & hw_man, const emp::String & filename) {
-    auto exp_genome = hw_man.LoadGenome(filename);
+  void Inject(const emp::String & filename) {
+    auto exp_genome = hw_manager.LoadGenome(filename);
     if (!exp_genome) {
       emp::notify::Error("Failed to inject from file '", filename, "'.");
     }
 
-    return Inject(hw_man, std::move(*exp_genome));
+    return Inject(std::move(*exp_genome));
   }
 
   // Collect an offspring from a designated parent organism.
@@ -280,14 +280,24 @@ public:
     biota[id].Process(num_cycles);
   }
 
-  void Run() { while (true) DoUpdate(); }
+  void Run() {
+    if (run_state == RunState::INITIALIZING) {
+      Setup();
+      run_state = RunState::RUNNING;
+    }
+    while (run_state == RunState::RUNNING) DoUpdate();
+  }
 
   void Exit() {
-    plug_ins.BeforeExit();  // Notify plug-ins of exit.
-    biota.clear();
+    if (run_state == RunState::EXITING) return; // Already exiting.
 
-    // Delete all of the hardware managers and the hardware they have.
-    for ( auto & [name, ptr] : hw_man_map) ptr.Delete();
-    hw_man_map.clear();
+    emp::notify::Message("Exiting.");
+    // If plug-ins have been initialized, notify them of impending exit.
+    if (run_state > RunState::INITIALIZING) plug_ins.BeforeExit();
+    biota.clear();
+    hw_manager.Clear();
+    trait_man.Clear();
+    emp::notify::Message("DONE");
+    run_state = RunState::EXITING;
   }
 };
