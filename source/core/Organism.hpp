@@ -52,7 +52,6 @@ public:
     : genome(std::move(offspring_genome))
     , hw_ptr(parent.GetHardware().GetManager().Allocate(*this))
   {
-    generation = parent.generation + 1;
     hw_ptr->Reset(genome);
   }
   ~Organism() {
@@ -78,7 +77,6 @@ public:
     hw_ptr = in.hw_ptr;
     position = in.position;
     id = in.id;
-    generation = in.generation;
 
     // Clean up old pointers (so they don't deallocate on destruction.)
     in.hw_ptr = nullptr;
@@ -109,9 +107,6 @@ public:
 
   [[nodiscard]] double GetMetabolicRate() const { return genome.size(); }
 
-  [[nodiscard]] uint32_t GetGeneration() const { return generation; }
-  Organism & SetGeneration(uint32_t in_gen) { generation = in_gen; return *this; }
-
   [[nodiscard]] HW_T & GetHardware() { emp_assert(hw_ptr); return *hw_ptr; }
   [[nodiscard]] const HW_T & GetHardware() const { emp_assert(hw_ptr); return *hw_ptr; }
 
@@ -136,8 +131,7 @@ public:
     emp_assert(hw_ptr);
     os << "Genome:" << GetGenomeSequence()
       << " hw_ptr:" << hw_ptr 
-      << " id:" << id
-      << " generation:" << generation;
+      << " id:" << id;
   }
 
   /// Check to make sure there aren't any problems with this organism object.

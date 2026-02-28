@@ -38,7 +38,7 @@ public:
     // Test if this run should finish.
     if (new_update > last_update) {
       avida.Exit();
-      exit(0);
+      return true;
     }
 
     // Execute all organisms for this update.
@@ -56,7 +56,7 @@ public:
     if (old_update % 100 == 0) {
       std::cout << "UD:" << old_update
                 << "  PopSize:" << avida.GetNumOrgs()
-                << "  Generation: " << avida.GetAveGeneration()
+                << "  Generation: " << avida.GetAveTrait("generation")
                 << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
                 << std::endl;
     }

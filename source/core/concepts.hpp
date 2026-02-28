@@ -250,8 +250,6 @@ namespace concepts {
     { const_org.GetGenomeSequence() } -> std::same_as<emp::String>;
 
     { const_org.GetMetabolicRate() } -> std::convertible_to<double>;
-    { const_org.GetGeneration() } -> std::convertible_to<std::uint32_t>;
-
     { org.SetPosition(position) } -> std::same_as<ORG_T&>;
 
     { org.Process(cycles) } -> std::same_as<ORG_T&>;

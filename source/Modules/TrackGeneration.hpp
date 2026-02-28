@@ -3,11 +3,10 @@
  *  Copyright (C) Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
- *  This is a starter plug-in module, with all of the signals listed, but none set to do anything.
+ *  Track the current generation of each organism in the population.
  */
 
 #include <cstddef>   // for size_t
-#include <fstream>
 #include <iostream>
 
 #include "../core/Avida.hpp"
@@ -36,64 +35,14 @@ public:
 
   // === Signal Listeners ===
 
-  bool OnUpdateStart([[maybe_unused]] size_t new_update) {
-    return true;
-  }
-
-  bool OnUpdateEnd([[maybe_unused]] size_t old_update) {
-    return true;
-  }
-
-  template <concepts::Organism ORG_T>
-  bool BeforeRepro([[maybe_unused]] ORG_T & parent) {
-    return true;
-  }
-
   template <concepts::Organism ORG_T>
   bool OnOffspringReady([[maybe_unused]] ORG_T & offspring, [[maybe_unused]] ORG_T & parent) {
     offspring.GetPhenotype().generation = parent.GetPhenotype().generation + 1;
-    std::cout << "Parent gen = " << parent.GetPhenotype().generation << std::endl;
-    std::cout << "Offspring gen = " << offspring.GetPhenotype().generation << std::endl;
-    return true;
-  }
-
-  template <concepts::Organism ORG_T>
-  bool OnInjectReady([[maybe_unused]] ORG_T & inject_org) {
-    return true;
-  }
-
-  template <concepts::Organism ORG_T>
-  bool BeforePlacement([[maybe_unused]] ORG_T & org) {
-    return true;
-  }
-
-  template <concepts::Organism ORG_T>
-  bool OnPlacement([[maybe_unused]] ORG_T & org) {
-    return true;
-  }
-
-  template <concepts::Organism ORG_T>
-  bool BeforeMutate([[maybe_unused]] ORG_T & org) {
-    return true;
-  }
-
-  template <concepts::Organism ORG_T>
-  bool OnMutate([[maybe_unused]] ORG_T & org) {
-    return true;
-  }
-
-  template <concepts::Organism ORG_T>
-  bool BeforeDeath([[maybe_unused]] ORG_T & org) {
     return true;
   }
 
   bool BeforeExit() {
     std::cout << "MODULE RESULT: " << avida.GetAveTrait("generation") << std::endl;
     return true;
-  }
-  
-  bool OnHelp() {
-    return true;
-    
   }
 };

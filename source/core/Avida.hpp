@@ -96,7 +96,6 @@ private:
     ++org_count;
     organism_t & placed_org = biota[index];  // org_to_place was moved out; grab new location.
     placed_org.SetPosition(index);
-
     plug_ins.OnPlacement(placed_org);
   }
 
@@ -132,7 +131,7 @@ public:
     emp_assert(self.GetNumOrgs() > 0);
     return self.biota[self.occupied.FindOne()];
   }
-  [[nodiscard]] bool IsOccupied(size_t id) const { return occupied[id]; }
+  [[nodiscard]] bool IsOccupied(size_t id) const { return id < occupied.size() && occupied[id]; }
   [[nodiscard]] int32_t GetNumOrgs() const { return org_count; }
 
   template <std::invocable<const organism_t &> FUN_T>
@@ -145,10 +144,6 @@ public:
   [[nodiscard]] double GetAveTrait(const emp::String & name) const {
     const auto & trait = trait_man.Get(name);
     return GetAveTrait([&trait](const organism_t & org){ return trait.AsDouble(org.GetPhenotype()); });
-  }
-
-  [[nodiscard]] double GetAveGeneration() const {
-    return GetAveTrait([](const organism_t & org){ return org.GetGeneration(); });
   }
 
   // Get a plug-in by realized type.
@@ -258,7 +253,6 @@ public:
 
   // Delete an organism at a specific position in the biota.
   void DeleteOrg(size_t delete_id) {
-    emp_assert(delete_id < biota.size());
     emp_assert(IsOccupied(delete_id));
 
     plug_ins.BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
@@ -301,13 +295,11 @@ public:
   void Exit() {
     if (run_state == RunState::EXITING) return; // Already exiting.
 
-    emp::notify::Message("Exiting.");
     // If plug-ins have been initialized, notify them of impending exit.
     if (run_state > RunState::INITIALIZING) plug_ins.BeforeExit();
     biota.clear();
     hw_manager.Clear();
     trait_man.Clear();
-    emp::notify::Message("DONE");
     run_state = RunState::EXITING;
   }
 };
