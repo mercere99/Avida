@@ -20,14 +20,19 @@ private:
 public:
   TrackGeneration(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>("TrackGeneration", "Analysis", "Monitor lineage length.")
-    , avida(avida) { }
-  ~TrackGeneration() { }
+    , avida(avida) {}
+  ~TrackGeneration() {}
 
   // === Phenotypic Traits ===
 
   struct Phenotype {
-    AVIDA_TRAIT(size_t, generation, "Number of offspring in chain since inject");
+    size_t generation = 0;
   };
+
+  bool RegisterTraits() {
+    AVIDA_REGISTER_TRAIT(generation, "Number of offspring in chain since inject");
+    return true;
+  }
 
   // === Signal Listeners ===
 
@@ -46,6 +51,9 @@ public:
 
   template <concepts::Organism ORG_T>
   bool OnOffspringReady([[maybe_unused]] ORG_T & offspring, [[maybe_unused]] ORG_T & parent) {
+    offspring.GetPhenotype().generation = parent.GetPhenotype().generation + 1;
+    std::cout << "Parent gen = " << parent.GetPhenotype().generation << std::endl;
+    std::cout << "Offspring gen = " << offspring.GetPhenotype().generation << std::endl;
     return true;
   }
 
@@ -79,7 +87,8 @@ public:
     return true;
   }
 
-  bool BeforeExit() {      
+  bool BeforeExit() {
+    std::cout << "MODULE RESULT: " << avida.GetAveTrait("generation") << std::endl;
     return true;
   }
   
