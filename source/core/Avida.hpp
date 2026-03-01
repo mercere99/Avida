@@ -58,11 +58,18 @@ public:
 
   using pheno_pack_t = plug_in_pack_t::template filter<pheno_member>::template wrap<pheno_member>;
   using phenotype_t = merge_from_TypePack<pheno_pack_t>::merged_t;
-  using hardware_t = HARDWARE_T;                  // Type of general hardware for all organisms
-  using hw_manager_t = HardwareManager<hardware_t>;  // Type of manager to recycle hardware
-  using organism_t = Organism<hardware_t, phenotype_t>;        // Type for each individual organism
-  using biota_t = emp::vector<organism_t>;        // Collection of all current organisms in Avida
-  using genome_t = hardware_t::genome_t;          // Type of genomes used in organisms
+  using hardware_t = HARDWARE_T;                         // Type of general hardware for all organisms
+  using hw_manager_t = HardwareManager<hardware_t>;      // Type of manager to recycle hardware
+  using organism_t = Organism<hardware_t, phenotype_t>;  // Type for each individual organism
+  using biota_t = emp::vector<organism_t>;               // Collection of all current organisms in Avida
+  using genome_t = hardware_t::genome_t;                 // Type of genomes used in organisms
+
+  // Make sure all of the components fit the proper concepts.
+  static_assert(concepts::Genome<genome_t>);
+  // static_assert(concepts::InstSet<>);
+  static_assert(concepts::Hardware<hardware_t>);
+  static_assert(concepts::HardwareManager<hw_manager_t>);
+  static_assert(concepts::Organism<organism_t>);
 
 private:
   PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
@@ -73,13 +80,33 @@ private:
   emp::Random random;         // Central random number generator
   biota_t biota{};            // Collection of all current organisms
   emp::BitVector occupied{};  // Which organisms in biota are active?
-  int32_t num_orgs = 0;       // Current number of active organisms
+  uint32_t num_orgs = 0;      // Current number of active organisms
   size_t total_orgs = 0;      // Total orgs that have ever existed (used for global IDs)
 
   enum class RunState { INITIALIZING, RUNNING, PAUSED, EXITING, ERROR };
   RunState run_state = RunState::INITIALIZING;
 
   // ===== Helper Functions =====
+
+  // Set up a new organism in the biota, returning its new version.
+  organism_t & ReserveOrganism(organism_t && org_to_place) {
+    size_t index = occupied.FindZero();    // Find empty position in biota.
+    if (index == emp::BitVector::npos) {   // If no empty position available, add one.
+      index = occupied.PushBack(true);
+      biota.emplace_back(std::move(org_to_place));
+    } else {
+      occupied.Set(index);
+      biota[index] = std::move(org_to_place);
+    }
+    ++num_orgs;
+    organism_t & placed_org = biota[index];  // org_to_place was moved out; this is new location.
+    placed_org.SetBiotaID(index);
+    placed_org.SetGlobalID(total_orgs++);
+
+    return placed_org;
+  }
+
+  // Indicate that an organism has been activated in a population.
   void PlaceOrganism(organism_t && org_to_place) {
     emp_assert(occupied.size() == biota.size());
     emp_assert(occupied.CountOnes() == num_orgs);
@@ -89,20 +116,7 @@ private:
       "Organisms should not have a global ID until placement.", org_to_place.GetGlobalID());
 
     plug_ins.BeforePlacement(org_to_place);
-
-    size_t index = occupied.FindZero();    // Find empty position in biota.
-    if (index == emp::BitVector::npos) {   // If no empty position available, add one.
-      index = occupied.PushBack(true);
-      biota.emplace_back(std::move(org_to_place));
-    } else {
-      occupied.Set(index);
-      biota[index] = std::move(org_to_place);
-    }
-
-    ++num_orgs;
-    organism_t & placed_org = biota[index];  // org_to_place was moved out; this is new location.
-    placed_org.SetBiotaID(index);
-    placed_org.SetGlobalID(total_orgs++);
+    organism_t & placed_org = ReserveOrganism(std::move(org_to_place));
     plug_ins.OnPlacement(placed_org);
   }
 
@@ -139,8 +153,8 @@ public:
     return self.biota[self.occupied.FindOne()];
   }
   [[nodiscard]] bool IsOccupied(size_t id) const { return id < occupied.size() && occupied[id]; }
-  [[nodiscard]] int32_t GetNumOrgs() const { return num_orgs; }
-  [[nodiscard]] int32_t GetTotalOrgs() const { return total_orgs; }
+  [[nodiscard]] uint32_t GetNumOrgs() const { return num_orgs; }
+  [[nodiscard]] size_t GetTotalOrgs() const { return total_orgs; }
 
   template <std::invocable<const organism_t &> FUN_T>
   [[nodiscard]] double GetAveTrait(const FUN_T & fun) const {
@@ -177,34 +191,6 @@ public:
     plug_ins.OnHelp();  // Allow plug-ins to provide help information.      
     Exit();
   }
-
-  void Trace(AvidaVM & vm, size_t cpu_cycles=200) {
-    for (size_t i = 0; i < cpu_cycles; ++i) {
-      std::cout << "STEP " << i << ":\n" << vm.StatusString() << std::endl;
-      vm.ProcessStep();
-    }
-    std::cout << "STEP " << cpu_cycles << ":\n" << vm.StatusString() << std::endl;
-  }
-
-  // Generate many random genomes of a given size and try running them.
-  template <typename MANAGER_T=AvidaVM>
-  bool Test(const size_t genome_size = 256, const size_t num_trials = 5000000, size_t run_time=200) {
-    // Create the hardware manager.
-    auto inst_set = MANAGER_T::BuildInstSet();
-
-    // Load in the default ancestor genome.
-    auto exp_genome = inst_set.LoadGenome("../config/ancestor.org");
-    if (!exp_genome) return false;
-    organism_t org(hw_manager, *exp_genome);
-    for (size_t trial = 0; trial < num_trials; ++trial) {
-      if (trial % 100000 == 0) std::cout << "Trial: " << trial << std::endl; 
-      // Build a random genome and run it.
-      inst_set.BuildGenome(*exp_genome, genome_size, random);
-      org.Process(run_time);
-    }
-    return true;
-  }
-
 
   // ====== Configuration Management ======
 
@@ -246,7 +232,7 @@ public:
     return Inject(std::move(*exp_genome));
   }
 
-  // Collect an offspring from a designated parent organism.
+  /// Collect an offspring from a designated parent organism.
   void DivideOrg(organism_t & parent_org) {
     emp_assert(parent_org.OK());
     plug_ins.BeforeRepro(parent_org);
@@ -288,7 +274,7 @@ public:
     plug_ins.OnUpdateStart(update);
   }
 
-  void ProcessOrg(size_t id, int32_t num_cycles) {
+  void ProcessOrg(size_t id, uint32_t num_cycles) {
     biota[id].Process(num_cycles);
   }
 
