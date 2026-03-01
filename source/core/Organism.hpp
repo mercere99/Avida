@@ -75,13 +75,13 @@ public:
     // Move over guts of Organism.
     genome = std::move(in.genome);
     hw_ptr = in.hw_ptr;
-    biota_pos = in.biota_pos;
-    id = in.id;
+    biota_id = in.biota_id;
+    global_id = in.global_id;
 
     // Clean up old pointers (so they don't deallocate on destruction.)
     in.hw_ptr = nullptr;
-    in.biota_pos = UNKNOWN_ID;
-    in.id = UNKNOWN_ID;
+    in.biota_id = UNKNOWN_ID;
+    in.global_id = UNKNOWN_ID;
 
     // Make sure hardware knows about its new Organism.
     emp_assert(hw_ptr);
@@ -125,7 +125,7 @@ public:
     emp_assert(hw_ptr);
     os << "Genome:" << GetGenomeSequence()
       << " hw_ptr:" << hw_ptr 
-      << " id:" << id;
+      << " global_id:" << global_id;
   }
 
   /// Check to make sure there aren't any problems with this organism object.

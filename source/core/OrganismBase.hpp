@@ -17,21 +17,21 @@ public:
   static constexpr size_t UNKNOWN_ID = static_cast<size_t>(-1);
 protected:
 
-  size_t biota_pos = UNKNOWN_ID;  // Where is this Organism located?
-  size_t id = UNKNOWN_ID;         // Unique organism ID.
+  size_t biota_id = UNKNOWN_ID;   // Where is this Organism located?
+  size_t global_id = UNKNOWN_ID;  // Unique organism ID.
 
   OrganismBase() = default;
-  OrganismBase(OrganismBase && in) : biota_pos(in.biota_pos), id(in.id) {
-    in.biota_pos = UNKNOWN_ID;
-    in.id = UNKNOWN_ID;
+  OrganismBase(OrganismBase && in) : biota_id(in.biota_id), global_id(in.global_id) {
+    in.biota_id = UNKNOWN_ID;
+    in.global_id = UNKNOWN_ID;
   }
 
 public:
-  [[nodiscard]] size_t GetPosition() const { return biota_pos; }
-  auto & SetPosition(this auto & self, size_t in_pos) { self.biota_pos = in_pos; return self; }
+  [[nodiscard]] size_t GetBiotaID() const { return biota_id; }
+  auto & SetBiotaID(this auto & self, size_t in_pos) { self.biota_id = in_pos; return self; }
 
-  [[nodiscard]] size_t GetID() const { return id; }
-  auto & SetID(this auto & self, size_t in_id) { self.id = in_id; return self; }
+  [[nodiscard]] size_t GetGlobalID() const { return global_id; }
+  auto & SetGlobalID(this auto & self, size_t in_id) { self.global_id = in_id; return self; }
 
 };
 
