@@ -8,9 +8,10 @@
  *  This is the main controller class for Avida.
  * 
  *  DEVELOPER notes:
- *  - Add module TrackGenotype
  *  - Add module PopGrid
- *  - Add module PrintGrid that prints grid every X updates AND requires PopGrid module
+ *  - Add module GridFacing (with dependency on PopGrid)
+ *  - Add module PrintGrid that prints grid every X updates (with dependency on PopGrid)
+ *  - Add module TrackGenotype
  *  - Add module EnvironmentLogic9 (it should register tasks and trigger OnTask as needed)
  *  - Add module OutputManager for printing to screen or files
  *  - Add module Reactions that listens for OnTask to provide rewards
@@ -72,7 +73,8 @@ private:
   emp::Random random;         // Central random number generator
   biota_t biota{};            // Collection of all current organisms
   emp::BitVector occupied{};  // Which organisms in biota are active?
-  size_t org_count = 0;       // Current number of active organisms
+  int32_t num_orgs = 0;       // Current number of active organisms
+  size_t total_orgs = 0;      // Total orgs that have ever existed (used for global IDs)
 
   enum class RunState { INITIALIZING, RUNNING, PAUSED, EXITING, ERROR };
   RunState run_state = RunState::INITIALIZING;
@@ -80,7 +82,11 @@ private:
   // ===== Helper Functions =====
   void PlaceOrganism(organism_t && org_to_place) {
     emp_assert(occupied.size() == biota.size());
-    emp_assert(occupied.CountOnes() == org_count);
+    emp_assert(occupied.CountOnes() == num_orgs);
+    emp_assert(org_to_place.GetBiotaID() == OrganismBase::UNKNOWN_ID,
+      "Organisms should not have a biota ID until placement.", org_to_place.GetBiotaID());
+    emp_assert(org_to_place.GetGlobalID() == OrganismBase::UNKNOWN_ID,
+      "Organisms should not have a global ID until placement.", org_to_place.GetGlobalID());
 
     plug_ins.BeforePlacement(org_to_place);
 
@@ -93,9 +99,10 @@ private:
       biota[index] = std::move(org_to_place);
     }
 
-    ++org_count;
-    organism_t & placed_org = biota[index];  // org_to_place was moved out; grab new location.
-    placed_org.SetPosition(index);
+    ++num_orgs;
+    organism_t & placed_org = biota[index];  // org_to_place was moved out; this is new location.
+    placed_org.SetBiotaID(index);
+    placed_org.SetGlobalID(total_orgs++);
     plug_ins.OnPlacement(placed_org);
   }
 
@@ -132,7 +139,8 @@ public:
     return self.biota[self.occupied.FindOne()];
   }
   [[nodiscard]] bool IsOccupied(size_t id) const { return id < occupied.size() && occupied[id]; }
-  [[nodiscard]] int32_t GetNumOrgs() const { return org_count; }
+  [[nodiscard]] int32_t GetNumOrgs() const { return num_orgs; }
+  [[nodiscard]] int32_t GetTotalOrgs() const { return total_orgs; }
 
   template <std::invocable<const organism_t &> FUN_T>
   [[nodiscard]] double GetAveTrait(const FUN_T & fun) const {
@@ -258,7 +266,7 @@ public:
     plug_ins.BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
     biota[delete_id].SignalDeath();       // Notify organism before deletion.
     occupied.Clear(delete_id);
-    --org_count;
+    --num_orgs;
   }
 
   // Delete a random (occupied) organism position.
