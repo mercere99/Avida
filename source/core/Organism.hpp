@@ -75,12 +75,12 @@ public:
     // Move over guts of Organism.
     genome = std::move(in.genome);
     hw_ptr = in.hw_ptr;
-    position = in.position;
+    biota_pos = in.biota_pos;
     id = in.id;
 
     // Clean up old pointers (so they don't deallocate on destruction.)
     in.hw_ptr = nullptr;
-    in.position = UNKNOWN_ID;
+    in.biota_pos = UNKNOWN_ID;
     in.id = UNKNOWN_ID;
 
     // Make sure hardware knows about its new Organism.
@@ -89,12 +89,6 @@ public:
 
     return *this;
   }
-
-  [[nodiscard]] size_t GetPosition() const { return position; }
-  Organism & SetPosition(size_t in_position) { position = in_position; return *this; }
-
-  [[nodiscard]] size_t GetID() const { return id; }
-  Organism & SetID(size_t in_id) { id = in_id; return *this; }
 
   [[nodiscard]] const genome_t & GetGenome() const { return genome; }
   [[nodiscard]] emp::String GetGenomeSequence() const {
