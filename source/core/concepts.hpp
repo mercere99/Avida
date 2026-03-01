@@ -106,19 +106,18 @@ namespace concepts {
   // ===  Genome  ===
 
   template <typename G>
-  concept Genome = requires(G genome, const G const_genome, std::size_t pos, std::size_t len, typename G::value_t id, std::ostream& os) {
+  concept Genome = requires(G genome, const G const_genome, std::size_t pos, std::size_t len, typename G::value_t value, std::ostream& os) {
     typename G::value_t;
 
     { const_genome.size() } -> std::convertible_to<std::size_t>;
     { const_genome[pos] } -> std::convertible_to<typename G::value_t>;
 
-    { genome.Push(id) } -> std::same_as<void>;
-    { genome.Insert(pos, id) } -> std::same_as<void>;
+    { genome.Push(value) } -> std::same_as<void>;
+    { genome.Insert(pos, value) } -> std::same_as<void>;
     { genome.Extract(pos, len) } -> std::same_as<G>;
 
     // Optional conveniences; keep them required only if you rely on them widely.
     { genome.Clear() } -> std::same_as<void>;
-    { const_genome.Print(os) } -> std::same_as<void>;
   };
 
 
@@ -168,11 +167,11 @@ namespace concepts {
       HARDWARE_T hardware,
       const HARDWARE_T const_hardware,
       emp::Random & random,
-      std::size_t cycles
+      std::size_t cycles,
+      OrganismBase org_base
     ) {
     typename HARDWARE_T::genome_t;
     typename HARDWARE_T::manager_t;
-    typename HARDWARE_T::organism_t;
 
     // Core execution
     { hardware.Process(cycles) } -> std::same_as<void>;
@@ -182,9 +181,9 @@ namespace concepts {
     { hardware.DivideGenome(random) } -> std::same_as<typename HARDWARE_T::genome_t>;
 
     // Organism linkage
-    { hardware.SetOrganism(std::declval<typename HARDWARE_T::organism_t&>()) } -> std::same_as<HARDWARE_T&>;
-    { hardware.GetOrganism() } -> std::same_as<typename HARDWARE_T::organism_t&>;
-    { const_hardware.GetOrganism() } -> std::same_as<const typename HARDWARE_T::organism_t&>;
+    { hardware.SetOrganism(org_base) } -> std::same_as<HARDWARE_T &>;
+    { hardware.GetOrganism() } -> std::same_as<OrganismBase &>;
+    { const_hardware.GetOrganism() } -> std::same_as<const OrganismBase &>;
 
     // Manager access
     { hardware.GetManager() } -> std::same_as<typename HARDWARE_T::manager_t&>;
@@ -208,28 +207,25 @@ namespace concepts {
       emp::Random & random,
       typename MANAGER_T::genome_t & genome,
       const typename MANAGER_T::genome_t & const_genome,
-      emp::String filename
+      OrganismBase organism,
+      emp::Ptr<typename MANAGER_T::hardware_t> hw_ptr,
+      emp::String name
     ) {
     typename MANAGER_T::hardware_t;
     typename MANAGER_T::genome_t;
-    typename MANAGER_T::org_t;
-    typename MANAGER_T::hw_ptr_t;
+    typename MANAGER_T::feedback_t; // std::function<void(OrganismBase & org)>
 
     { MANAGER_T::DefaultName() } -> StringLike;
 
-    { hardware_manager.Allocate(std::declval<typename MANAGER_T::org_t&>()) } -> std::same_as<typename MANAGER_T::hw_ptr_t>;
-    { hardware_manager.Release(std::declval<typename MANAGER_T::hw_ptr_t>()) } -> std::same_as<void>;
+    { hardware_manager.Allocate(organism) } -> std::same_as<emp::Ptr<typename MANAGER_T::hardware_t>>;
+    { hardware_manager.Release(hw_ptr) } -> std::same_as<void>;
+    { hardware_manager.Clear() } -> std::same_as<void>;
 
-    { hardware_manager.Mutate(random, genome) } -> std::same_as<void>;
+    { hardware_manager.AddCallback(name, [](OrganismBase &){}) } -> std::same_as<bool>;
 
     { const_hardware_manager.ToSequence(const_genome) } -> std::same_as<emp::String>;
-    { const_hardware_manager.LoadGenome(filename) };
-
-    { hardware_manager.GetInstSet() };
-    { const_hardware_manager.GetInstSet() };
-
-    // InstSet type consistency (light check)
-    requires InstSet<std::remove_reference_t<decltype(hardware_manager.GetInstSet())>>;
+    { const_hardware_manager.LoadGenome(name) };
+    { hardware_manager.Mutate(random, genome) } -> std::same_as<void>;
   };
 
 
@@ -240,7 +236,7 @@ namespace concepts {
       ORG_T org,
       const ORG_T const_org,
       emp::Random & random,
-      std::size_t position,
+      std::size_t id,
       std::size_t cycles
     ) {
     typename ORG_T::genome_t;
@@ -250,7 +246,8 @@ namespace concepts {
     { const_org.GetGenomeSequence() } -> std::same_as<emp::String>;
 
     { const_org.GetMetabolicRate() } -> std::convertible_to<double>;
-    { org.SetPosition(position) } -> std::same_as<ORG_T&>;
+    { org.SetBiotaID(id) } -> std::same_as<ORG_T&>;
+    { org.SetGlobalID(id) } -> std::same_as<ORG_T&>;
 
     { org.Process(cycles) } -> std::same_as<ORG_T&>;
     { org.DivideGenome(random) } -> std::same_as<typename ORG_T::genome_t>;
