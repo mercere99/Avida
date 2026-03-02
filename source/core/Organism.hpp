@@ -48,12 +48,6 @@ public:
   {
     hw_ptr->Reset(org_to_clone.GetGenome());
   }
-  Organism(Organism & parent, genome_t && offspring_genome) // Provide parent and new genome.
-    : genome(std::move(offspring_genome))
-    , hw_ptr(parent.GetHardware().GetManager().Allocate(*this))
-  {
-    hw_ptr->Reset(genome);
-  }
   ~Organism() {
     // Clean up hardware if we have it.
     if (hw_ptr) {
@@ -88,6 +82,11 @@ public:
     hw_ptr->SetOrganism(*this);
 
     return *this;
+  }
+
+  void Reset(genome_t && in_genome) {
+    genome = std::move(in_genome);
+    hw_ptr->Reset(genome);
   }
 
   [[nodiscard]] const genome_t & GetGenome() const { return genome; }
