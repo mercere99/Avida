@@ -28,11 +28,11 @@ class HardwareManager {
 public:
   using hardware_t = HW_T;
   using genome_t = typename hardware_t::genome_t;
+  using feedback_t = std::function<void(OrganismBase & /*org*/)>;
   using inst_set_t = InstSet<hardware_t>;
 
 private:
   using hw_ptr_t = emp::Ptr<hardware_t>;
-  using feedback_t = std::function<void(OrganismBase & /*org*/)>;
 
   emp::vector< hw_ptr_t > hw_ptrs;  // Pointers to available hardware.
 

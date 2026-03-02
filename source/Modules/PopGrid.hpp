@@ -99,7 +99,7 @@ public:
     emp_assert(pop_pos != npos, "Orgs must know where to be placed.");
     emp_assert(org_grid[pop_pos] == npos, "Org must be placed into empty cells");
 
-    org_grid[pop_pos] = org.GetPosition();
+    org_grid[pop_pos] = org.GetBiotaID();
 
     return true;
   }

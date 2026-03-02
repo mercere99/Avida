@@ -19,6 +19,7 @@ private:
   AVIDA_T & avida;
 
   size_t last_update = 10000; // How many updated should the run go for?
+  // size_t last_update = 1000; // How many updated should the run go for?
 
   // CPU Execution Management
   emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
@@ -65,13 +66,13 @@ public:
 
   template <concepts::Organism ORG_T>
   bool OnPlacement(ORG_T & org) {
-    speed_map.Set(org.GetPosition(), org.GetMetabolicRate());
+    speed_map.Set(org.GetBiotaID(), org.GetMetabolicRate());
     return true;
   }
 
   template <concepts::Organism ORG_T>
   bool BeforeDeath(ORG_T & org) {
-    speed_map.Set(org.GetPosition(), 0.0);  // Set old index speed to 0; don't shrink speed_map
+    speed_map.Set(org.GetBiotaID(), 0.0);  // Set old index speed to 0; don't shrink speed_map
     return true;
   }
 };
