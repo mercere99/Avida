@@ -540,6 +540,13 @@ public:
     }
   }
 
+  void Trace(size_t cpu_cycles=200, std::ostream & os=std::cout) {
+    for (size_t i = 0; i <= cpu_cycles; ++i) {
+      if (i) ProcessStep();
+      std::println(os, "STEP {}: {}", i, StatusString());
+    }
+  }
+
   // Initialize the state of the virtual CPU
   void Reset() {
     // Reset Heads
