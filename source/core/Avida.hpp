@@ -26,6 +26,7 @@
  *  - Allow hardware variant to form special type of organism that can use any listed hardware.
  *  - Configuration options need to be, well, configurable
  *  - Test out alternative VM
+ *  - Specialized base classes for module types: populations (1), drivers (1), analyzers, environments
  * 
  *  - Longer term: Simple language that compiles to Avida modules.
  */
@@ -88,36 +89,28 @@ private:
 
   // ===== Helper Functions =====
 
-  // Set up a new organism in the biota, returning its new version.
-  organism_t & ReserveOrganism(organism_t && org_to_place) {
+  // Set up a new organism in the biota, returning a reference to it.
+  organism_t & ReserveOrganism(genome_t && new_genome) {
     size_t index = occupied.FindZero();    // Find empty position in biota.
     if (index == emp::BitVector::npos) {   // If no empty position available, add one.
       index = occupied.PushBack(true);
-      biota.emplace_back(std::move(org_to_place));
+      biota.emplace_back(hw_manager, std::move(new_genome));
     } else {
       occupied.Set(index);
-      biota[index] = std::move(org_to_place);
+      biota[index].Reset(std::move(new_genome));
     }
     ++num_orgs;
-    organism_t & placed_org = biota[index];  // org_to_place was moved out; this is new location.
-    placed_org.SetBiotaID(index);
-    placed_org.SetGlobalID(total_orgs++);
+    organism_t & reserved_org = biota[index];
+    reserved_org.SetBiotaID(index);
+    reserved_org.SetGlobalID(total_orgs++);
 
-    return placed_org;
+    return reserved_org;
   }
 
-  // Indicate that an organism has been activated in a population.
-  void PlaceOrganism(organism_t && org_to_place) {
+  bool OK() {
     emp_assert(occupied.size() == biota.size());
     emp_assert(occupied.CountOnes() == num_orgs);
-    emp_assert(org_to_place.GetBiotaID() == OrganismBase::UNKNOWN_ID,
-      "Organisms should not have a biota ID until placement.", org_to_place.GetBiotaID());
-    emp_assert(org_to_place.GetGlobalID() == OrganismBase::UNKNOWN_ID,
-      "Organisms should not have a global ID until placement.", org_to_place.GetGlobalID());
-
-    plug_ins.BeforePlacement(org_to_place);
-    organism_t & placed_org = ReserveOrganism(std::move(org_to_place));
-    plug_ins.OnPlacement(placed_org);
+    return true;
   }
 
 public:
@@ -215,35 +208,35 @@ public:
 
   // ====== Organism Management ======
 
-  void Inject(genome_t && genome) {
-    organism_t inject_org{hw_manager, std::move(genome)};
-    plug_ins.OnInjectReady(inject_org);
-    return PlaceOrganism(std::move(inject_org));
+  organism_t & Inject(genome_t && genome) {
+    organism_t & inject_org = ReserveOrganism(std::move(genome));
+    plug_ins.OnInjectReady(inject_org);    // Trigger for injections only
+    plug_ins.BeforePlacement(inject_org);  // Trigger to set up organisms for activation
+    plug_ins.OnPlacement(inject_org);      // Trigger to activate organism in populations
+    return inject_org;
   }
   
   /// @brief Inject an organism using a genome loaded from a file.
   /// @param filename - The name of the file with the genome information.
-  void Inject(const emp::String & filename) {
+  organism_t & Inject(const emp::String & filename) {
     auto exp_genome = hw_manager.LoadGenome(filename);
-    if (!exp_genome) {
-      emp::notify::Error("Failed to inject from file '", filename, "'.");
-    }
-
+    if (!exp_genome) emp::notify::Error("Failed to inject from file '", filename, "'.");
     return Inject(std::move(*exp_genome));
   }
 
   /// Collect an offspring from a designated parent organism.
-  void DivideOrg(organism_t & parent_org) {
-    emp_assert(parent_org.OK());
-    plug_ins.BeforeRepro(parent_org);
-    genome_t offspring_genome = parent_org.DivideGenome(random);
+  void DivideOrg(organism_t & parent) {
+    emp_assert(parent.OK());
+    plug_ins.BeforeRepro(parent);
+    genome_t offspring_genome = parent.DivideGenome(random);
     if (offspring_genome.size()) {
-      organism_t offspring{parent_org, std::move(offspring_genome)};
-      plug_ins.OnOffspringReady(offspring, parent_org);
-      PlaceOrganism( std::move(offspring) );
+      organism_t & offspring = ReserveOrganism(std::move(offspring_genome));
+      plug_ins.OnOffspringReady(offspring, parent);  // Trigger for offspring only
+      plug_ins.BeforePlacement(offspring);           // Trigger to set up organisms for activation
+      plug_ins.OnPlacement(offspring);               // Trigger to activate organism in populations
     }
   }
-  void DivideOrg(OrganismBase & parent_org) { DivideOrg( static_cast<organism_t&>(parent_org) ); }
+  void DivideOrg(OrganismBase & parent) { DivideOrg( static_cast<organism_t&>(parent) ); }
 
   // Delete an organism at a specific position in the biota.
   void DeleteOrg(size_t delete_id) {

@@ -36,8 +36,14 @@ public:
   // === Signal Listeners ===
 
   template <concepts::Organism ORG_T>
-  bool OnOffspringReady([[maybe_unused]] ORG_T & offspring, [[maybe_unused]] ORG_T & parent) {
+  bool OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
     offspring.GetPhenotype().generation = parent.GetPhenotype().generation + 1;
+    return true;
+  }
+
+  template <concepts::Organism ORG_T>
+  bool OnInjectReady(ORG_T & inject_org) {
+    inject_org.GetPhenotype().generation = 0;
     return true;
   }
 
