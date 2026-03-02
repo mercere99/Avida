@@ -18,7 +18,7 @@ class PopWellMixed : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
 
-  int32_t pop_cap = 10000;    // Population size limit (default: 10,000 orgs)
+  uint32_t pop_cap = 10000;    // Population size limit (default: 10,000 orgs)
 
 public:
   PopWellMixed(AVIDA_T & avida)
@@ -32,7 +32,7 @@ public:
   template <concepts::Organism ORG_T>
   bool BeforePlacement([[maybe_unused]] ORG_T & org) {
     // See if we must delete an organism to make room for the new one.
-    if (avida.GetNumOrgs() == pop_cap) avida.DeleteOrg();
+    if (avida.GetNumOrgs() > pop_cap) avida.DeleteOrg();
 
     return true;
   }
