@@ -28,7 +28,6 @@ protected:
 
 public:
   [[nodiscard]] size_t GetBiotaID() const { return biota_id; }
-  auto & SetBiotaID(this auto & self, size_t in_pos) { self.biota_id = in_pos; return self; }
 
   [[nodiscard]] size_t GetGlobalID() const { return global_id; }
   auto & SetGlobalID(this auto & self, size_t in_id) { self.global_id = in_id; return self; }

@@ -167,65 +167,28 @@ namespace concepts {
       HARDWARE_T hardware,
       const HARDWARE_T const_hardware,
       emp::Random & random,
-      std::size_t cycles,
-      OrganismBase org_base
+      std::size_t value,
+      HARDWARE_T::inst_set_t & inst_set
     ) {
     typename HARDWARE_T::genome_t;
-    typename HARDWARE_T::manager_t;
 
     // Core execution
-    { hardware.Process(cycles) } -> std::same_as<void>;
+    { hardware.Process(value) } -> std::same_as<void>;
     { hardware.ProcessStep() } -> std::same_as<void>;
 
     // Reproduction
     { hardware.DivideGenome(random) } -> std::same_as<typename HARDWARE_T::genome_t>;
 
     // Organism linkage
-    { hardware.SetOrganism(org_base) } -> std::same_as<HARDWARE_T &>;
-    { hardware.GetOrganism() } -> std::same_as<OrganismBase &>;
-    { const_hardware.GetOrganism() } -> std::same_as<const OrganismBase &>;
-
-    // Manager access
-    { hardware.GetManager() } -> std::same_as<typename HARDWARE_T::manager_t&>;
-    { const_hardware.GetManager() } -> std::same_as<const typename HARDWARE_T::manager_t&>;
+    { hardware.SetBiotaID(value) } -> std::same_as<HARDWARE_T &>;
+    { const_hardware.GetBiotaID() } -> std::convertible_to<size_t>;
 
     // Health check
     { const_hardware.OK() } -> std::convertible_to<bool>;
 
     // Static identity + inst set construction
     { HARDWARE_T::HardwareName() } -> StringLike;
-    { HARDWARE_T::BuildInstSet() };
-  };
-
-
-  // ===  HardwareManager  ===
-
-  template <typename MANAGER_T>
-  concept HardwareManager = requires(
-      MANAGER_T hardware_manager,
-      const MANAGER_T const_hardware_manager,
-      emp::Random & random,
-      typename MANAGER_T::genome_t & genome,
-      const typename MANAGER_T::genome_t & const_genome,
-      OrganismBase organism,
-      emp::Ptr<typename MANAGER_T::hardware_t> hw_ptr,
-      emp::String name
-    ) {
-    typename MANAGER_T::hardware_t;
-    typename MANAGER_T::genome_t;
-    typename MANAGER_T::feedback_t; // std::function<void(OrganismBase & org)>
-
-    { MANAGER_T::DefaultName() } -> StringLike;
-
-    { hardware_manager.Allocate(organism) } -> std::same_as<emp::Ptr<typename MANAGER_T::hardware_t>>;
-    { hardware_manager.Release(hw_ptr) } -> std::same_as<void>;
-    { hardware_manager.Clear() } -> std::same_as<void>;
-
-    { hardware_manager.AddCallback(name, [](OrganismBase &){}) } -> std::same_as<bool>;
-
-    { const_hardware_manager.ToSequence(const_genome) } -> std::same_as<emp::String>;
-    { const_hardware_manager.LoadGenome(name) };
-    { hardware_manager.Mutate(random, genome) } -> std::same_as<void>;
+    { HARDWARE_T::BuildInstSet(inst_set) };
   };
 
 

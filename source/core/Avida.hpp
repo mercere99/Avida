@@ -40,10 +40,10 @@
 #include "emp/meta/TypePack.hpp"
 
 #include "../Hardware/AvidaVM.hpp"
-#include "../Hardware/HardwareManager.hpp"
 
 #include "concepts.hpp"
 #include "ModuleBase.hpp"
+#include "Organism.hpp"
 #include "Phenotype.hpp"
 #include "PlugInManager.hpp"
 
@@ -60,7 +60,7 @@ public:
   using pheno_pack_t = plug_in_pack_t::template filter<pheno_member>::template wrap<pheno_member>;
   using phenotype_t = merge_from_TypePack<pheno_pack_t>::merged_t;
   using hardware_t = HARDWARE_T;                         // Type of general hardware for all organisms
-  using hw_manager_t = HardwareManager<hardware_t>;      // Type of manager to recycle hardware
+  using inst_set_t = hardware_t::inst_set_t;             // Type of inst set used by this hardware.
   using organism_t = Organism<hardware_t, phenotype_t>;  // Type for each individual organism
   using biota_t = emp::vector<organism_t>;               // Collection of all current organisms in Avida
   using genome_t = hardware_t::genome_t;                 // Type of genomes used in organisms
@@ -69,13 +69,12 @@ public:
   static_assert(concepts::Genome<genome_t>);
   // static_assert(concepts::InstSet<>);
   static_assert(concepts::Hardware<hardware_t>);
-  static_assert(concepts::HardwareManager<hw_manager_t>);
   static_assert(concepts::Organism<organism_t>);
 
 private:
-  PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
-  hw_manager_t hw_manager;
+  inst_set_t inst_set;
   TraitManager<this_t> trait_man;
+  PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
 
   size_t update = 0;          // Times update was run on this population
   emp::Random random;         // Central random number generator
@@ -94,7 +93,7 @@ private:
     size_t index = occupied.FindZero();    // Find empty position in biota.
     if (index == emp::BitVector::npos) {   // If no empty position available, add one.
       index = occupied.PushBack(true);
-      biota.emplace_back(hw_manager, std::move(new_genome));
+      biota.emplace_back(inst_set, std::move(new_genome));
     } else {
       occupied.Set(index);
       biota[index].Reset(std::move(new_genome));
@@ -105,12 +104,6 @@ private:
     reserved_org.SetGlobalID(total_orgs++);
 
     return reserved_org;
-  }
-
-  bool OK() {
-    emp_assert(occupied.size() == biota.size());
-    emp_assert(occupied.CountOnes() == num_orgs);
-    return true;
   }
 
 public:
@@ -187,12 +180,12 @@ public:
 
   // ====== Configuration Management ======
 
-  // Initialize the hardware manager (with AvidVM) and the biota (with the default) ancestor.
+  // Initialize AvidaVM and the biota with the (default) ancestor.
   void Setup() {
     if (run_state != RunState::INITIALIZING) return;
 
     // Add callbacks for the current hardware manager.
-    hw_manager.AddCallback("DivideCell", [this](OrganismBase & org){ DivideOrg(org); });
+    inst_set.AddCallbackInst("DivideCell", [this](size_t biota_id){ DivideOrg(biota[biota_id]); });
 
     // Inject a single individual of the default ancestor.
     Inject("../config/ancestor.org");
@@ -219,7 +212,7 @@ public:
   /// @brief Inject an organism using a genome loaded from a file.
   /// @param filename - The name of the file with the genome information.
   organism_t & Inject(const emp::String & filename) {
-    auto exp_genome = hw_manager.LoadGenome(filename);
+    auto exp_genome = inst_set.LoadGenome(filename);
     if (!exp_genome) emp::notify::Error("Failed to inject from file '", filename, "'.");
     return Inject(std::move(*exp_genome));
   }
@@ -268,14 +261,14 @@ public:
   }
 
   void ProcessOrg(size_t id, uint32_t num_cycles) {
-    biota[id].Process(num_cycles);
+    for (size_t i = 0; i < num_cycles; ++i) {
+      biota[id].GetHardware().ProcessStep();
+    }
   }
 
   void Run() {
-    if (run_state == RunState::INITIALIZING) {
-      Setup();
-      run_state = RunState::RUNNING;
-    }
+    if (run_state == RunState::INITIALIZING) Setup();
+    run_state = RunState::RUNNING;
     while (run_state == RunState::RUNNING) DoUpdate();
   }
 
@@ -285,8 +278,18 @@ public:
     // If plug-ins have been initialized, notify them of impending exit.
     if (run_state > RunState::INITIALIZING) plug_ins.BeforeExit();
     biota.clear();
-    hw_manager.Clear();
     trait_man.Clear();
     run_state = RunState::EXITING;
   }
+
+  bool OK() {
+    emp_assert(occupied.size() == biota.size());
+    emp_assert(occupied.CountOnes() == num_orgs);
+
+    bool orgs_ok = true;
+    for (size_t index : occupied) orgs_ok = orgs_ok && biota[index].OK();
+
+    return orgs_ok;
+  }
+
 };

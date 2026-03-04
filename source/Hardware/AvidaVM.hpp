@@ -17,23 +17,15 @@
 #include "emp/math/math.hpp"
 #include "emp/tools/String.hpp"
 
-#include "HardwareManager.hpp"
 #include "InstSet.hpp"
 #include "VMStack.hpp"
 
 #include "../core/Genome.hpp"
-#include "../core/Organism.hpp"
+#include "../core/OrganismBase.hpp"
 
 /// Default Avida Virtual Machine for use in Avida 5
 class AvidaVM {
 public:
-  using manager_t = HardwareManager<AvidaVM>;
-  using genome_t = Genome;
-
-private:
-  manager_t & hw_manager;
-  emp::Ptr<OrganismBase> org_ptr = nullptr;
-
   // Configured values.
   static constexpr size_t NUM_NOPS = 6;           // Num nop modifier instructions used
   static constexpr size_t STACK_DEPTH = 16;       // Num entries on stack before it loops.
@@ -44,10 +36,11 @@ private:
   // Configured types.
   using data_t = int;                             // What data type does this VM use?
   using mem_t = emp::array<data_t, MEM_SIZE>;     // Memory is a fixed size.
-  using inst_id_t = typename genome_t::value_t;   // Type used for inst IDs in a genome.
+  using genome_t = Genome;
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM.
+  using inst_id_t = typename genome_t::value_t;   // Type used for inst IDs in a genome.
   using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU.
-  using callback_t = std::function<void(OrganismBase &)>; // Special functions added to inst set.
+  using callback_t = std::function<void(size_t)>; // Special functions added to inst set.
 
   enum class Nop {
     A = 0, B = 1, C = 2, D = 3, E = 4, F = 5, // Nops referring to specific stacks or heads
@@ -69,26 +62,22 @@ private:
   // Calculated values.
   static constexpr size_t DATA_BITS = sizeof(data_t)*8; // Number of bits in data_t;
 
-
-  // === Hardware ===
-
-  genome_t genome;  // Genome of this organism, being executed.
-  mem_t memory{};   // Storage of values being manipulated by this organism.
+private:
+  genome_t genome;              // Genome of this organism, being executed.
+  mem_t memory{};               // Storage of values being manipulated by this organism.
+  const inst_set_t & inst_set;  // Map of instruction names to functionality.
+  size_t biota_id;              // ID of organism from the biota.
 
   emp::array<size_t, NUM_NOPS> heads;
   emp::array<Stack, NUM_NOPS> stacks;
   size_t error_count = 0;
 
-  // =========== Helper Functions ============
+  // @CAO: Move to a module??
+  static constexpr double mut_prob{0.0075};
+  static constexpr double mut_scale{1.0 / emp::Log2(1.0 - mut_prob)};
 
-  manager_t & Manager() {
-    return static_cast<manager_t &>(hw_manager);
-  }
-  const manager_t & Manager() const {
-    return static_cast<const manager_t &>(hw_manager);
-  }
-  inst_set_t & GetInstSet() { return Manager().GetInstSet(); }
-  const inst_set_t & GetInstSet() const { return Manager().GetInstSet(); }
+
+  // =========== Helper Functions ============
 
   /// Read from a position in the genome.
   [[nodiscard]] inst_id_t ReadGenome(const size_t pos) const {
@@ -122,7 +111,6 @@ private:
 
   [[nodiscard]] inst_id_t ReadIP() const { return ReadGenome(IP()); }
   void AdvanceIP() { ++IP(); }
-
 
   /// Determine an instruction argument: if next instruction is a Nop, use it; else use default_arg
   [[nodiscard]] inst_id_t GetArg(inst_id_t default_arg) {
@@ -205,22 +193,17 @@ private:
 
 public:
   AvidaVM() = delete;
-  AvidaVM(const AvidaVM &) = default;
+  AvidaVM(const AvidaVM &) = delete;
   AvidaVM(AvidaVM &&) = default;
-  AvidaVM(manager_t & hw_manager) : hw_manager(hw_manager) { Reset(); }
-  AvidaVM(manager_t & hw_manager, const genome_t & genome)
-    : hw_manager(hw_manager), genome(genome) { Reset(); }
-  // AvidaVM & operator=(const AvidaVM &) = default;
-  // AvidaVM & operator=(AvidaVM &&) = default;
+  AvidaVM(const inst_set_t & inst_set, const genome_t & genome=genome_t{})
+    : genome(genome), inst_set(inst_set) { Reset(); }
 
-  // === Organisms ===
+  // === Accessors ===
   
-  [[nodiscard]] OrganismBase & GetOrganism() { emp_assert(org_ptr); return *org_ptr; }
-  [[nodiscard]] const OrganismBase & GetOrganism() const { emp_assert(org_ptr); return *org_ptr; }
-  AvidaVM & SetOrganism(OrganismBase & org) { org_ptr = &org; return *this; }
+  [[nodiscard]] size_t GetBiotaID() const { return biota_id; }
+  AvidaVM & SetBiotaID(size_t in) { biota_id = in; return *this; }
 
-  [[nodiscard]] manager_t & GetManager() { return hw_manager; }
-  [[nodiscard]] const manager_t & GetManager() const { return hw_manager; }
+  [[nodiscard]] const inst_set_t & GetInstSet() const { return inst_set; }
 
   // === Instructions ===
 
@@ -530,7 +513,6 @@ public:
     const inst_id_t inst_id = ReadIP();
     AdvanceIP();
     GetInstSet().Execute(*this, inst_id);
-    // ProcessStep(inst_id);
   }
 
   void Process(size_t cycles=10) {
@@ -591,7 +573,11 @@ public:
     head2 = head1;  // Move head2 to the beginning of the extracted position (likely org end)
     head1 = 0;      // Move head1 to the beginning of the genome
 
-    hw_manager.Mutate(random, offspring);
+    size_t mut_pos = static_cast<size_t>(emp::Log2(random.GetDoubleNonZero()) * mut_scale);
+    while (mut_pos < offspring.size()) {
+      offspring[mut_pos] = inst_set.GetRandom(random);
+      mut_pos += static_cast<size_t>(emp::Log2(random.GetDoubleNonZero()) * mut_scale) + 1;
+    }
 
     return offspring;
   }
@@ -601,8 +587,7 @@ public:
 
   [[nodiscard]] static emp::String HardwareName() { return "AvidaVM"; }
 
-  [[nodiscard]] static inst_set_t BuildInstSet() {    
-    inst_set_t inst_set;
+  static void BuildInstSet(inst_set_t & inst_set) {    
     inst_set.AddNopInst("Nop-A");
     inst_set.AddNopInst("Nop-B");
     inst_set.AddNopInst("Nop-C");
@@ -641,8 +626,6 @@ public:
     inst_set.AddInst("SetHead",    &AvidaVM::Inst_SetHead);
     inst_set.AddInst("JumpHead",   &AvidaVM::Inst_JumpHead);
     inst_set.AddInst("OffsetHead", &AvidaVM::Inst_OffsetHead);
-
-    return inst_set;
   }
 
   static bool AddCallback(inst_set_t & inst_set, emp::String name, callback_t callback_fun) {
@@ -694,11 +677,6 @@ public:
 
 
   bool OK() const {
-    // Check both the organism pointer itself and the organism it's pointing to.
-    if (!org_ptr.OK()) {
-      emp::notify::Warning("Invalid organism pointer found in AvidaVM.");
-      return false;
-    }
     return true;
   }
 };

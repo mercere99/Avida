@@ -26,7 +26,7 @@ public:
   using genome_t = typename HW_T::genome_t;
   using inst_id_t = emp::min_uint_type<MAX_SET_SIZE+1>;
   using inst_fun_t = INST_RETURN_T (HW_T::*)();
-  using callback_t = std::function<void(OrganismBase &)>;
+  using callback_t = std::function<void(size_t)>;
 
   static constexpr inst_id_t NULL_ID = static_cast<inst_id_t>(-1);
 
@@ -45,6 +45,13 @@ private:
   size_t num_nops = 0;
 
 public:
+  InstSet() { hardware_t::BuildInstSet(*this); }
+  InstSet(const InstSet &) = default;
+  InstSet(InstSet &&) = default;
+
+  InstSet & operator=(const InstSet &) = default;
+  InstSet & operator=(InstSet &&) = default;
+
   [[nodiscard]] size_t size() const noexcept { return num_insts; }
   [[nodiscard]] size_t NumInsts() const noexcept { return num_insts; }
   [[nodiscard]] size_t NumNops() const noexcept { return num_nops; }
@@ -137,7 +144,7 @@ public:
     else {
       // If this function doesn't exist, assume it is just a callback.
       emp_assert(callback_funs[id], "Instruction has no function or callback.", id);
-      callback_funs[id](vm.GetOrganism());
+      callback_funs[id](vm.GetBiotaID());
     }
   }
 
