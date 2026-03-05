@@ -14,7 +14,7 @@
 #include "../core/Avida.hpp"
 
 template <typename AVIDA_T>
-class RunStandard : public ModuleBase<AVIDA_T> {
+class DriverBasic : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
 
@@ -28,10 +28,10 @@ private:
   int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
 public:
-  RunStandard(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("RunStandard", "Execution", "Execute organisms based on metabolic rate.")
+  DriverBasic(AVIDA_T & avida)
+    : ModuleBase<AVIDA_T>("DriverBasic", "Execution", "Execute organisms based on metabolic rate.")
     , avida(avida) { }
-  ~RunStandard() { }
+  ~DriverBasic() { }
 
   // === Signal Listeners ===
 
