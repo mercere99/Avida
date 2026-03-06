@@ -173,7 +173,6 @@ namespace concepts {
     typename HARDWARE_T::genome_t;
 
     // Core execution
-    { hardware.Process(value) } -> std::same_as<void>;
     { hardware.ProcessStep() } -> std::same_as<void>;
 
     // Reproduction
