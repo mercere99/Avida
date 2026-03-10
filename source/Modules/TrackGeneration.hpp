@@ -47,8 +47,4 @@ public:
     return true;
   }
 
-  bool BeforeExit() {
-    std::cout << "MODULE RESULT: " << avida.GetAveTrait("generation") << std::endl;
-    return true;
-  }
 };

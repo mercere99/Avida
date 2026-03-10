@@ -67,7 +67,6 @@ public:
 
   // Make sure all of the components fit the proper concepts.
   static_assert(concepts::Genome<genome_t>);
-  // static_assert(concepts::InstSet<>);
   static_assert(concepts::Hardware<hardware_t>);
   static_assert(concepts::Organism<organism_t>);
 
