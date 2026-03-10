@@ -24,7 +24,7 @@ private:
   // CPU Execution Management
   emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
   static constexpr int32_t ave_cycles_per_org = 30; // Total cycles to execute per org per update.
-  static constexpr int32_t CPU_chunk_size = 10;     // Num cycles executed each time org is picked.
+  static constexpr int32_t CPU_chunk_size = 15;     // Num cycles executed each time org is picked.
   int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
 public:
@@ -43,12 +43,12 @@ public:
     }
 
     // Execute all organisms for this update.
-    const int32_t cycles = avida.GetNumOrgs() * ave_cycles_per_org;
-    for (int32_t rounds = cycles / CPU_chunk_size; rounds; --rounds) {
+    const int32_t total_cycles = avida.GetNumOrgs() * ave_cycles_per_org;
+    for (int32_t rounds = total_cycles / CPU_chunk_size; rounds; --rounds) {
       const size_t id = speed_map.Index(avida.GetRandom().GetDouble(speed_map.GetWeight()));
       avida.ProcessOrg(id, CPU_chunk_size);
     }
-    cycles_executed += cycles;
+    cycles_executed += total_cycles;
 
     return true;
   }
