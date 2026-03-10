@@ -30,11 +30,9 @@ public:
 
   // If we have a population cap, delete organisms rather than let population get overfull.
   template <concepts::Organism ORG_T>
-  bool BeforePlacement([[maybe_unused]] ORG_T & org) {
+  void BeforePlacement([[maybe_unused]] ORG_T & org) {
     // See if we must delete an organism to make room for the new one.
     if (avida.GetNumOrgs() > pop_cap) avida.DeleteOrg();
-
-    return true;
   }
 
 };

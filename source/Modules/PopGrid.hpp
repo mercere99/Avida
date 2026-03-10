@@ -49,16 +49,15 @@ public:
     size_t pop_pos = npos;
   };
 
-  bool RegisterTraits() {
+  void RegisterTraits() {
     AVIDA_REGISTER_TRAIT(pop_pos, "Position in the grid population of this organism.");
-    return true;
   }
 
   // === Signal Listeners ===
 
   // When an offspring is ready, need to determine where to place it.
   template <concepts::Organism ORG_T>
-  bool OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
+  void OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
     // Pick future position for offspring.
     const size_t parent_pos = parent.GetPhenotype().pop_pos;
     const size_t parent_x = parent_pos % width;
@@ -73,12 +72,11 @@ public:
       case 6: SetPos(offspring, parent_x - 1 + width, parent_y             ); break;
       case 7: SetPos(offspring, parent_x - 1 + width, parent_y - 1 + height); break;
     }
-    return true;
   }
 
   // If we have a population cap, delete organisms rather than let population get overfull.
   template <concepts::Organism ORG_T>
-  bool BeforePlacement(ORG_T & org) {
+  void BeforePlacement(ORG_T & org) {
     size_t & org_pos = org.GetPhenotype().pop_pos;
 
     // If placed organism does not have a position, it is being injected; pick a random position
@@ -89,18 +87,14 @@ public:
       avida.DeleteOrg(org_grid[org_pos]);
       org_grid[org_pos] = npos;
     }
-
-    return true;
   }
 
   template <concepts::Organism ORG_T>
-  bool OnPlacement([[maybe_unused]] ORG_T & org) {
+  void OnPlacement([[maybe_unused]] ORG_T & org) {
     const size_t pop_pos = org.GetPhenotype().pop_pos;
     emp_assert(pop_pos != npos, "Orgs must know where to be placed.");
     emp_assert(org_grid[pop_pos] == npos, "Org must be placed into empty cells");
 
     org_grid[pop_pos] = org.GetBiotaID();
-
-    return true;
   }
 };

@@ -35,11 +35,10 @@ public:
 
   // === Signal Listeners ===
 
-  bool OnUpdateStart(size_t new_update) {
+  void OnUpdateStart(size_t new_update) {
     // Test if this run should finish.
     if (new_update > last_update) {
       avida.Exit();
-      return true;
     }
 
     // Execute all organisms for this update.
@@ -49,11 +48,9 @@ public:
       avida.ProcessOrg(id, CPU_chunk_size);
     }
     cycles_executed += total_cycles;
-
-    return true;
   }
 
-  bool OnUpdateEnd(size_t old_update) {
+  void OnUpdateEnd(size_t old_update) {
     if (old_update % 100 == 0) {
       std::cout << "UD:" << old_update
                 << "  PopSize:" << avida.GetNumOrgs()
@@ -61,18 +58,15 @@ public:
                 << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
                 << std::endl;
     }
-    return true;
   }
 
   template <concepts::Organism ORG_T>
-  bool OnPlacement(ORG_T & org) {
+  void OnPlacement(ORG_T & org) {
     speed_map.Set(org.GetBiotaID(), org.GetMetabolicRate());
-    return true;
   }
 
   template <concepts::Organism ORG_T>
-  bool BeforeDeath(ORG_T & org) {
+  void BeforeDeath(ORG_T & org) {
     speed_map.Set(org.GetBiotaID(), 0.0);  // Set old index speed to 0; don't shrink speed_map
-    return true;
   }
 };

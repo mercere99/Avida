@@ -28,23 +28,20 @@ public:
     size_t generation = 0;
   };
 
-  bool RegisterTraits() {
+  void RegisterTraits() {
     AVIDA_REGISTER_TRAIT(generation, "Number of offspring in chain since inject");
-    return true;
   }
 
   // === Signal Listeners ===
 
   template <concepts::Organism ORG_T>
-  bool OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
+  void OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
     offspring.GetPhenotype().generation = parent.GetPhenotype().generation + 1;
-    return true;
   }
 
   template <concepts::Organism ORG_T>
-  bool OnInjectReady(ORG_T & inject_org) {
+  void OnInjectReady(ORG_T & inject_org) {
     inject_org.GetPhenotype().generation = 0;
-    return true;
   }
 
 };
