@@ -515,13 +515,6 @@ public:
     GetInstSet().Execute(*this, inst_id);
   }
 
-  void Process(size_t cycles=10) {
-    emp_assert(OK());
-    for (size_t i = 0; i < cycles; ++i) {
-      ProcessStep();
-    }
-  }
-
   void Trace(size_t cpu_cycles=200, std::ostream & os=std::cout) {
     for (size_t i = 0; i <= cpu_cycles; ++i) {
       if (i) ProcessStep();
