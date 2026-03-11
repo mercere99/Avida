@@ -49,6 +49,13 @@ namespace concepts {
 
   // Class reacts to signal: Offspring is ready to be placed.
   template <typename T>
+  concept HasOnOffspringInit = requires(T plugin, typename T::organism_t & offspring,
+                                        typename T::organism_t &  parent) {
+    { plugin.OnOffspringInit(offspring, parent) } -> std::convertible_to<bool>;
+  };
+
+  // Class reacts to signal: Offspring is ready to be placed.
+  template <typename T>
   concept HasOnOffspringReady = requires(T plugin, typename T::organism_t & offspring,
                                          typename T::organism_t &  parent) {
     { plugin.OnOffspringReady(offspring, parent) } -> std::convertible_to<bool>;
@@ -166,7 +173,6 @@ namespace concepts {
   concept Hardware = requires(
       HARDWARE_T hardware,
       const HARDWARE_T const_hardware,
-      emp::Random & random,
       std::size_t value,
       HARDWARE_T::inst_set_t & inst_set
     ) {
@@ -176,7 +182,7 @@ namespace concepts {
     { hardware.ProcessStep() } -> std::same_as<void>;
 
     // Reproduction
-    { hardware.DivideGenome(random) } -> std::same_as<typename HARDWARE_T::genome_t>;
+    { hardware.DivideGenome() } -> std::same_as<typename HARDWARE_T::genome_t>;
 
     // Organism linkage
     { hardware.SetBiotaID(value) } -> std::same_as<HARDWARE_T &>;
@@ -197,7 +203,6 @@ namespace concepts {
   concept Organism = requires(
       ORG_T org,
       const ORG_T const_org,
-      emp::Random & random,
       std::size_t id,
       std::size_t cycles
     ) {
@@ -212,7 +217,7 @@ namespace concepts {
     { org.SetGlobalID(id) } -> std::same_as<ORG_T&>;
 
     { org.Process(cycles) } -> std::same_as<ORG_T&>;
-    { org.DivideGenome(random) } -> std::same_as<typename ORG_T::genome_t>;
+    { org.DivideGenome() } -> std::same_as<typename ORG_T::genome_t>;
   };
 
 } // namespace concepts
