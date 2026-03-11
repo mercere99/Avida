@@ -6,15 +6,16 @@
 
 #include "core/Avida.hpp"
 
-#include "Modules/LogModule.hpp"
-#include "Modules/PopWellMixed.hpp"
-#include "Modules/PopGrid.hpp"
 #include "Modules/DriverBasic.hpp"
+#include "Modules/LogModule.hpp"
+#include "Modules/MutationsDivideSub.hpp"
+#include "Modules/PopGrid.hpp"
+#include "Modules/PopWellMixed.hpp"
 #include "Modules/TrackGeneration.hpp"
 
 int main(int argc, char * argv[])
 {
-  using avida_t = Avida<AvidaVM, PopWellMixed, DriverBasic, TrackGeneration>;
+  using avida_t = Avida<AvidaVM, PopWellMixed, DriverBasic, MutationsDivideSub, TrackGeneration>;
   // using avida_t = Avida<AvidaVM, PopGrid, DriverBasic, TrackGeneration>;
   avida_t avida(emp::ArgsToStrings(argc, argv));
   avida.OK();
