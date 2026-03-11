@@ -140,6 +140,7 @@ public:
   [[nodiscard]] bool IsOccupied(size_t id) const { return id < occupied.size() && occupied[id]; }
   [[nodiscard]] uint32_t GetNumOrgs() const { return num_orgs; }
   [[nodiscard]] size_t GetTotalOrgs() const { return total_orgs; }
+  [[nodiscard]] const inst_set_t & GetInstSet() const { return inst_set; }
 
   template <std::invocable<const organism_t &> FUN_T>
   [[nodiscard]] double GetAveTrait(const FUN_T & fun) const {
@@ -220,12 +221,14 @@ public:
   void DivideOrg(organism_t & parent) {
     emp_assert(parent.OK());
     plug_ins.BeforeRepro(parent);
-    genome_t offspring_genome = parent.DivideGenome(random);
+    genome_t offspring_genome = parent.DivideGenome();
+
     if (offspring_genome.size()) {
       organism_t & offspring = ReserveOrganism(std::move(offspring_genome));
-      plug_ins.OnOffspringReady(offspring, parent);  // Trigger for offspring only
-      plug_ins.BeforePlacement(offspring);           // Trigger to set up organisms for activation
-      plug_ins.OnPlacement(offspring);               // Trigger to activate organism in populations
+      plug_ins.OnOffspringInit(offspring, parent);   // Trigger: set up offspring (e.g., mutations)
+      plug_ins.OnOffspringReady(offspring, parent);  // Trigger: offspring is all set up
+      plug_ins.BeforePlacement(offspring);           // Trigger: set up ANY organism for activation
+      plug_ins.OnPlacement(offspring);               // Trigger: activate organism in populations
     }
   }
   void DivideOrg(OrganismBase & parent) { DivideOrg( static_cast<organism_t&>(parent) ); }
