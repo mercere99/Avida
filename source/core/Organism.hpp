@@ -46,11 +46,14 @@ public:
     return *this;
   }
 
+  void ResetHardware() { hardware.Reset(genome); }
+
   void Reset(genome_t && in_genome) {
     genome = std::move(in_genome);
-    hardware.Reset(genome);
+    ResetHardware();
   }
 
+  [[nodiscard]] genome_t & GetGenome() { return genome; }
   [[nodiscard]] const genome_t & GetGenome() const { return genome; }
   [[nodiscard]] emp::String GetGenomeSequence() const {
     return hardware.GetInstSet().ToSequence(genome);
@@ -70,9 +73,10 @@ public:
     return *this;
   }
 
-  [[nodiscard]] genome_t DivideGenome(emp::Random & random) {
+  [[nodiscard]] genome_t DivideGenome() {
     emp_assert(OK());
-    return hardware.DivideGenome(random);
+    genome_t offspring = hardware.DivideGenome();
+    return offspring;
   }
 
   /// Called when organism is about to die.
