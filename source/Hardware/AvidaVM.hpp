@@ -72,11 +72,6 @@ private:
   emp::array<Stack, NUM_NOPS> stacks;
   size_t error_count = 0;
 
-  // @CAO: Move to a module??
-  static constexpr double mut_prob{0.0075};
-  static constexpr double mut_scale{1.0 / emp::Log2(1.0 - mut_prob)};
-
-
   // =========== Helper Functions ============
 
   /// Read from a position in the genome.
@@ -544,7 +539,7 @@ public:
     Reset();
   }
 
-  genome_t DivideGenome(emp::Random & random) {
+  genome_t DivideGenome() {
     const auto [head1_id, head2_id] = GetArgs<Nop::B, Nop::C>();
 
     size_t & head1 = heads[head1_id];
@@ -565,12 +560,6 @@ public:
     // Reset the heads.
     head2 = head1;  // Move head2 to the beginning of the extracted position (likely org end)
     head1 = 0;      // Move head1 to the beginning of the genome
-
-    size_t mut_pos = static_cast<size_t>(emp::Log2(random.GetDoubleNonZero()) * mut_scale);
-    while (mut_pos < offspring.size()) {
-      offspring[mut_pos] = inst_set.GetRandom(random);
-      mut_pos += static_cast<size_t>(emp::Log2(random.GetDoubleNonZero()) * mut_scale) + 1;
-    }
 
     return offspring;
   }
