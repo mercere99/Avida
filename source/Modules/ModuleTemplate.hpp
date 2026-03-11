@@ -30,35 +30,32 @@ public:
 
   // === Signal Listeners ===
 
-  OnUpdateStart([[maybe_unused]] size_t new_update) { }
+  void OnUpdateStart([[maybe_unused]] size_t new_update) { }
 
-  OnUpdateEnd([[maybe_unused]] size_t old_update) { }
-
-  template <concepts::Organism ORG_T>
-  BeforeRepro([[maybe_unused]] ORG_T & parent) { }
+  void OnUpdateEnd([[maybe_unused]] size_t old_update) { }
 
   template <concepts::Organism ORG_T>
-  OnOffspringReady([[maybe_unused]] ORG_T & offspring, [[maybe_unused]] ORG_T & parent) { }
+  void BeforeRepro([[maybe_unused]] ORG_T & parent) { }
 
   template <concepts::Organism ORG_T>
-  OnInjectReady([[maybe_unused]] ORG_T & inject_org) { }
+  void OnOffspringInit([[maybe_unused]] ORG_T & org, [[maybe_unused]] ORG_T & parent) { }
 
   template <concepts::Organism ORG_T>
-  BeforePlacement([[maybe_unused]] ORG_T & org) { }
+  void OnOffspringReady([[maybe_unused]] ORG_T & offspring, [[maybe_unused]] ORG_T & parent) { }
 
   template <concepts::Organism ORG_T>
-  OnPlacement([[maybe_unused]] ORG_T & org) { }
+  void OnInjectReady([[maybe_unused]] ORG_T & inject_org) { }
 
   template <concepts::Organism ORG_T>
-  BeforeMutate([[maybe_unused]] ORG_T & org) { }
+  void BeforePlacement([[maybe_unused]] ORG_T & org) { }
 
   template <concepts::Organism ORG_T>
-  OnMutate([[maybe_unused]] ORG_T & org) { }
+  void OnPlacement([[maybe_unused]] ORG_T & org) { }
 
   template <concepts::Organism ORG_T>
-  BeforeDeath([[maybe_unused]] ORG_T & org) { }
+  void BeforeDeath([[maybe_unused]] ORG_T & org) { }
 
-  BeforeExit() { }
+  void BeforeExit() { }
   
-  OnHelp() { }
+  void OnHelp() { }
 };

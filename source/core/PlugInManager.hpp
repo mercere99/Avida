@@ -64,6 +64,10 @@ public:
 
   void BeforeRepro(organism_t & parent) { AVIDA_SIGNAL_DEF(BeforeRepro(parent), &parent); }
 
+  void OnOffspringInit(organism_t & offspring, organism_t & parent) {
+    AVIDA_SIGNAL_DEF(OnOffspringInit(offspring, parent), &offspring, &parent);
+  }
+
   void OnOffspringReady(organism_t & offspring, organism_t & parent) {
     AVIDA_SIGNAL_DEF(OnOffspringReady(offspring, parent), &offspring, &parent);
   }
@@ -72,10 +76,6 @@ public:
   void BeforePlacement(organism_t & org) { AVIDA_SIGNAL_DEF(BeforePlacement(org), &org); }
   void OnPlacement(organism_t & org) { AVIDA_SIGNAL_DEF(OnPlacement(org), &org); }
   void BeforeDeath(organism_t & org) { AVIDA_SIGNAL_DEF(BeforeDeath(org), &org); }
-
-  // @CAO TODO: Call these
-  void BeforeMutate(organism_t & org) { AVIDA_SIGNAL_DEF(BeforeMutate(org), &org); }
-  void OnMutate(organism_t & org) { AVIDA_SIGNAL_DEF(OnMutate(org), &org); }
 
   void BeforeExit() { AVIDA_SIGNAL_DEF(BeforeExit(), ); }
   void OnHelp() { AVIDA_SIGNAL_DEF(OnHelp(), ); }
