@@ -28,6 +28,8 @@ private:
   phenotype_t phenotype;  // Current phenotype for this organism.
   hardware_t hardware;    // Hardware run by this organism.
 
+  bool is_mutant = false; // Is this organism different from its parent?
+
 public:
   Organism(const Organism&) = delete;   // No direct copying of organism is allowed.
   Organism(Organism && in) = default;
@@ -46,12 +48,11 @@ public:
     return *this;
   }
 
-  void ResetHardware() { hardware.Reset(genome); }
+  [[nodiscard]] bool IsMutated() const { return is_mutant; }
+  void SetMutated(bool in=true) { is_mutant=in; }
 
-  void Reset(genome_t && in_genome) {
-    genome = std::move(in_genome);
-    ResetHardware();
-  }
+  void ResetHardware() { hardware.Reset(genome); }
+  void SetGenome(genome_t && in_genome) { genome = std::move(in_genome); }
 
   [[nodiscard]] genome_t & GetGenome() { return genome; }
   [[nodiscard]] const genome_t & GetGenome() const { return genome; }
