@@ -1,34 +1,64 @@
+ NEXT MODULES:
+ - Add module GridFacing (with dependency on PopGrid)
+ - Add module PrintGrid that prints grid every X updates (with dependency on PopGrid)
+ - Add module TrackGenotypes
+ - Add module EnvironmentLogic9 (it should register tasks and trigger OnTask as needed)
+ - Add module OutputManager for printing to screen or files
+ - Add module Reactions that listens for OnTask to provide rewards?
+ - Add module LimitedResources that listens for OnTask
+ - Add module PopulationDemes
+ - Add module PhylogenyTracker
+ - Add module EventManager for dynamic events (population bottlenecks, environment changes, etc.)
+ 
+CORE FEATURES / REFACTORING
+ - Switch from pre-defined concepts for plug-in member functions to automated ones.
+ - Improve command-line options; pass on to modules to deal with too.
+ - Help should have an optional argument to get help for/from specific modules.
+ - Make a master list of module TYPES with rules on how each type should be managed (e.g., one pop manager, any number of analysis modules)
+ - Allow hardware variant to form special type of organism that can use any listed hardware.
+ - Configuration options need to be, well, configurable
+ - Test out alternative VM
+ - Specialized base classes for module types: populations (1), drivers (1), analyzers, environments
+ 
+LONGER TERM:
+ - Simple language that compiles to Avida modules.
+
+MODULE TYPES:
+ - Driver - (Requires 1) Runs virtual organisms; handles scheduling
+   + DriverBasic (continuous running; self-replication)
+   - DriverTournament (Tournament-based selection for replication) + other types of EC
+ - Population - (Requires 1); handles rules for population management
+   + PopWellMixed
+   + PopGrid
+   - PopDemes
+   - PopIslands
+ - Mutations - (Typically 1+) - creates a source of variation
+   + MutationsDivideSubstitutions
+   + MutationsDivideInDels
+ - Evaluators (Any number)
+   - Rewards
+   - LimitedResources
+   - Reactions
+ - Interactive (Any number) - Provides callbacks to organisms
+   - DataIO - Allows organisms to input and output values
+ - Analysis - (Any number) does not directly change how a run precedes (though other modules may use)
+   + Log (mostly for debugging; log when any events are triggered)
+   + TrackGeneration
+   + TrackGenotypes
+   - TrackLogic9 (requires DataIO)
+ - I/O
+   - DataLog
+   - PrintGrid
+   - PhylogenyTracker
+ - Events
+   - Extinction
+
+
+
+
 variant<vector> + visit            3.999 ms total       2.00 ns/elem   checksum=33526667883744400
 10 vectors (by type)               1.386 ms total       0.69 ns/elem   checksum=33526667883744400
 virtual<Base> via unique_ptr      16.135 ms total       8.07 ns/elem   checksum=33526667883744400
-
-
-
-
-
-
-Next steps:
-- Move Population handling to module?
-- Build alternate VM?
-- Build modules
-  - Genotype tracker
-  - Phylogeny tracker
-  - Logic 9 Environment (or general function environment that takes lambdas?)
-  - Limited resource environment
-  - Event manager
-- Build new Populations (or overlays?)
-  - Grid
-  - Demes
-- Build dynamic organism that uses variant to handle hardware type.
-
-
-I'm working on the new version of Avida.  Most of the main classes are templated.  For example, Organisms are templated based on their virtual hardware type.  Populations are then templated based on the types of organisms they have.  The main Avida class is templated on what feature modules you want active.
-
-OR: Organisms have a variadic of all hardware types.  Perhaps another variadic for all niche types they might be in?
-
-ONE population.
-
-OrganismSet can be used to represent IDs any group of organisms.
 
 
 
