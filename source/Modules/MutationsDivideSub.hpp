@@ -17,6 +17,10 @@ class MutationsDivideSub : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
 
+  double mut_prob{0.0075};
+  // static constexpr double mut_prob{0.0001};
+  double mut_scale{1.0 / emp::Log2(1.0 - mut_prob)};
+
 public:
   MutationsDivideSub(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>("MutationsDivideSub", "Mutation", "Handle substitution mutations on birth."), avida(avida) { }
@@ -32,19 +36,14 @@ public:
 
   template <concepts::Organism ORG_T>
   void OnOffspringInit(ORG_T & org, [[maybe_unused]] ORG_T & parent) {
-    static constexpr double mut_prob{0.0075};
-    static constexpr double mut_scale{1.0 / emp::Log2(1.0 - mut_prob)};
-
     auto & genome = org.GetGenome();
     emp::Random & random = avida.GetRandom();
-    bool has_mut = false;
     size_t mut_pos = static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale);
     while (mut_pos < genome.size()) {
       genome[mut_pos] = avida.GetInstSet().GetRandom(random);
-      has_mut = true;
+      org.SetMutated();
       mut_pos += static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale) + 1;
     }
-    if (has_mut) org.ResetHardware();
   }
 
 };
