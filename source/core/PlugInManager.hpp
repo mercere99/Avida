@@ -13,6 +13,8 @@
 template <typename AVIDA_T, typename... PLUG_IN_Ts>
 class PlugInManager {
 private:
+  static_assert(sizeof...(PLUG_IN_Ts) > 0, "At least one plug-in required to manage run.");
+
   using organism_t = typename AVIDA_T::organism_t;
 
   std::tuple<PLUG_IN_Ts...> plug_ins;
@@ -81,4 +83,7 @@ public:
   void OnHelp() { AVIDA_SIGNAL_DEF(OnHelp(), ); }
   
   void RegisterTraits() { AVIDA_SIGNAL_DEF(RegisterTraits(), ); }
+  void RegisterSettings() { AVIDA_SIGNAL_DEF(RegisterSettings(), ); }
+  void RegisterCallbacks() { AVIDA_SIGNAL_DEF(RegisterCallbacks(), ); }
+  void OnStart() { AVIDA_SIGNAL_DEF(OnStart(), ); }
 };
