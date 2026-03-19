@@ -6,35 +6,13 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  * 
  *  This is the main controller class for Avida.
- * 
- *  DEVELOPER notes:
- *  - Add module PopGrid
- *  - Add module GridFacing (with dependency on PopGrid)
- *  - Add module PrintGrid that prints grid every X updates (with dependency on PopGrid)
- *  - Add module TrackGenotype
- *  - Add module EnvironmentLogic9 (it should register tasks and trigger OnTask as needed)
- *  - Add module OutputManager for printing to screen or files
- *  - Add module Reactions that listens for OnTask to provide rewards
- *  - Add module LimitedResources that listens for OnTask
- *  - Add module PopulationDemes
- *  - Add module PhylogenyTracker
- *  - Add module EventManager for dynamic events (population bottlenecks, environment changes, etc.)
- *
- *  - Improve command-line options; pass on to modules to deal with too.
- *  - Help should have an optional argument to get help for/from specific modules.
- *  - Make a master list of module TYPES with rules on how each type should be managed (e.g., one pop manager, any number of analysis modules)
- *  - Allow hardware variant to form special type of organism that can use any listed hardware.
- *  - Configuration options need to be, well, configurable
- *  - Test out alternative VM
- *  - Specialized base classes for module types: populations (1), drivers (1), analyzers, environments
- * 
- *  - Longer term: Simple language that compiles to Avida modules.
  */
 
 #include "emp/base/Ptr.hpp"
 #include "emp/base/vector.hpp"
 #include "emp/bits/BitVector.hpp"
 #include "emp/config/command_line.hpp"
+#include "emp/config/SettingsManager.hpp"
 #include "emp/datastructs/map_utils.hpp"
 #include "emp/datastructs/UnorderedIndexMap.hpp"
 #include "emp/meta/TypePack.hpp"
@@ -53,7 +31,6 @@ template <concepts::Hardware HW_T> struct hardware_filter { };
 template <typename HARDWARE_T, template <typename> typename... PLUG_IN_Ts>
 class Avida {
 public:
-  static_assert(sizeof...(PLUG_IN_Ts) > 0, "At least one Avida plug-in required to manage run.");
   using this_t = Avida<HARDWARE_T, PLUG_IN_Ts...>;
   using plug_in_pack_t = emp::TypePack<PLUG_IN_Ts<this_t>...>;
 
@@ -74,6 +51,7 @@ private:
   inst_set_t inst_set;
   TraitManager<this_t> trait_man;
   PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
+  emp::SettingsManager settings;
 
   size_t update = 0;          // Times update was run on this population
   emp::Random random;         // Central random number generator
@@ -82,7 +60,7 @@ private:
   uint32_t num_orgs = 0;      // Current number of active organisms
   size_t total_orgs = 0;      // Total orgs that have ever existed (used for global IDs)
 
-  enum class RunState { INITIALIZING, RUNNING, PAUSED, EXITING, ERROR };
+  enum class RunState { INITIALIZING, PAUSED, RUNNING, EXITING, ERROR };
   RunState run_state = RunState::INITIALIZING;
 
   // ===== Helper Functions =====
@@ -95,7 +73,7 @@ private:
       biota.emplace_back(inst_set, std::move(new_genome));
     } else {
       occupied.Set(index);
-      biota[index].Reset(std::move(new_genome));
+      biota[index].SetGenome(std::move(new_genome));
     }
     ++num_orgs;
     organism_t & reserved_org = biota[index];
@@ -106,22 +84,26 @@ private:
   }
 
 public:
-  Avida() : plug_ins(*this) { plug_ins.RegisterTraits(); }
-  Avida(emp::vector<emp::String> args) : plug_ins(*this) {
-    plug_ins.RegisterTraits();
-    for (size_t i = 1; i < args.size(); ++i) {
-      if (args[i] == "-h" || args[i] == "--help") { PrintHelp(args[0], std::cout); }
-      else if (args[i] == "-s" || args[i] == "--seed") {
-        // Collect the seed.
-        ++i;
-        if (i >= args.size()) { emp::notify::Error("Must specify a random number seed."); }
-        if (!args[i].OnlyDigits()) { emp::notify::Error("Random seed must be set to a whole number."); }
-        random.ResetSeed(args[i].ConvertFromLiteral<uint64_t>());
-      }
-      else {
-        emp::notify::Error("Unknown argument: ", args[i]);
-      }
-    }
+  Avida() : plug_ins(*this) {
+    AddSetting("random.seed",
+      [this](){ return random.GetSeed(); },
+      [this](size_t new_seed){ random.ResetSeed(new_seed); },
+      "Main random number seed", 's');
+
+    settings.AddKeyword("help",
+      [this](emp::vector<emp::String> kw_args) {
+        settings.PrintHelp(kw_args);
+        plug_ins.OnHelp();  // Allow plug-ins to provide help information.      
+        Exit();
+      }, "Print help info for this program", 'h', /*max_args=*/ 1);
+
+    // Allow plug-ins to register anything that they need to...
+    plug_ins.RegisterTraits();    // Set up any traits in the phenotype.
+    plug_ins.RegisterSettings();  // Set up parameters for the config file.
+    plug_ins.RegisterCallbacks(); // Set up new instructions for the instruction set.
+  }
+  Avida(emp::vector<emp::String> args) : Avida() {
+    settings.LoadArgs(args);
   }
   ~Avida() { Exit(); }
 
@@ -166,30 +148,14 @@ public:
   template <size_t INDEX>
   [[nodiscard]] auto & GetPlugIn() { return plug_ins.template Get<INDEX>(); }
 
-  void PrintHelp(const emp::String & exec_name, std::ostream & os) {
-    os << "Format: " << exec_name << " [flags]\n"
-        << "Allowed flags include:\n"
-        << "  --help (or -h) : Print this message.\n"
-        << "\n"
-        << "Current plug-ins: " << emp::MakeList(plug_ins.GetNames(), ", ")
-        << std::endl;
-    
-    plug_ins.OnHelp();  // Allow plug-ins to provide help information.      
-    Exit();
-  }
-
   // ====== Configuration Management ======
 
-  // Initialize AvidaVM and the biota with the (default) ancestor.
-  void Setup() {
-    if (run_state != RunState::INITIALIZING) return;
-
-    // Add callbacks for the current hardware manager.
-    inst_set.AddCallbackInst("DivideCell", [this](size_t biota_id){ DivideOrg(biota[biota_id]); });
-
-    // Inject a single individual of the default ancestor.
-    Inject("../config/ancestor.org");
-  }
+  template <typename... ARG_Ts>
+  void AddSetting(ARG_Ts &&... args) { settings.AddSetting(std::forward<ARG_Ts>(args)...); }
+  template <typename... ARG_Ts>
+  void AddKeyword(ARG_Ts &&... args) { settings.AddKeyword(std::forward<ARG_Ts>(args)...); }
+  template <typename... ARG_Ts>
+  void AddCallback(ARG_Ts &&... args) { inst_set.AddCallbackInst(std::forward<ARG_Ts>(args)...); }
 
   template <typename TRAIT_T>
   void RegisterTrait(const emp::String & name, const emp::String & desc,
@@ -203,6 +169,7 @@ public:
 
   organism_t & Inject(genome_t && genome) {
     organism_t & inject_org = ReserveOrganism(std::move(genome));
+    inject_org.ResetHardware();
     plug_ins.OnInjectReady(inject_org);    // Trigger for injections only
     plug_ins.BeforePlacement(inject_org);  // Trigger to set up organisms for activation
     plug_ins.OnPlacement(inject_org);      // Trigger to activate organism in populations
@@ -218,7 +185,9 @@ public:
   }
 
   /// Collect an offspring from a designated parent organism.
-  void DivideOrg(organism_t & parent) {
+  void DivideOrg(size_t parent_id) {
+    emp_assert(IsOccupied(parent_id));
+    organism_t & parent = biota[parent_id];
     emp_assert(parent.OK());
     plug_ins.BeforeRepro(parent);
     genome_t offspring_genome = parent.DivideGenome();
@@ -226,12 +195,12 @@ public:
     if (offspring_genome.size()) {
       organism_t & offspring = ReserveOrganism(std::move(offspring_genome));
       plug_ins.OnOffspringInit(offspring, parent);   // Trigger: set up offspring (e.g., mutations)
+      offspring.ResetHardware();
       plug_ins.OnOffspringReady(offspring, parent);  // Trigger: offspring is all set up
       plug_ins.BeforePlacement(offspring);           // Trigger: set up ANY organism for activation
       plug_ins.OnPlacement(offspring);               // Trigger: activate organism in populations
     }
   }
-  void DivideOrg(OrganismBase & parent) { DivideOrg( static_cast<organism_t&>(parent) ); }
 
   // Delete an organism at a specific position in the biota.
   void DeleteOrg(size_t delete_id) {
@@ -251,7 +220,6 @@ public:
     else DeleteOrg(); // Our random choice did not work... try again!
   }
 
-
   // ====== Run Management ======
 
   // Process a single update for Avida
@@ -269,29 +237,28 @@ public:
   }
 
   void Run() {
-    if (run_state == RunState::INITIALIZING) Setup();
-    run_state = RunState::RUNNING;
-    while (run_state == RunState::RUNNING) DoUpdate();
+    switch (run_state) {
+    case RunState::INITIALIZING:
+      plug_ins.OnStart(); // Trigger plug-ins to initialize.
+      [[fallthrough]];
+    case RunState::PAUSED: run_state = RunState::RUNNING; [[fallthrough]];
+    case RunState::RUNNING: while (run_state == RunState::RUNNING) DoUpdate(); [[fallthrough]];
+    case RunState::EXITING: case RunState::ERROR: // Do nothing.
+    }
   }
 
   void Exit() {
     if (run_state == RunState::EXITING) return; // Already exiting.
-
-    // If plug-ins have been initialized, notify them of impending exit.
-    if (run_state > RunState::INITIALIZING) plug_ins.BeforeExit();
-    biota.clear();
-    trait_man.Clear();
-    run_state = RunState::EXITING;
+    run_state = RunState::EXITING;              // Change run_state in case check by plug-ins
+    plug_ins.BeforeExit();                      // Notify plug-ins of impending exit
+    biota.clear();                              // Clean up organisms
+    trait_man.Clear();                          // Clean up traits
   }
 
   bool OK() {
     emp_assert(occupied.size() == biota.size());
     emp_assert(occupied.CountOnes() == num_orgs);
-
-    bool orgs_ok = true;
-    for (size_t index : occupied) orgs_ok = orgs_ok && biota[index].OK();
-
-    return orgs_ok;
+    for (size_t index : occupied) if (!biota[index].OK()) return false;
+    return true;
   }
-
 };
