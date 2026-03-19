@@ -52,7 +52,10 @@ public:
   void SetMutated(bool in=true) { is_mutant=in; }
 
   void ResetHardware() { hardware.Reset(genome); }
-  void SetGenome(genome_t && in_genome) { genome = std::move(in_genome); }
+  void SetGenome(genome_t && in_genome) {
+    genome = std::move(in_genome);
+    is_mutant = false;
+  }
 
   [[nodiscard]] genome_t & GetGenome() { return genome; }
   [[nodiscard]] const genome_t & GetGenome() const { return genome; }
