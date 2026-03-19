@@ -19,7 +19,6 @@ private:
   AVIDA_T & avida;
 
   size_t last_update = 10000; // How many updated should the run go for?
-  // size_t last_update = 1000; // How many updated should the run go for?
 
   // CPU Execution Management
   emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
@@ -33,7 +32,17 @@ public:
     , avida(avida) { }
   ~DriverBasic() { }
 
+  void RegisterCallbacks() {
+    // Register callback for a cell to signal that it is ready to divide.
+    avida.AddCallback("DivideCell", [this](size_t biota_id){ avida.DivideOrg(biota_id); });
+  }
+
   // === Signal Listeners ===
+
+  void OnStart() {
+    // Inject a single individual of the default ancestor.
+    avida.Inject("../config/ancestor.org");
+  }
 
   void OnUpdateStart(size_t new_update) {
     // Test if this run should finish.
