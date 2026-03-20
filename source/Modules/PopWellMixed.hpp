@@ -19,12 +19,17 @@ private:
   AVIDA_T & avida;
 
   uint32_t pop_cap = 10000;    // Population size limit (default: 10,000 orgs)
+  // uint32_t pop_cap = 25000;    // Population size limit (default: 10,000 orgs)
 
 public:
   PopWellMixed(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>("PopWellMixed", "PopManager", "Manage a well-mixed population")
     , avida(avida) { }
   ~PopWellMixed() { }
+
+  void RegisterSettings() {
+    avida.AddSetting("pop.cap", pop_cap, "Max number of organism allows in population.");
+  }
 
   // === Signal Listeners ===
 

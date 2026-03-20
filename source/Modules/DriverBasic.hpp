@@ -18,7 +18,7 @@ class DriverBasic : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
 
-  size_t last_update = 10000; // How many updated should the run go for?
+  size_t max_updates = 10000; // How many updates should the run go for?
 
   // CPU Execution Management
   emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
@@ -32,6 +32,10 @@ public:
     , avida(avida) { }
   ~DriverBasic() { }
 
+  void RegisterSettings() {
+    avida.AddSetting("base.max_updates", max_updates, "Maximum number of updates to run", 'U');
+  }
+
   void RegisterCallbacks() {
     // Register callback for a cell to signal that it is ready to divide.
     avida.AddCallback("DivideCell", [this](size_t biota_id){ avida.DivideOrg(biota_id); });
@@ -40,13 +44,15 @@ public:
   // === Signal Listeners ===
 
   void OnStart() {
+    std::println("Random seed = {}", avida.GetRandom().GetSeed());
+
     // Inject a single individual of the default ancestor.
     avida.Inject("../config/ancestor.org");
   }
 
   void OnUpdateStart(size_t new_update) {
     // Test if this run should finish.
-    if (new_update > last_update) {
+    if (new_update > max_updates) {
       avida.Exit();
     }
 

@@ -21,16 +21,17 @@ class PopGrid : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
 
-  static constexpr size_t width = 100;
-  static constexpr size_t height = 100;
-  static constexpr size_t num_cells = width * height;
+  size_t width = 100;
+  size_t height = 100;
+  size_t num_cells = width * height;
   static constexpr size_t npos = static_cast<size_t>(-1);
 
-  emp::array<size_t, num_cells> org_grid{};
+  // emp::array<size_t, num_cells> org_grid{};
+  emp::vector<size_t> org_grid;
 
   // === Helper Functions ===
   template <concepts::Organism ORG_T>
-  static void SetPos(ORG_T & org, size_t x, size_t y) {
+  void SetPos(ORG_T & org, size_t x, size_t y) {
     org.GetPhenotype().pop_pos = (x % width) + (y % height) * width;
   }
 
@@ -38,9 +39,7 @@ public:
   PopGrid(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>("PopGrid", "PopManager", "Manage a grid-based population")
     , avida(avida)
-  {
-    org_grid.fill(npos);
-  }
+  { }
   ~PopGrid() { }
 
   // === Phenotypic Traits ===
@@ -53,7 +52,18 @@ public:
     AVIDA_REGISTER_TRAIT(pop_pos, "Position in the grid population of this organism.");
   }
 
+  void RegisterSettings() {
+    avida.AddSetting("grid.width", width, "Number of columns in population grid");
+    avida.AddSetting("grid.height", height, "Number of rows in population grid");
+  }
+
   // === Signal Listeners ===
+
+  void OnStart() {
+    num_cells = width * height;
+    org_grid.resize(num_cells, npos);
+  }
+
 
   // When an offspring is ready, need to determine where to place it.
   template <concepts::Organism ORG_T>

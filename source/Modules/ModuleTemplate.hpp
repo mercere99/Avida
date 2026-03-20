@@ -17,7 +17,8 @@ class ModuleTemplate : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
 
-  int example_setting;
+  int example_setting = 42;
+  int example_setting2 = 91;
 
 public:
   ModuleTemplate(AVIDA_T & avida)
@@ -36,6 +37,10 @@ public:
 
   void RegisterSettings() {
     avida.AddSetting("example_setting", example_setting, "Description of example setting", 'x');
+    avida.AddSetting("example_setting2",
+      [this](){ return example_setting2; },
+      [this](int in){ example_setting2 = in; },
+      "Description of example fuction-based setting", 'y');
   }
 
   void RegisterCallbacks() {

@@ -17,20 +17,20 @@ class MutationsDivideSub : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
 
-  double mut_prob{0.0075};
-  // static constexpr double mut_prob{0.0001};
-  double mut_scale{1.0 / emp::Log2(1.0 - mut_prob)};
+  double sub_prob{0.0075};
+  double mut_scale{1.0 / emp::Log2(1.0 - sub_prob)};
 
 public:
   MutationsDivideSub(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>("MutationsDivideSub", "Mutation", "Handle substitution mutations on birth."), avida(avida) { }
   ~MutationsDivideSub() { }
 
-  // === Phenotypic Traits ===
-
-  // struct Phenotype {
-  //   AVIDA_TRAIT(size_t, generation, "Number of offspring in chain since inject");
-  // };
+  void RegisterSettings() {
+    avida.AddSetting("mutations.sub_prob",
+      [this](){ return sub_prob; },
+      [this](double p){ sub_prob = p; mut_scale = 1.0 / emp::Log2(1.0 - sub_prob); },
+      "Per-site substitution probability", 'p');
+  }
 
   // === Signal Listeners ===
 
