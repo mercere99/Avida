@@ -54,7 +54,7 @@ private:
   emp::SettingsManager settings;
 
   size_t update = 0;          // Times update was run on this population
-  emp::Random random;         // Central random number generator
+  emp::Random random{0};      // Central random number generator
   biota_t biota{};            // Collection of all current organisms
   emp::BitVector occupied{};  // Which organisms in biota are active?
   uint32_t num_orgs = 0;      // Current number of active organisms
@@ -88,7 +88,7 @@ public:
     AddSetting("random.seed",
       [this](){ return random.GetSeed(); },
       [this](size_t new_seed){ random.ResetSeed(new_seed); },
-      "Main random number seed", 's');
+      "Main random number seed", 's', "0");
 
     settings.AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
