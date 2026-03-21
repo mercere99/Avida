@@ -212,7 +212,6 @@ namespace concepts {
     { const_org.GetGenome() } -> std::same_as<const typename ORG_T::genome_t&>;
     { const_org.GetGenomeSequence() } -> std::same_as<emp::String>;
 
-    { const_org.GetMetabolicRate() } -> std::convertible_to<double>;
     { org.SetBiotaID(id) } -> std::same_as<ORG_T&>;
     { org.SetGlobalID(id) } -> std::same_as<ORG_T&>;
 

@@ -66,8 +66,6 @@ public:
   [[nodiscard]] phenotype_t & GetPhenotype() { return phenotype; }
   [[nodiscard]] const phenotype_t & GetPhenotype() const { return phenotype; }
 
-  [[nodiscard]] double GetMetabolicRate() const { return genome.size(); }
-
   [[nodiscard]] HW_T & GetHardware() { return hardware; }
   [[nodiscard]] const HW_T & GetHardware() const { return hardware; }
 
