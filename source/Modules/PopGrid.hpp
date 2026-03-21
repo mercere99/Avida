@@ -1,6 +1,6 @@
 /*
  *  This file is part of the Avida Digital Evolution Research Platform, v5.0
- *  Copyright (C) Michigan State University & Dr. Charles Ofria
+ *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
  *  This module maintains a grid-based population.
@@ -84,7 +84,6 @@ public:
     }
   }
 
-  // If we have a population cap, delete organisms rather than let population get overfull.
   template <concepts::Organism ORG_T>
   void BeforePlacement(ORG_T & org) {
     size_t & org_pos = org.GetPhenotype().pop_pos;
