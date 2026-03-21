@@ -24,9 +24,10 @@ private:
   // Delete a random (occupied) organism position.
   void DeleteRandomOrg() {
     emp_assert(avida.GetNumOrgs() > 0); // Must have something to delete!
-    size_t delete_id = avida.GetRandom().GetUInt32(avida.GetBiotaSize());
-    if (avida.IsOccupied(delete_id)) avida.DeleteOrg(delete_id);
-    else DeleteRandomOrg(); // Our random choice did not work... try again!
+    size_t delete_id;
+    do { delete_id = avida.GetRandom().GetUInt32(avida.GetBiotaSize()); }
+    while (!avida.IsOccupied(delete_id));
+    avida.DeleteOrg(delete_id);    
   }
 
 public:
