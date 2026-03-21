@@ -90,7 +90,7 @@ public:
       [this](size_t new_seed){ random.ResetSeed(new_seed); },
       "Main random number seed", 's', "0");
 
-    settings.AddKeyword("help",
+    AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
         settings.PrintHelp(kw_args);
         plug_ins.OnHelp();  // Allow plug-ins to provide help information.      
@@ -102,9 +102,7 @@ public:
     plug_ins.RegisterSettings();  // Set up parameters for the config file.
     plug_ins.RegisterCallbacks(); // Set up new instructions for the instruction set.
   }
-  Avida(emp::vector<emp::String> args) : Avida() {
-    settings.LoadArgs(args);
-  }
+  Avida(emp::vector<emp::String> args) : Avida() { settings.LoadArgs(args); }
   ~Avida() { Exit(); }
 
   // === Basic Accessors ===
@@ -121,6 +119,7 @@ public:
   }
   [[nodiscard]] bool IsOccupied(size_t id) const { return id < occupied.size() && occupied[id]; }
   [[nodiscard]] uint32_t GetNumOrgs() const { return num_orgs; }
+  [[nodiscard]] size_t GetBiotaSize() const { return biota.size(); }
   [[nodiscard]] size_t GetTotalOrgs() const { return total_orgs; }
   [[nodiscard]] const inst_set_t & GetInstSet() const { return inst_set; }
 
@@ -207,17 +206,9 @@ public:
     emp_assert(IsOccupied(delete_id));
 
     plug_ins.BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
-    biota[delete_id].SignalDeath();       // Notify organism before deletion.
+    biota[delete_id].SignalDeath();         // Notify organism before deletion.
     occupied.Clear(delete_id);
     --num_orgs;
-  }
-
-  // Delete a random (occupied) organism position.
-  void DeleteOrg() {
-    emp_assert(GetNumOrgs() > 0); // Must have something to delete!
-    size_t delete_id = random.GetUInt32(biota.size());
-    if (IsOccupied(delete_id)) DeleteOrg(delete_id);
-    else DeleteOrg(); // Our random choice did not work... try again!
   }
 
   // ====== Run Management ======

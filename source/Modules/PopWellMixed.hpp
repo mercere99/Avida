@@ -21,6 +21,14 @@ private:
   uint32_t pop_cap = 10000;    // Population size limit (default: 10,000 orgs)
   // uint32_t pop_cap = 25000;    // Population size limit (default: 10,000 orgs)
 
+  // Delete a random (occupied) organism position.
+  void DeleteOrg() {
+    emp_assert(avida.GetNumOrgs() > 0); // Must have something to delete!
+    size_t delete_id = avida.GetRandom().GetUInt32(avida.GetBiotaSize());
+    if (avida.IsOccupied(delete_id)) avida.DeleteOrg(delete_id);
+    else DeleteOrg(); // Our random choice did not work... try again!
+  }
+
 public:
   PopWellMixed(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>("PopWellMixed", "PopManager", "Manage a well-mixed population")
