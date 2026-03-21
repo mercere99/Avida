@@ -47,12 +47,12 @@ public:
 
   // === Signal Listeners ===
 
-  void OnUpdateStart(size_t new_update) {
-    Log("==> Starting update:", new_update, "; Num orgs = ", avida.GetNumOrgs());
+  void OnUpdateStart(size_t update) {
+    Log("==> Starting update:", update, "; Num orgs = ", avida.GetNumOrgs());
   }
 
-  void OnUpdateEnd(size_t old_update) {
-    Log("Ending update:", old_update, " <==");
+  void OnUpdateEnd(size_t update) {
+    Log("Ending update:", update, " <==");
   }
 
   template <concepts::Organism ORG_T>
@@ -78,16 +78,6 @@ public:
   template <concepts::Organism ORG_T>
   void OnPlacement(ORG_T & org) {
     Log("New org placed at biota_id=", org.GetBiotaID(), "!");
-  }
-
-  template <concepts::Organism ORG_T>
-  void BeforeMutate(ORG_T & org) {
-    Log("Org at biota_id=", org.GetBiotaID(), " about to mutate!");
-  }
-
-  template <concepts::Organism ORG_T>
-  void OnMutate(ORG_T & org) {
-    Log("Org at biota_id=", org.GetBiotaID(), " has been mutated!");
   }
 
   template <concepts::Organism ORG_T>
