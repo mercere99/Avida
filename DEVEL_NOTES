@@ -1,7 +1,7 @@
  NEXT MODULES:
+ - Add module TrackGenotypes
  - Add module GridFacing (with dependency on PopGrid)
  - Add module PrintGrid that prints grid every X updates (with dependency on PopGrid)
- - Add module TrackGenotypes
  - Add module EnvironmentLogic9 (it should register tasks and trigger OnTask as needed)
  - Add module OutputManager for printing to screen or files
  - Add module Reactions that listens for OnTask to provide rewards?
@@ -12,14 +12,15 @@
  
 CORE FEATURES / REFACTORING
  - Switch from pre-defined concepts for plug-in member functions to automated ones.
- - Improve command-line options; pass on to modules to deal with too.
- - Help should have an optional argument to get help for/from specific modules.
+ - Improve command-line handling:
+   - Add flag to generate config files
+   - Control if configs are printed by scope or not (e.g., "grid { width=10; height=10 }" vs. "grid.width=10; grid.height=10;")
+   - Allow a more dynamic system of single-char flags to avoid collisions across modules.
+   - Create a list of help options based on modules with OnHelp() defined.
  - Make a master list of module TYPES with rules on how each type should be managed (e.g., one pop manager, any number of analysis modules)
- - Allow hardware variant to form special type of organism that can use any listed hardware.
- - Configuration options need to be, well, configurable
  - Test out alternative VM
- - Specialized base classes for module types: populations (1), drivers (1), analyzers, environments
- 
+ - Allow hardware variant to form special type of organism that can use any listed hardware.
+
 LONGER TERM:
  - Simple language that compiles to Avida modules.
 
