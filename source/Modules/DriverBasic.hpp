@@ -32,6 +32,24 @@ public:
     , avida(avida) { }
   ~DriverBasic() { }
 
+  // === Phenotypic Traits ===
+
+  struct Phenotype {
+    double metabolic_base = 1.0;
+    double metabolic_mult = 1.0;
+    double MetabolicBonus() { return metabolic_base * metabolic_mult; }
+  };
+
+  template <concepts::Organism ORG_T>
+  static double CalcMetabolicRate(ORG_T & org) {
+    return org.GetPhenotype().MetabolicBonus() * org.GetGenome().size();
+  }
+
+  void RegisterTraits() {
+    AVIDA_REGISTER_TRAIT(metabolic_base, "Relative base speed of the virtual CPU for this organism.");
+    AVIDA_REGISTER_TRAIT(metabolic_mult, "Bonus speed multiple from tasks.");
+  }
+
   void RegisterSettings() {
     avida.AddSetting("base.max_updates", max_updates, "Maximum number of updates to run", 'U');
   }
@@ -77,7 +95,8 @@ public:
 
   template <concepts::Organism ORG_T>
   void OnPlacement(ORG_T & org) {
-    speed_map.Set(org.GetBiotaID(), org.GetMetabolicRate());
+    // Lock in metabolic rate as organism speed.
+    speed_map.Set(org.GetBiotaID(), CalcMetabolicRate(org));
   }
 
   template <concepts::Organism ORG_T>
