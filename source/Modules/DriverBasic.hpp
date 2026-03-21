@@ -31,6 +31,14 @@ private:
   static constexpr int32_t CPU_chunk_size = 15;     // Num cycles executed each time org is picked.
   int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
+  void PrintStats(size_t ud) {
+    std::cout << "UD:" << ud
+              << "  PopSize:" << avida.GetNumOrgs()
+              << "  Generation: " << avida.GetAveTrait("generation")
+              << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
+              << std::endl;
+  }
+
 public:
   DriverBasic(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>("DriverBasic", "Execution", "Execute organisms based on metabolic rate.")
@@ -73,14 +81,6 @@ public:
   }
 
   // === Signal Listeners ===
-
-  void PrintStats(size_t ud) {
-    std::cout << "UD:" << ud
-              << "  PopSize:" << avida.GetNumOrgs()
-              << "  Generation: " << avida.GetAveTrait("generation")
-              << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
-              << std::endl;
-  }
 
   void OnStart() {
     std::println("Random seed = {}", avida.GetRandom().GetSeed());
