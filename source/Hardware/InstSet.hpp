@@ -7,6 +7,7 @@
  */
 
 #include <expected>
+#include <filesystem>  // std::filesystem::path
 #include <fstream>     // std::ifstream
 #include <functional>  // std::function
 #include <istream>
@@ -201,9 +202,9 @@ public:
     return genome;
   }
 
-  [[nodiscard]] std::expected<genome_t, emp::String> LoadGenome(const emp::String & filename) const {
-    std::ifstream is(filename);
-    if (!is) return std::unexpected(emp::String("Could not open file: ") + filename);
+  [[nodiscard]] std::expected<genome_t, emp::String> LoadGenome(const std::filesystem::path & filepath) const {
+    std::ifstream is(filepath);
+    if (!is) return std::unexpected(emp::String("Could not open file: ") + filepath.string());
     return LoadGenome(is);
   }
 

@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <filesystem>  // std::filesystem::path
 #include <iosfwd>
 #include <tuple>
 #include <type_traits>
@@ -26,88 +27,6 @@ namespace concepts {
   concept StringLike =
     std::convertible_to<T, emp::String> ||
     std::same_as<std::remove_cvref_t<T>, emp::String>;
-
-  // === Signals ===
-
-  // Class reacts to signal: New update has just started.
-  template <typename T>
-  concept HasOnUpdateStart = requires(T plugin, size_t new_update) {
-    { plugin.OnUpdateStart(new_update) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Update is ending; new one is about to start
-  template <typename T>
-  concept HasOnUpdateEnd = requires(T plugin, size_t old_update) {
-    { plugin.OnUpdateEnd(old_update) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Parent is about to (try to) reproduce.
-  template <typename T>
-  concept HasBeforeRepro = requires(T plugin, typename T::organism_t & parent) {
-    { plugin.BeforeRepro(parent) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Offspring is ready to be placed.
-  template <typename T>
-  concept HasOnOffspringInit = requires(T plugin, typename T::organism_t & offspring,
-                                        typename T::organism_t &  parent) {
-    { plugin.OnOffspringInit(offspring, parent) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Offspring is ready to be placed.
-  template <typename T>
-  concept HasOnOffspringReady = requires(T plugin, typename T::organism_t & offspring,
-                                         typename T::organism_t &  parent) {
-    { plugin.OnOffspringReady(offspring, parent) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Organism to be injected into pop is ready to be placed.
-  template <typename T>
-  concept HasOnInjectReady = requires(T plugin, typename T::organism_t & inject_org) {
-    { plugin.OnInjectReady(inject_org) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Placement location has been identified (For birth or inject)
-  template <typename T>
-  concept HasBeforePlacement = requires(T plugin, typename T::organism_t & org, size_t target_pos, size_t parent_pos) {
-    { plugin.BeforePlacement(org, target_pos, parent_pos) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: New organism has been placed in the population.
-  template <typename T>
-  concept HasOnPlacement = requires(T plugin, typename T::organism_t & org) {
-    { plugin.OnPlacement(org) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Mutate is about to run on an organism.
-  template <typename T>
-  concept HasBeforeMutate = requires(T plugin, typename T::organism_t & org) {
-    { plugin.BeforeMutate(org) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Organism has had its genome changed due to mutation.
-  template <typename T>
-  concept HasOnMutate = requires(T plugin, typename T::organism_t & org) {
-    { plugin.OnMutate(org) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Organism is about to die.
-  template <typename T>
-  concept HasBeforeDeath = requires(T plugin, typename T::organism_t & org) {
-    { plugin.BeforeDeath(org) } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Run immediately before Avida exits.
-  template <typename T>
-  concept HasBeforeExit = requires(T plugin) {
-    { plugin.BeforeExit() } -> std::convertible_to<bool>;
-  };
-
-  // Class reacts to signal: Run when the --help option is called at startup.
-  template <typename T>
-  concept HasOnHelp = requires(T plugin) {
-    { plugin.OnHelp() } -> std::convertible_to<bool>;
-  };
 
 
   // ===  Genome  ===
@@ -138,6 +57,7 @@ namespace concepts {
     const typename INST_SET_T::genome_t & const_genome,
     emp::Random & random,
     emp::String str,
+    std::filesystem::path filepath,
     char symbol,
     std::istream & in,
     std::size_t n
@@ -163,7 +83,7 @@ namespace concepts {
     { inst_set.ToSequence(const_genome) } -> std::same_as<emp::String>;
 
     { inst_set.LoadGenome(in) } -> std::same_as<std::expected<typename INST_SET_T::genome_t, emp::String>>;
-    { inst_set.LoadGenome(str) }  -> std::same_as<std::expected<typename INST_SET_T::genome_t, emp::String>>;
+    { inst_set.LoadGenome(filepath) }  -> std::same_as<std::expected<typename INST_SET_T::genome_t, emp::String>>;
   };
 
 

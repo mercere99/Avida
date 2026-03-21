@@ -8,6 +8,8 @@
  *  This is the main controller class for Avida.
  */
 
+#include <filesystem>  // std::filesystem::path
+
 #include "emp/base/Ptr.hpp"
 #include "emp/base/vector.hpp"
 #include "emp/bits/BitVector.hpp"
@@ -176,10 +178,10 @@ public:
   }
   
   /// @brief Inject an organism using a genome loaded from a file.
-  /// @param filename - The name of the file with the genome information.
-  organism_t & Inject(const emp::String & filename) {
-    auto exp_genome = inst_set.LoadGenome(filename);
-    if (!exp_genome) emp::notify::Error("Failed to inject from file '", filename, "'.");
+  /// @param filepath - Path to the file with the genome information.
+  organism_t & Inject(const std::filesystem::path & filepath) {
+    auto exp_genome = inst_set.LoadGenome(filepath);
+    if (!exp_genome) emp::notify::Error("Failed to inject from file '", filepath.string(), "'.");
     return Inject(std::move(*exp_genome));
   }
 
@@ -216,9 +218,9 @@ public:
   // Process a single update for Avida
   void DoUpdate() {
     emp_assert(GetNumOrgs() > 0, "Running DoUpdate() with no organisms.");
-    plug_ins.OnUpdateEnd(update);
     ++update;
-    plug_ins.OnUpdateStart(update);
+    plug_ins.OnUpdateStart(update);  // Run organisms
+    plug_ins.OnUpdateEnd(update);    // Report stats / check stop condition
   }
 
   void ProcessOrg(size_t id, uint32_t num_cycles) {
