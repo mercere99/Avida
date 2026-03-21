@@ -57,12 +57,12 @@ public:
 
   template <concepts::Organism ORG_T>
   void BeforeRepro(ORG_T & parent) {
-    Log("Org at ", parent.GetPosition(), " about to replicate");
+    Log("Org at biota_id=", parent.GetBiotaID(), " about to replicate");
   }
 
   template <concepts::Organism ORG_T>
   void OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
-    Log("Offspring ready from ", parent.GetPosition(), " : ", offspring.GetGenomeSequence());
+    Log("Offspring ready from biota_id=", parent.GetBiotaID(), " : ", offspring.GetGenomeSequence());
   }
 
   template <concepts::Organism ORG_T>
@@ -72,27 +72,27 @@ public:
 
   template <concepts::Organism ORG_T>
   void BeforePlacement(ORG_T & org) {
-    Log("Organism (", org.GetID(), ") about to be placed into population)");
+    Log("Organism (global_id=", org.GetGlobalID(), ") about to be placed into population");
   }
 
   template <concepts::Organism ORG_T>
   void OnPlacement(ORG_T & org) {
-    Log("New org placed as position ", org.GetPosition(), "!");
+    Log("New org placed at biota_id=", org.GetBiotaID(), "!");
   }
 
   template <concepts::Organism ORG_T>
   void BeforeMutate(ORG_T & org) {
-    Log("Org at position ", org.GetPosition(), " about to mutate!");
+    Log("Org at biota_id=", org.GetBiotaID(), " about to mutate!");
   }
 
   template <concepts::Organism ORG_T>
   void OnMutate(ORG_T & org) {
-    Log("Org at position ", org.GetPosition(), " has been mutated!");
+    Log("Org at biota_id=", org.GetBiotaID(), " has been mutated!");
   }
 
   template <concepts::Organism ORG_T>
   void BeforeDeath(ORG_T & org) {
-    Log("Org at position ", org.GetPosition(), " about to DIE!");
+    Log("Org at biota_id=", org.GetBiotaID(), " about to DIE!");
   }
 
   void BeforeExit() { Log("Program about to exit..."); }

@@ -22,11 +22,11 @@ private:
   // uint32_t pop_cap = 25000;    // Population size limit (default: 10,000 orgs)
 
   // Delete a random (occupied) organism position.
-  void DeleteOrg() {
+  void DeleteRandomOrg() {
     emp_assert(avida.GetNumOrgs() > 0); // Must have something to delete!
     size_t delete_id = avida.GetRandom().GetUInt32(avida.GetBiotaSize());
     if (avida.IsOccupied(delete_id)) avida.DeleteOrg(delete_id);
-    else DeleteOrg(); // Our random choice did not work... try again!
+    else DeleteRandomOrg(); // Our random choice did not work... try again!
   }
 
 public:
@@ -45,7 +45,7 @@ public:
   template <concepts::Organism ORG_T>
   void BeforePlacement([[maybe_unused]] ORG_T & org) {
     // See if we must delete an organism to make room for the new one.
-    if (avida.GetNumOrgs() > pop_cap) avida.DeleteOrg();
+    if (avida.GetNumOrgs() > pop_cap) DeleteRandomOrg();
   }
 
 };

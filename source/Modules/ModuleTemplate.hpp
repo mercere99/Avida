@@ -7,8 +7,6 @@
  */
 
 #include <cstddef>   // for size_t
-#include <fstream>
-#include <iostream>
 
 #include "../core/Avida.hpp"
 
@@ -40,29 +38,31 @@ public:
     avida.AddSetting("example_setting2",
       [this](){ return example_setting2; },
       [this](int in){ example_setting2 = in; },
-      "Description of example fuction-based setting", 'y');
+      "Description of example function-based setting", 'y');
   }
 
+  // RegisterCallbacks adds new instructions to the VM instruction set.
+  // When an organism executes the named instruction, the lambda is called with the organism's biota_id.
   void RegisterCallbacks() {
-    avida.AddCallback("DivideCell", [this](size_t biota_id){ avida.DivideOrg(biota_id); });
+    avida.AddCallback("ExampleInst", [this](size_t biota_id){ /* handle instruction */ });
   }
 
   // === Signal Listeners ===
 
-  // Triggered: Once a the very beginning of a run, after all configurations have been loaded.
+  // Triggered: Once at the very beginning of a run, after all configurations have been loaded.
   void OnStart() { }
 
-  // Triggered: Every update at the very beginning of the update.
-  void OnUpdateStart([[maybe_unused]] size_t new_update) { }
+  // Triggered: Every update before organisms are executed (run organisms here).
+  void OnUpdateStart([[maybe_unused]] size_t update) { }
 
-  // Triggered: Every update at the end of the update.
-  void OnUpdateEnd([[maybe_unused]] size_t old_update) { }
+  // Triggered: Every update after organisms are executed (report stats / check stop here).
+  void OnUpdateEnd([[maybe_unused]] size_t update) { }
 
   // Triggered: When a parent is about to replicate, before starting to make the new organism.
   template <concepts::Organism ORG_T>
   void BeforeRepro([[maybe_unused]] ORG_T & parent) { }
 
-  // Triggered: Offspring Organism has been identified and supplied genome (do mutations here!)
+  // Triggered: Offspring organism has been identified and supplied a genome (do mutations here!)
   template <concepts::Organism ORG_T>
   void OnOffspringInit([[maybe_unused]] ORG_T & org, [[maybe_unused]] ORG_T & parent) { }
 
@@ -70,11 +70,11 @@ public:
   template <concepts::Organism ORG_T>
   void OnOffspringReady([[maybe_unused]] ORG_T & offspring, [[maybe_unused]] ORG_T & parent) { }
 
-  // Triggered: Organism has been build from scratch to be injected into the population.
+  // Triggered: Organism has been built from scratch to be injected into the population.
   template <concepts::Organism ORG_T>
   void OnInjectReady([[maybe_unused]] ORG_T & inject_org) { }
 
-  // Triggered: Organism (either offspring or injected) is about the be placed into a population.
+  // Triggered: Organism (either offspring or injected) is about to be placed into a population.
   template <concepts::Organism ORG_T>
   void BeforePlacement([[maybe_unused]] ORG_T & org) { }
 
