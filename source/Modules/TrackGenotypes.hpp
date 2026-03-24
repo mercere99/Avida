@@ -46,9 +46,8 @@ public:
     uint64_t genotype_id = 0; // Unique ID for the genotype of this organism.
   };
 
-  bool RegisterTraits() {
+  void RegisterTraits() {
     AVIDA_REGISTER_TRAIT(genotype_id, "Unique ID for group of identical genomes");
-    return true;
   }
 
   // === Signal Listeners ===
@@ -56,30 +55,24 @@ public:
   // When an offspring is born with a mutation, give it a new genotype;
   // otherwise give it the same genotype as its parent.
   template <concepts::Organism ORG_T>
-  bool OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
+  void OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
     const uint64_t id = (offspring.IsMutated()) ? GetNextID() : parent.GetPhenotype().genotype_id;
     offspring.GetPhenotype().genotype_id = id;
     id_map[id].Birth();
-
-    return true;
   }
 
   template <concepts::Organism ORG_T>
-  bool OnInjectReady(ORG_T & inject_org) {
+  void OnInjectReady(ORG_T & inject_org) {
     inject_org.GetPhenotype().genotype_id = GetNextID();
     id_map[GetCurID()].Birth();
-
-    return true;
   }
 
   template <concepts::Organism ORG_T>
-  bool BeforeDeath([[maybe_unused]] ORG_T & org) {
+  void BeforeDeath([[maybe_unused]] ORG_T & org) {
     const uint64_t id = org.GetPhenotype().genotype_id;
     Genotype & genotype = id_map[id];
     genotype.Death();
     if (genotype.GetCurCount() == 0) id_map.erase(id);
-    
-    return true;
   }
 
   void OnUpdateEnd(size_t update) {
