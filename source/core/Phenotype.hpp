@@ -36,6 +36,13 @@ struct merge_from_TypePack<emp::TypePack<Ts...>> {
      [](const AVIDA_T::phenotype_t & p) -> const auto & { return p.NAME; } \
   );
 
+#define AVIDA_REQUIRE_TRAIT(TYPE, NAME)                              \
+static_assert(                                                       \
+    requires(const typename AVIDA_T::phenotype_t & p) {              \
+        { p.NAME } -> std::convertible_to<TYPE>;                     \
+    },                                                               \
+    "DriverBasic requires a '" #NAME "' trait of type '" #TYPE ". "  \
+    "Add a compatible module to your module list.");
 
 template <typename AVIDA_T>
 class TraitBase {
@@ -123,8 +130,6 @@ public:
                 const emp::String & filename, size_t line,
                 auto get_fun, auto cget_fun)
   {
-    std::cout << "Registering trait '" << name << "'." << std::endl;
-
     using reg_t = Trait<TRAIT_T, AVIDA_T>;
     emp::Ptr<reg_t> reg_ptr =
       emp::NewPtr<reg_t>(name, desc, filename, line, std::move(get_fun), std::move(cget_fun));
