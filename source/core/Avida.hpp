@@ -94,10 +94,19 @@ public:
 
     AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
+        std::println("Avida v5.0.0\n");
         settings.PrintHelp(kw_args);
         plug_ins.OnHelp();  // Allow plug-ins to provide help information.      
         Exit();
       }, "Print help info for this program", 'h', /*max_args=*/ 1);
+
+    AddKeyword("generate",
+      [this](emp::vector<emp::String> kw_args) {
+        emp::String filename = kw_args.size() ? kw_args[0] : "Avida.cfg";
+        std::println("Generating config file '", filename, "'...");
+        settings.Save(filename);
+        Exit();
+      }, "Generate a config file with the provided name (or Avida.cfg)", 'g', /*max_args=*/ 1);
 
     // Allow plug-ins to register anything that they need to...
     plug_ins.RegisterTraits();    // Set up any traits in the phenotype.
