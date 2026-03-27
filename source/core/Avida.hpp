@@ -141,8 +141,12 @@ public:
     return total / GetNumOrgs();
   }
 
+  const auto & GetTrait(const emp::String & name) const {
+    return trait_man.Get(name);
+  }
+
   [[nodiscard]] double GetAveTrait(const emp::String & name) const {
-    const auto & trait = trait_man.Get(name);
+    const auto & trait = GetTrait(name);
     return GetAveTrait([&trait](const organism_t & org){ return trait.AsDouble(org.GetPhenotype()); });
   }
 
@@ -197,13 +201,15 @@ public:
   /// Collect an offspring from a designated parent organism.
   void DivideOrg(size_t parent_id) {
     emp_assert(IsOccupied(parent_id));
-    organism_t & parent = biota[parent_id];
-    emp_assert(parent.OK());
-    plug_ins.BeforeRepro(parent);
-    genome_t offspring_genome = parent.DivideGenome();
+    emp_assert(biota[parent_id].OK());
+    plug_ins.BeforeRepro(biota[parent_id]);
+    genome_t offspring_genome = biota[parent_id].DivideGenome();
 
     if (offspring_genome.size()) {
+      // ReserveOrganism may call biota.emplace_back, reallocating the vector and
+      // invalidating any prior reference to biota elements.  Re-fetch parent after.
       organism_t & offspring = ReserveOrganism(std::move(offspring_genome));
+      organism_t & parent = biota[parent_id];
       plug_ins.OnOffspringInit(offspring, parent);   // Trigger: set up offspring (e.g., mutations)
       offspring.ResetHardware();
       plug_ins.OnOffspringReady(offspring, parent);  // Trigger: offspring is all set up
