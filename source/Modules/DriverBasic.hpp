@@ -9,10 +9,7 @@
  */
 
 #include <cstddef>    // for size_t
-#include <filesystem> // for path joining
 #include <iostream>
-
-namespace fs = std::filesystem;
 
 #include "../core/Avida.hpp"
 
@@ -21,9 +18,8 @@ class DriverBasic : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
 
-  size_t max_updates = 10000;              // How many updates should the run go for?
-  fs::path config_dir{"../config"};        // Directory containing configuration files.
-  fs::path ancestor_filename{"ancestor.org"}; // Ancestor genome filename within config_dir.
+  size_t max_updates = 10000;                               // Update to end run
+  std::filesystem::path ancestor_filename{"ancestor.org"};  // Ancestor genome filename
 
   // CPU Execution Management
   emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
@@ -59,16 +55,13 @@ public:
   }
 
   void RegisterTraits() {
+    // AVIDA_REQUIRE_TRAIT(size_t, generation);
     AVIDA_REGISTER_TRAIT(metabolic_base, "Relative base speed of the virtual CPU for this organism.");
     AVIDA_REGISTER_TRAIT(metabolic_mult, "Bonus speed multiple from tasks.");
   }
 
   void RegisterSettings() {
     avida.AddSetting("base.max_updates", max_updates, "Maximum number of updates to run", 'U');
-    avida.AddSetting("base.config_dir",
-      [this](){ return config_dir.string(); },
-      [this](std::string s){ config_dir = s; },
-      "Default directory to find configuration files.");
     avida.AddSetting("base.ancestor_filename",
       [this](){ return ancestor_filename.string(); },
       [this](std::string s){ ancestor_filename = s; },
@@ -84,7 +77,7 @@ public:
 
   void OnStart() {
     std::println("Random seed = {}", avida.GetRandom().GetSeed());
-    avida.Inject(config_dir / ancestor_filename);
+    avida.Inject(avida.GetSettings().GetConfigDir() / ancestor_filename);
     PrintStats(0);  // Report initial state before any organisms run.
   }
 

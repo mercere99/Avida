@@ -53,14 +53,14 @@ private:
   inst_set_t inst_set;
   TraitManager<this_t> trait_man;
   PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
-  emp::SettingsManager settings;
 
-  size_t update = 0;          // Times update was run on this population
-  emp::Random random{0};      // Central random number generator
-  biota_t biota{};            // Collection of all current organisms
-  emp::BitVector occupied{};  // Which organisms in biota are active?
-  uint32_t num_orgs = 0;      // Current number of active organisms
-  size_t total_orgs = 0;      // Total orgs that have ever existed (used for global IDs)
+  emp::SettingsManager settings;  // Collection of all configurable settings
+  size_t update = 0;              // Times update was run on this population
+  emp::Random random{0};          // Central random number generator
+  biota_t biota{};                // Collection of all current organisms
+  emp::BitVector occupied{};      // Which organisms in biota are active?
+  uint32_t num_orgs = 0;          // Current number of active organisms
+  size_t total_orgs = 0;          // Total orgs that have ever existed (used for global IDs)
 
   enum class RunState { INITIALIZING, PAUSED, RUNNING, EXITING, ERROR };
   RunState run_state = RunState::INITIALIZING;
@@ -91,6 +91,10 @@ public:
       [this](){ return random.GetSeed(); },
       [this](size_t new_seed){ random.ResetSeed(new_seed); },
       "Main random number seed", 's', "0");
+    AddSetting("base.config_dir",
+      [this](){ return settings.GetConfigDir().string(); },
+      [this](const emp::String & s){ settings.SetConfigDir(s); },
+      "Default directory to find configuration files.");
 
     AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
@@ -163,6 +167,9 @@ public:
   [[nodiscard]] auto & GetPlugIn() { return plug_ins.template Get<INDEX>(); }
 
   // ====== Configuration Management ======
+
+  const emp::SettingsManager & GetSettings() const { return settings; }
+  emp::SettingsManager & GetSettings() { return settings; }
 
   template <typename... ARG_Ts>
   void AddSetting(ARG_Ts &&... args) { settings.AddSetting(std::forward<ARG_Ts>(args)...); }
