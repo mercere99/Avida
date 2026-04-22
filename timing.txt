@@ -70,3 +70,60 @@ UD:10000  PopSize:10000  Generation: 433.597  Genome0:[LccgcxdEhfEwzEydGzLEpCuhj
 ./Avida -s 100  47.65s user 0.08s system 99% cpu 47.742 total
 ./Avida -s 100  46.73s user 0.08s system 99% cpu 46.814 total
 ./Avida -s 100  47.24s user 0.08s system 99% cpu 47.336 total
+
+=== More refactoring; shifted workload to modules; more recycling of organisms ===
+
+UD:10000  PopSize:10000  Generation: 328.741  Genome0:[hwBDvbydcwLJgCyhqrswqbjxvHbEqvfltsEGgsdlwcxpJjpIcbAveCDzbcnkjItIvlEHcldE]
+./Avida -s 100  41.45s user 0.10s system 99% cpu 41.570 total
+./Avida -s 100  40.90s user 0.11s system 99% cpu 41.015 total
+./Avida -s 100  41.11s user 0.10s system 99% cpu 41.220 total
+
+=== Shifted hardware to be owned by organism; removed hardware manager ===
+
+UD:10000  PopSize:10000  Generation: 329.222  Genome0:[hwBDvbydcwLJgCyhqrswqbjxvHbEqvfltsEGgsdlwcxpJjpIcbAveCDzbcnkjItIvlEHcldE]
+./Avida -s 100  37.52s user 0.08s system 99% cpu 37.616 total
+./Avida -s 100  38.06s user 0.08s system 99% cpu 38.151 total
+./Avida -s 100  38.08s user 0.07s system 99% cpu 38.170 total
+
+Step size  1: 242.23s 252.79s 251.90s
+Step size  2: 119.08s 114.35s 130.70s
+Step size  3:  88.10s  81.35s
+Step size  5:  53.30s  59.10s
+Step size 10:  34.27s  35.09s
+Step size 15:  23.80s  31.64s  25.23s  28.48s
+Step size 30:  25.10s  24.62s  22.85s  22.85s
+
+=== Defaulted to 15 instructions at a time ===
+
+UD:10000  PopSize:10000  Generation: 433.303  Genome0:[gcxdEhfEwzEydxFtEvCAcfBIvBLLKFGorwlFvbHqkBBhKFsLnrciyEffAtKumdxaLpDvilfIHajLlqpohGChjkbjJFaAjqspJEpwwlEaqlwtqgqxkFuaCeiiEDbAvBpnnJcmlnrbdAzbtEhGDF]
+./Avida -s 100  31.19s user 0.07s system 99% cpu 31.275 total
+./Avida -s 100  31.09s user 0.07s system 99% cpu 31.167 total
+./Avida -s 100  31.07s user 0.08s system 99% cpu 31.176 total
+
+=> Pushed mutations to their own module.
+UD:10000  PopSize:10000  Generation: 433.303  Genome0:[gcxdEhfEwzEydxFtEvCAcfBIvBLLKFGorwlFvbHqkBBhKFsLnrciyEffAtKumdxaLpDvilfIHajLlqpohGChjkbjJFaAjqspJEpwwlEaqlwtqgqxkFuaCeiiEDbAvBpnnJcmlnrbdAzbtEhGDF]
+./Avida -s 100  32.71s user 0.13s system 99% cpu 32.844 total
+./Avida -s 100  31.91s user 0.09s system 99% cpu 32.017 total
+./Avida -s 100  32.65s user 0.37s system 99% cpu 33.046 total
+
+=> Shifting to a 100x100 population + genotype tracking
+UD:10000  PopSize:10000  Generation: 473.225  Genome0:[grteofcxdEhfEwzbydxbLJekADGncLrv]
+10000: Cur Genotypes: 6936; Total Genotypes: 2009173
+./Avida -s 100  29.14s user 0.10s system 99% cpu 29.275 total
+./Avida -s 100  30.80s user 0.12s system 99% cpu 31.176 total
+./Avida -s 100  27.66s user 0.06s system 99% cpu 27.733 total
+
+=> Trying mutations as NON constexpr.
+./Avida -s 100  28.66s user 0.09s system 99% cpu 28.753 total
+./Avida -s 100  29.82s user 0.09s system 99% cpu 30.056 total
+./Avida -s 100  29.08s user 0.08s system 99% cpu 29.215 total
+
+=> Lots of trigger, etc updates (and laptop not plugged in)
+UD:10000  PopSize:10000  Generation: 473.225  Genome0:[grteofcxdEhfEwzbydxbLJekADGncLrv]
+10000: Cur Genotypes: 6936; Total Genotypes: 2009173
+./Avida -s 100  29.07s user 0.07s system 99% cpu 29.144 total
+
+=> Moved lots of settings to run time.
+./Avida -s 100  28.91s user 0.06s system 99% cpu 28.973 total
+./Avida -s 100  29.04s user 0.05s system 99% cpu 29.104 total
+
