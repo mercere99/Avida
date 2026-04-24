@@ -40,7 +40,7 @@ public:
     emp::Random & random = avida.GetRandom();
     size_t mut_pos = static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale);
     while (mut_pos < genome.size()) {
-      genome[mut_pos] = avida.GetInstSet().GetRandom(random);
+      genome.RandomizeSite(random, mut_pos);
       org.SetMutated();
       mut_pos += static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale) + 1;
     }
