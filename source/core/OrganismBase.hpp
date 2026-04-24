@@ -15,10 +15,11 @@
 class OrganismBase {
 public:
   static constexpr size_t UNKNOWN_ID = static_cast<size_t>(-1);
-protected:
 
-  size_t biota_id = UNKNOWN_ID;   // Where is this Organism located?
+protected:
+  size_t biota_id = UNKNOWN_ID;   // Where is this Organism stored?
   size_t global_id = UNKNOWN_ID;  // Unique organism ID.
+  bool is_mutant = false;         // Is this organism different from its parent?
 
   OrganismBase() = default;
   OrganismBase(OrganismBase && in) : biota_id(in.biota_id), global_id(in.global_id) {
@@ -31,6 +32,9 @@ public:
 
   [[nodiscard]] size_t GetGlobalID() const { return global_id; }
   auto & SetGlobalID(this auto & self, size_t in_id) { self.global_id = in_id; return self; }
+
+  [[nodiscard]] bool IsMutated() const { return is_mutant; }
+  void SetMutated(bool in=true) { is_mutant=in; }
 
 };
 
