@@ -18,17 +18,6 @@
 #include "emp/meta/TypeID.hpp"
 #include "emp/tools/String.hpp"
 
-// Retrieve a Phenotype member from a plug-in module.
-template <typename T> using pheno_member = typename T::Phenotype;
-
-// Convert a type pack of phenotypes into a single, merged phenotype.
-template <typename T> struct merge_from_TypePack;
-
-template <typename... Ts>
-struct merge_from_TypePack<emp::TypePack<Ts...>> {
-  struct merged_t : Ts... { };
-};
-
 #define AVIDA_REGISTER_TRAIT(NAME, DESC)                                   \
   avida.template RegisterTrait<decltype(Phenotype::NAME)>(                 \
      #NAME, DESC, __FILE__, __LINE__,                                      \
@@ -106,7 +95,11 @@ public:
     }
   }
   [[nodiscard]] emp::String AsString(const phenotype_t & p) const override {
-    return emp::MakeString(cget_fun(p));
+    if constexpr (std::formattable<const TRAIT_T, char>) {
+      return emp::MakeString(cget_fun(p));
+    } else {
+      return emp::MakeString("[", emp::GetTypeID<TRAIT_T>().GetName(), "]");
+    }
   }
 };
 
