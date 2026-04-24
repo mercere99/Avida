@@ -16,12 +16,31 @@ private:
   static_assert(sizeof...(PLUG_IN_Ts) > 0, "At least one plug-in required to manage run.");
 
   using organism_t = typename AVIDA_T::organism_t;
+  using genome_t   = typename AVIDA_T::genome_t;
 
   std::tuple<PLUG_IN_Ts...> plug_ins;
 
-  // === Signals ===
+// === Signals ===
+
+  // Pass all plug-ins through signal_fun, ignoring returns.
   void TriggerSignal(auto signal_fun) {
     std::apply([&signal_fun](auto &... p){ (signal_fun(p), ...); }, plug_ins);
+  }
+
+  // Pass all plug-ins through handler_fun, returning the first non-null returned.
+  template <typename T>
+  std::expected<T, emp::String> TriggerHandler(auto handler_fun) {
+    std::expected<T, emp::String> result = std::unexpected<emp::String>("No handler");
+    std::apply([&](auto &... p){
+      ((result = handler_fun(p), result.has_value()) || ...);
+    }, plug_ins);
+    return result;
+  }
+
+  size_t CountSignal(auto check_fun) const {
+    size_t count = 0;
+    std::apply([&](auto &... p){ ((check_fun(p) ? ++count : 0), ...); }, plug_ins);
+    return count;
   }
 
 public:
@@ -55,11 +74,39 @@ public:
 
   // Build out all of the individual signals.
 
-  // Start with a signal generator macro.
+  // "Signal" generator macro.  Signals are sent out to ALL modules listening for them,
+  // which they do by implementing a function with the same signature as the signal.
   #define AVIDA_SIGNAL_DEF(TRIGGER, ...)                                 \
     TriggerSignal([__VA_ARGS__](auto & plug_in) {                        \
       if constexpr (requires { plug_in.TRIGGER; }) { plug_in.TRIGGER; }  \
     });
+
+  // "Handler" generator macro.  Handlers are similar to signals, but return std::expected.
+  // As soon as the "expected" has a proper value, it is returned and no more handlers are called.
+  #define AVIDA_HANDLER_DEF(RETURN_TYPE, TRIGGER, ...)                          \
+    TriggerHandler<RETURN_TYPE>([__VA_ARGS__](auto & plug_in) {                 \
+      if constexpr (requires { plug_in.TRIGGER; }) { return plug_in.TRIGGER; }  \
+      else return std::unexpected<emp::String>("No Handler");                   \
+    })
+
+  // Generate a function to count how many plug-ins respond to a given signal.
+  #define AVIDA_ADD_SIGNAL_COUNT(TRIGGER, ...)                                         \
+    size_t Count_ ## TRIGGER() const {                                               \
+      return CountSignal([](auto & plug_in) -> bool {                                \
+        using nc_t = std::remove_const_t<std::remove_reference_t<decltype(plug_in)>>; \
+        return requires(nc_t & p) { p.TRIGGER(__VA_ARGS__); };                       \
+      });                                                                             \
+    }
+
+  // Create Count_AddCallback()
+  AVIDA_ADD_SIGNAL_COUNT(AddCallback, "name", [](size_t){}) // Generates Count_AddCallback()
+
+  // ======== SIGNALS ========
+
+  void AddCallback(const emp::String & name, std::function<void(size_t)> fun) {
+    emp_always_assert(Count_AddCallback() > 0, "AddCallback() triggered, but no plug-in modules listening");
+    AVIDA_SIGNAL_DEF(AddCallback(name, fun), name, fun);
+  }
 
   void OnUpdateStart(size_t update) { AVIDA_SIGNAL_DEF(OnUpdateStart(update), update); }
   void OnUpdateEnd(size_t update) { AVIDA_SIGNAL_DEF(OnUpdateEnd(update), update); }
@@ -86,4 +133,10 @@ public:
   void RegisterSettings() { AVIDA_SIGNAL_DEF(RegisterSettings(), ); }
   void RegisterCallbacks() { AVIDA_SIGNAL_DEF(RegisterCallbacks(), ); }
   void OnStart() { AVIDA_SIGNAL_DEF(OnStart(), ); }
+
+  // ======== HANDLERS ========
+
+  std::expected<genome_t, emp::String> LoadGenome(const std::filesystem::path & filepath) {
+    return AVIDA_HANDLER_DEF(genome_t, LoadGenome(filepath), &filepath);
+  }
 };
