@@ -14,6 +14,7 @@
 
 #include "emp/base/array.hpp"
 #include "emp/base/notify.hpp"
+#include "emp/base/Ptr.hpp"
 #include "emp/math/math.hpp"
 #include "emp/tools/String.hpp"
 
@@ -34,13 +35,13 @@ public:
   static constexpr size_t MAX_GENOME_SIZE = 2048; // Max genome length.
 
   // Configured types.
-  using data_t = int;                             // What data type does this VM use?
-  using mem_t = emp::array<data_t, MEM_SIZE>;     // Memory is a fixed size.
-  using genome_t = Genome;
-  using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM.
-  using inst_id_t = typename genome_t::value_t;   // Type used for inst IDs in a genome.
-  using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU.
-  using callback_t = std::function<void(size_t)>; // Special functions added to inst set.
+  using data_t = int;                             // Data type used by this VM
+  using mem_t = emp::array<data_t, MEM_SIZE>;     // Memory is a fixed size
+  using genome_t = Genome<uint8_t>;               // Genomes capped at 256 instructions
+  using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM
+  using inst_id_t = typename genome_t::value_t;   // Type used for inst IDs in a genome
+  using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU
+  using callback_t = std::function<void(size_t)>; // Special functions added to inst set
 
   enum class Nop {
     A = 0, B = 1, C = 2, D = 3, E = 4, F = 5, // Nops referring to specific stacks or heads
@@ -65,7 +66,7 @@ public:
 private:
   genome_t genome;              // Genome of this organism, being executed.
   mem_t memory{};               // Storage of values being manipulated by this organism.
-  const inst_set_t & inst_set;  // Map of instruction names to functionality.
+  emp::Ptr<const inst_set_t> inst_set_ptr = nullptr;  // Map of instruction names to functionality.
   size_t biota_id;              // ID of organism from the biota.
 
   emp::array<size_t, NUM_NOPS> heads;
@@ -187,18 +188,19 @@ private:
   }
 
 public:
-  AvidaVM() = delete;
+  AvidaVM() = default;
   AvidaVM(const AvidaVM &) = delete;
   AvidaVM(AvidaVM &&) = default;
   AvidaVM(const inst_set_t & inst_set, const genome_t & genome=genome_t{})
-    : genome(genome), inst_set(inst_set) { Reset(); }
+    : genome(genome), inst_set_ptr(&inst_set) { Reset(); }
 
   // === Accessors ===
   
   [[nodiscard]] size_t GetBiotaID() const { return biota_id; }
   AvidaVM & SetBiotaID(size_t in) { biota_id = in; return *this; }
 
-  [[nodiscard]] const inst_set_t & GetInstSet() const { return inst_set; }
+  [[nodiscard]] const inst_set_t & GetInstSet() const { emp_assert(inst_set_ptr); return *inst_set_ptr; }
+  AvidaVM & SetInstSet(const inst_set_t & is) { inst_set_ptr = &is; return *this; }
 
   // === Instructions ===
 
