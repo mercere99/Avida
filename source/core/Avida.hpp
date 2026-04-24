@@ -19,38 +19,47 @@
 #include "emp/datastructs/UnorderedIndexMap.hpp"
 #include "emp/meta/TypePack.hpp"
 
-#include "../Hardware/AvidaVM.hpp"
-
 #include "concepts.hpp"
 #include "ModuleBase.hpp"
 #include "Organism.hpp"
 #include "Phenotype.hpp"
 #include "PlugInManager.hpp"
 
-template <concepts::Hardware HW_T> struct hardware_filter { };
-
 /// Main Avida-control object.
-template <typename HARDWARE_T, template <typename> typename... PLUG_IN_Ts>
+template <template <typename> typename... PLUG_IN_Ts>
 class Avida {
 public:
-  using this_t = Avida<HARDWARE_T, PLUG_IN_Ts...>;
+  using this_t = Avida<PLUG_IN_Ts...>;
   using plug_in_pack_t = emp::TypePack<PLUG_IN_Ts<this_t>...>;
 
-  using pheno_pack_t = plug_in_pack_t::template filter<pheno_member>::template wrap<pheno_member>;
+  // Convert a type pack of types into a single, merged types.
+  template <typename T> struct merge_from_TypePack;
+
+  template <typename... Ts>
+  struct merge_from_TypePack<emp::TypePack<Ts...>> {
+    struct merged_t : Ts... { };
+  };
+
+  // Merge the Phenotype members from the modules.
+  template <typename T> using to_pheno_member = typename T::Phenotype;
+  using pheno_pack_t = plug_in_pack_t::template filter<to_pheno_member>::template wrap<to_pheno_member>;
   using phenotype_t = merge_from_TypePack<pheno_pack_t>::merged_t;
-  using hardware_t = HARDWARE_T;                         // Type of general hardware for all organisms
-  using inst_set_t = hardware_t::inst_set_t;             // Type of inst set used by this hardware.
-  using organism_t = Organism<hardware_t, phenotype_t>;  // Type for each individual organism
-  using biota_t = emp::vector<organism_t>;               // Collection of all current organisms in Avida
-  using genome_t = hardware_t::genome_t;                 // Type of genomes used in organisms
+
+  // Merge the GlobalTypes from the modules.
+  template <typename T> using to_global_types = typename T::GlobalTypes;
+  using global_types_pack_t = plug_in_pack_t::template filter<to_global_types>::template wrap<to_global_types>;
+  using global_types_t = merge_from_TypePack<global_types_pack_t>::merged_t;
+
+  // Isolate the types used in this Avida instance.
+  using genome_t = global_types_t::genome_t;           // Type of genomes used in organisms
+  using organism_t = Organism<genome_t, phenotype_t>;  // Type for each individual organism
+  using biota_t = emp::vector<organism_t>;             // All current organisms in Avida
 
   // Make sure all of the components fit the proper concepts.
   static_assert(concepts::Genome<genome_t>);
-  static_assert(concepts::Hardware<hardware_t>);
   static_assert(concepts::Organism<organism_t>);
 
 private:
-  inst_set_t inst_set;
   TraitManager<this_t> trait_man;
   PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
 
@@ -72,7 +81,7 @@ private:
     size_t index = occupied.FindZero();    // Find empty position in biota.
     if (index == emp::BitVector::npos) {   // If no empty position available, add one.
       index = occupied.PushBack(true);
-      biota.emplace_back(inst_set, std::move(new_genome));
+      biota.emplace_back(std::move(new_genome));
     } else {
       occupied.Set(index);
       biota[index].SetGenome(std::move(new_genome));
@@ -136,7 +145,6 @@ public:
   [[nodiscard]] uint32_t GetNumOrgs() const { return num_orgs; }
   [[nodiscard]] size_t GetBiotaSize() const { return biota.size(); }
   [[nodiscard]] size_t GetTotalOrgs() const { return total_orgs; }
-  [[nodiscard]] const inst_set_t & GetInstSet() const { return inst_set; }
 
   template <std::invocable<const organism_t &> FUN_T>
   [[nodiscard]] double GetAveTrait(const FUN_T & fun) const {
@@ -175,8 +183,10 @@ public:
   void AddSetting(ARG_Ts &&... args) { settings.AddSetting(std::forward<ARG_Ts>(args)...); }
   template <typename... ARG_Ts>
   void AddKeyword(ARG_Ts &&... args) { settings.AddKeyword(std::forward<ARG_Ts>(args)...); }
-  template <typename... ARG_Ts>
-  void AddCallback(ARG_Ts &&... args) { inst_set.AddCallbackInst(std::forward<ARG_Ts>(args)...); }
+
+  void AddCallback(const emp::String & name, std::function<void(size_t)> callback) {
+    plug_ins.AddCallback(name, callback);
+  }
 
   template <typename TRAIT_T>
   void RegisterTrait(const emp::String & name, const emp::String & desc,
@@ -200,7 +210,7 @@ public:
   /// @brief Inject an organism using a genome loaded from a file.
   /// @param filepath - Path to the file with the genome information.
   organism_t & Inject(const std::filesystem::path & filepath) {
-    auto exp_genome = inst_set.LoadGenome(filepath);
+    auto exp_genome = plug_ins.LoadGenome(filepath);
     if (!exp_genome) emp::notify::Error("Failed to inject from file '", filepath.string(), "'.");
     return Inject(std::move(*exp_genome));
   }
@@ -258,7 +268,7 @@ public:
       [[fallthrough]];
     case RunState::PAUSED: run_state = RunState::RUNNING; [[fallthrough]];
     case RunState::RUNNING: while (run_state == RunState::RUNNING) DoUpdate(); [[fallthrough]];
-    case RunState::EXITING: case RunState::ERROR: // Do nothing.
+    case RunState::EXITING: case RunState::ERROR: ; // Do nothing.
     }
   }
 
