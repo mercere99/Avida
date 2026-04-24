@@ -38,7 +38,7 @@ namespace concepts {
     { const_genome.size() } -> std::convertible_to<std::size_t>;
     { const_genome[pos] } -> std::convertible_to<typename G::value_t>;
 
-    { genome.Push(value) } -> std::same_as<void>;
+    { genome.Push(value) } -> std::same_as<bool>;
     { genome.Insert(pos, value) } -> std::same_as<void>;
     { genome.Extract(pos, len) } -> std::same_as<G>;
 
@@ -123,11 +123,10 @@ namespace concepts {
   concept Organism = requires(
       ORG_T org,
       const ORG_T const_org,
-      std::size_t id,
-      std::size_t cycles
+      std::size_t id
     ) {
     typename ORG_T::genome_t;
-    typename ORG_T::hardware_t;
+    typename ORG_T::phenotype_t;
 
     { const_org.GetGenome() } -> std::same_as<const typename ORG_T::genome_t&>;
     { const_org.GetGenomeSequence() } -> std::same_as<emp::String>;
@@ -135,7 +134,6 @@ namespace concepts {
     { org.SetBiotaID(id) } -> std::same_as<ORG_T&>;
     { org.SetGlobalID(id) } -> std::same_as<ORG_T&>;
 
-    { org.Process(cycles) } -> std::same_as<ORG_T&>;
     { org.DivideGenome() } -> std::same_as<typename ORG_T::genome_t>;
   };
 
