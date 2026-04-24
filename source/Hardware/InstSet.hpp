@@ -45,14 +45,9 @@ private:
   size_t num_insts = 0;
   size_t num_nops = 0;
 
+  genome_t::manager_t genome_manager;
+
 public:
-  InstSet() { hardware_t::BuildInstSet(*this); }
-  InstSet(const InstSet &) = default;
-  InstSet(InstSet &&) = default;
-
-  InstSet & operator=(const InstSet &) = default;
-  InstSet & operator=(InstSet &&) = default;
-
   [[nodiscard]] size_t size() const noexcept { return num_insts; }
   [[nodiscard]] size_t NumInsts() const noexcept { return num_insts; }
   [[nodiscard]] size_t NumNops() const noexcept { return num_nops; }
@@ -113,16 +108,16 @@ public:
     info[num_insts] = InstInfo{name, id, symbol, callback_fun != nullptr};
     funs[num_insts] = fun;
     callback_funs[num_insts] = callback_fun;
+    genome_manager.SetMaxValue(id); // Max values is this inst id.
+
     ++num_insts;
   }
 
   /// Add an instruction to the set that is a nop that can be used as a modifier.
   /// Note: Nops must be at the BEGINNING of the instruction set.
   bool AddNopInst(const emp::String & name) noexcept {
-    if (num_nops != num_insts) {
-      emp::notify::Error("Nops must be at beginning of instruction set. (inst='", name, "')");
-      return false;
-    }
+    emp_always_assert(num_nops == num_insts, "Nops must be at beginning of instruction set.",
+        name, num_insts, num_nops);
     AddInst(name, nullptr);
     ++num_nops;
     return true;
@@ -134,16 +129,15 @@ public:
   }
 
   // Execute an instruction on a given VM instance
-  void Execute(HW_T & vm, size_t id) const noexcept {
+  void Execute(HW_T & vm, size_t id) const {
     emp_assert(id < num_insts, "Calling execute with an invalid inst id.", id, num_insts);
     emp_assert(vm.OK(), "Calling execute on an invalid virtual machine.");
 
     if (id < num_nops) return;  // Nops are "no operation" instructions.
 
-
     if (funs[id]) (vm.*funs[id])();
     else {
-      // If this function doesn't exist, assume it is just a callback.
+      // If this function doesn't exist, assume it is a callback.
       emp_assert(callback_funs[id], "Instruction has no function or callback.", id);
       callback_funs[id](vm.GetBiotaID());
     }
@@ -151,6 +145,7 @@ public:
 
   /// Rebuild an existing genome based on a string sequence.
   void BuildGenome(genome_t & genome, const emp::String & sequence) const noexcept {
+    emp_assert(genome.HasManager());
     genome.Clear();
     for (char symbol : sequence) {
       const auto id = GetID(symbol);
@@ -161,7 +156,7 @@ public:
 
   /// Build a genome based on a string sequence.
   [[nodiscard]] genome_t BuildGenome(const emp::String & sequence) const noexcept {
-    genome_t genome;
+    genome_t genome(genome_manager);
     BuildGenome(genome, sequence);
     return genome;
   }
@@ -172,6 +167,7 @@ public:
     emp_assert(num_insts > 0);
     emp_assert(num_nops <= num_insts);
     emp_assert(num_nops > 0 || nop_prob == 0.0);
+    emp_assert(genome.HasManager());
 
     const size_t non_nops = num_insts - num_nops;
     emp_assert(non_nops > 0 || nop_prob == 1.0);
@@ -187,7 +183,7 @@ public:
   }
 
   [[nodiscard]] std::expected<genome_t, emp::String> LoadGenome(std::istream & is) const {
-    genome_t genome;
+    genome_t genome(genome_manager);
     emp::File file(is);
     file.RemoveComments("//");
     file.CompressWhitespace();
