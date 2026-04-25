@@ -20,13 +20,13 @@
 #include "../core/OrganismBase.hpp"
 
 // Map of genome instruction to which instruction should be run.
-template <typename HW_T, size_t MAX_SET_SIZE=256, typename INST_RETURN_T=void>
+template <typename HW_T, size_t MAX_SET_SIZE=256>
 class InstSet {
 public:
   using hardware_t = HW_T;
   using genome_t = typename HW_T::genome_t;
   using inst_id_t = emp::min_uint_type<MAX_SET_SIZE+1>;
-  using inst_fun_t = INST_RETURN_T (HW_T::*)();
+  using inst_fun_t = void (*)(HW_T &);
   using callback_t = std::function<void(size_t)>;
 
   static constexpr inst_id_t NULL_ID = static_cast<inst_id_t>(-1);
@@ -128,7 +128,7 @@ public:
     emp_assert(id < num_insts, "Calling execute with an invalid inst id.", id, num_insts);
     emp_assert(vm.OK(), "Calling execute on an invalid virtual machine.");
 
-    (vm.*funs[id])();
+    funs[id](vm);
   }
 
   // Execute a callback instruction on a given VM instance
