@@ -31,7 +31,7 @@ public:
   static constexpr size_t NUM_NOPS = 6;           // Num nop modifier instructions used
   static constexpr size_t STACK_DEPTH = 16;       // Num entries on stack before it loops.
   static constexpr size_t MEM_SIZE = 64;          // How much physical memory is available?
-  static constexpr size_t MAX_INSTS = 256;        // Max number of distinct instructions.
+  static constexpr size_t MAX_INSTS = 64;         // Max number of distinct instructions.
   static constexpr size_t MAX_GENOME_SIZE = 2048; // Max genome length.
 
   // Configured types.
@@ -68,6 +68,7 @@ private:
   mem_t memory{};               // Storage of values being manipulated by this organism.
   emp::Ptr<const inst_set_t> inst_set_ptr = nullptr;  // Map of instruction names to functionality.
   size_t biota_id;              // ID of organism from the biota.
+  inst_id_t exec_id;            // ID of instruction being executed.
 
   emp::array<size_t, NUM_NOPS> heads;
   emp::array<Stack, NUM_NOPS> stacks;
@@ -505,11 +506,16 @@ public:
     heads[head_id] += stacks[stack_id].Pop();
   }
 
+  // Instruction for dealing with callbacks.
+  void Inst_Callback() {
+    GetInstSet().ExecuteCallback(*this, exec_id);
+  }
+
   void ProcessStep() {
     emp_assert(OK());
-    const inst_id_t inst_id = ReadIP();
+    exec_id = ReadIP();
     AdvanceIP();
-    GetInstSet().Execute(*this, inst_id);
+    GetInstSet().Execute(*this, exec_id);
   }
 
   void Trace(size_t cpu_cycles=200, std::ostream & os=std::cout) {
@@ -572,12 +578,12 @@ public:
   [[nodiscard]] static emp::String HardwareName() { return "AvidaVM"; }
 
   static void BuildInstSet(inst_set_t & inst_set) {    
-    inst_set.AddNopInst("Nop-A");
-    inst_set.AddNopInst("Nop-B");
-    inst_set.AddNopInst("Nop-C");
-    inst_set.AddNopInst("Nop-D");
-    inst_set.AddNopInst("Nop-E");
-    inst_set.AddNopInst("Nop-F");
+    inst_set.AddNopInst("Nop-A", &AvidaVM::Inst_Nop);
+    inst_set.AddNopInst("Nop-B", &AvidaVM::Inst_Nop);
+    inst_set.AddNopInst("Nop-C", &AvidaVM::Inst_Nop);
+    inst_set.AddNopInst("Nop-D", &AvidaVM::Inst_Nop);
+    inst_set.AddNopInst("Nop-E", &AvidaVM::Inst_Nop);
+    inst_set.AddNopInst("Nop-F", &AvidaVM::Inst_Nop);
 
     inst_set.AddInst("Const",      &AvidaVM::Inst_Const);
     inst_set.AddInst("Offset",     &AvidaVM::Inst_Offset);
@@ -613,7 +619,7 @@ public:
   }
 
   static bool AddCallback(inst_set_t & inst_set, emp::String name, callback_t callback_fun) {
-    inst_set.AddCallbackInst(name, callback_fun);
+    inst_set.AddInst(name, &AvidaVM::Inst_Callback, callback_fun);
     return true;
   }
 

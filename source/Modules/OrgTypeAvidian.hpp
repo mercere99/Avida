@@ -46,7 +46,7 @@ public:
   }
 
   void AddCallback(const emp::String & name, std::function<void(size_t)> callback) {
-    inst_set.AddCallbackInst(name, callback);
+    AvidaVM::AddCallback(inst_set, name, callback);
   }
 
   // === Signal Listeners ===

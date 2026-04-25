@@ -115,17 +115,12 @@ public:
 
   /// Add an instruction to the set that is a nop that can be used as a modifier.
   /// Note: Nops must be at the BEGINNING of the instruction set.
-  bool AddNopInst(const emp::String & name) noexcept {
+  bool AddNopInst(const emp::String & name, inst_fun_t fun) noexcept {
     emp_always_assert(num_nops == num_insts, "Nops must be at beginning of instruction set.",
         name, num_insts, num_nops);
-    AddInst(name, nullptr);
+    AddInst(name, fun);
     ++num_nops;
     return true;
-  }
-
-  // Add a function that's just a callback.
-  void AddCallbackInst(const emp::String & name, callback_t callback_fun) noexcept {
-    AddInst(name, nullptr, callback_fun);
   }
 
   // Execute an instruction on a given VM instance
@@ -133,14 +128,17 @@ public:
     emp_assert(id < num_insts, "Calling execute with an invalid inst id.", id, num_insts);
     emp_assert(vm.OK(), "Calling execute on an invalid virtual machine.");
 
-    if (id < num_nops) return;  // Nops are "no operation" instructions.
+    (vm.*funs[id])();
+  }
 
-    if (funs[id]) (vm.*funs[id])();
-    else {
-      // If this function doesn't exist, assume it is a callback.
-      emp_assert(callback_funs[id], "Instruction has no function or callback.", id);
-      callback_funs[id](vm.GetBiotaID());
-    }
+  // Execute a callback instruction on a given VM instance
+  void ExecuteCallback(HW_T & vm, size_t id) const {
+    emp_assert(id < num_insts, "Calling execute with an invalid inst id.", id, num_insts);
+    emp_assert(vm.OK(), "Calling execute on an invalid virtual machine.");
+
+    // If this function doesn't exist, assume it is a callback.
+    emp_assert(callback_funs[id], "Instruction has no function or callback.", id);
+    callback_funs[id](vm.GetBiotaID());
   }
 
   /// Rebuild an existing genome based on a string sequence.
