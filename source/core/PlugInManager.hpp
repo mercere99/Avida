@@ -37,9 +37,9 @@ private:
     return result;
   }
 
-  size_t CountSignal(auto check_fun) const {
+  size_t CountResult(auto check_fun) const {
     size_t count = 0;
-    std::apply([&](auto &... p){ ((check_fun(p) ? ++count : 0), ...); }, plug_ins);
+    std::apply([&](auto &... p){ ((count += check_fun(p)), ...); }, plug_ins);
     return count;
   }
 
@@ -91,11 +91,11 @@ public:
 
   // Generate a function to count how many plug-ins respond to a given signal.
   #define AVIDA_ADD_SIGNAL_COUNT(TRIGGER, ...)                                         \
-    size_t Count_ ## TRIGGER() const {                                               \
-      return CountSignal([](auto & plug_in) -> bool {                                \
-        using nc_t = std::remove_const_t<std::remove_reference_t<decltype(plug_in)>>; \
-        return requires(nc_t & p) { p.TRIGGER(__VA_ARGS__); };                       \
-      });                                                                             \
+    size_t Count_ ## TRIGGER() const {                                                 \
+      return CountResult([](auto & plug_in) -> size_t {                                \
+        using nc_t = std::remove_const_t<std::remove_reference_t<decltype(plug_in)>>;  \
+        return requires(nc_t & p) { p.TRIGGER(__VA_ARGS__); };                         \
+      });                                                                              \
     }
 
   // Create Count_AddCallback()
@@ -138,5 +138,16 @@ public:
 
   std::expected<genome_t, emp::String> LoadGenome(const std::filesystem::path & filepath) {
     return AVIDA_HANDLER_DEF(genome_t, LoadGenome(filepath), &filepath);
+  }
+
+  // ======== Other Data ========
+
+  size_t CountReservedOrgs() {
+    return CountResult([](auto & plug_in) -> size_t {
+      using nc_t = std::remove_const_t<std::remove_reference_t<decltype(plug_in)>>;
+      if constexpr (requires(nc_t & p) { p.GetOrgReserveCount(); }) {
+        return plug_in.GetOrgReserveCount();
+      } else return 0;
+    });
   }
 };
