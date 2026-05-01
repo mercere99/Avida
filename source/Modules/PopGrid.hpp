@@ -57,8 +57,9 @@ public:
     avida.AddSetting("grid.height", height, "Number of rows in population grid");
   }
 
-  // === Signal Listeners ===
+  size_t GetOrgReserveCount() const { return num_cells; }
 
+  // === Signal Listeners ===
   void OnStart() {
     num_cells = width * height;
     org_grid.resize(num_cells, npos);

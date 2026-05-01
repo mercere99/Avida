@@ -40,6 +40,8 @@ public:
     avida.AddSetting("pop.cap", pop_cap, "Max number of organism allows in population.");
   }
 
+  size_t GetOrgReserveCount() const { return pop_cap; }
+
   // === Signal Listeners ===
 
   // If we have a population cap, delete organisms rather than let population get overfull.
