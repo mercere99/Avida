@@ -27,7 +27,6 @@ public:
   using genome_t = typename HW_T::genome_t;
   using inst_id_t = emp::min_uint_type<MAX_SET_SIZE+1>;
   using inst_fun_t = void (*)(HW_T &);
-  using callback_t = std::function<void(size_t)>;
 
   static constexpr inst_id_t NULL_ID = static_cast<inst_id_t>(-1);
 
@@ -36,12 +35,10 @@ private:
     emp::String name;
     inst_id_t id;
     char symbol = '?';
-    bool is_callback = false;
   };
 
-  emp::array<inst_fun_t, MAX_SET_SIZE> funs;          // Member functions to call in CPU
-  emp::array<callback_t, MAX_SET_SIZE> callback_funs; // For instructions with custom callbacks.
-  emp::array<InstInfo, MAX_SET_SIZE> info;            // Additional info about instructions
+  emp::array<inst_fun_t, MAX_SET_SIZE> funs;  // Member functions to call in CPU
+  emp::array<InstInfo, MAX_SET_SIZE> info;    // Additional info about instructions
   size_t num_insts = 0;
   size_t num_nops = 0;
 
@@ -63,10 +60,6 @@ public:
   [[nodiscard]] inst_fun_t GetFunction(size_t id) const noexcept {
     emp_assert(id < num_insts);
     return funs[id];
-  }
-  [[nodiscard]] bool IsCallback(size_t id) const noexcept {
-    emp_assert(id < num_insts);
-    return info[id].is_callback;
   }
 
   // Get an ID from a name.
@@ -99,15 +92,14 @@ public:
     return static_cast<inst_id_t>(random.GetUInt(num_insts));
   }
 
-  void AddInst(const emp::String & name, inst_fun_t fun, callback_t callback_fun=nullptr) noexcept {
+  void AddInst(const emp::String & name, inst_fun_t fun) noexcept {
     emp_assert(num_insts < MAX_SET_SIZE);
 
     const char symbol = GetNextSymbol();
     inst_id_t id = static_cast<inst_id_t>(num_insts);
 
-    info[num_insts] = InstInfo{name, id, symbol, callback_fun != nullptr};
+    info[num_insts] = InstInfo{name, id, symbol};
     funs[num_insts] = fun;
-    callback_funs[num_insts] = callback_fun;
     genome_manager.SetMaxValue(id); // Max values is this inst id.
 
     ++num_insts;
@@ -129,16 +121,6 @@ public:
     emp_assert(vm.OK(), "Calling execute on an invalid virtual machine.");
 
     funs[id](vm);
-  }
-
-  // Execute a callback instruction on a given VM instance
-  void ExecuteCallback(HW_T & vm, size_t id) const {
-    emp_assert(id < num_insts, "Calling execute with an invalid inst id.", id, num_insts);
-    emp_assert(vm.OK(), "Calling execute on an invalid virtual machine.");
-
-    // If this function doesn't exist, assume it is a callback.
-    emp_assert(callback_funs[id], "Instruction has no function or callback.", id);
-    callback_funs[id](vm.GetBiotaID());
   }
 
   /// Rebuild an existing genome based on a string sequence.
