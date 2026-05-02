@@ -81,6 +81,10 @@ private:
     size_t index = occupied.FindZero();    // Find empty position in biota.
     if (index == emp::BitVector::npos) {   // If no empty position available, add one.
       index = occupied.PushBack(true);
+      emp_assert(biota.capacity() > biota.size(),
+        "Failed to reserve enough organisms in biota!",
+        biota.capacity(), biota.size(),
+        plug_ins.CountReservedOrgs());
       biota.emplace_back(std::move(new_genome));
     } else {
       occupied.Set(index);
@@ -127,7 +131,9 @@ public:
     plug_ins.RegisterCallbacks(); // Set up new instructions for the instruction set.
   }
   Avida(emp::vector<emp::String> args) : Avida() { settings.LoadArgs(args); }
-  ~Avida() { Exit(); }
+  ~Avida() { 
+    Exit();
+  }
 
   // === Basic Accessors ===
 
@@ -256,14 +262,16 @@ public:
   }
 
   void ProcessOrg(size_t id, uint32_t num_cycles) {
+    auto & hw = biota[id].GetHardware();
     for (size_t i = 0; i < num_cycles; ++i) {
-      biota[id].GetHardware().ProcessStep();
+      hw.ProcessStep();
     }
   }
 
   void Run() {
     switch (run_state) {
     case RunState::INITIALIZING:
+      biota.reserve(plug_ins.CountReservedOrgs() + 1);
       plug_ins.OnStart(); // Trigger plug-ins to initialize.
       [[fallthrough]];
     case RunState::PAUSED: run_state = RunState::RUNNING; [[fallthrough]];
