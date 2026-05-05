@@ -12,6 +12,9 @@
 
 template <typename DATA_T, size_t STACK_DEPTH>
 struct VMStack {
+  static_assert((STACK_DEPTH & (STACK_DEPTH - 1)) == 0, "STACK_DEPTH must be a power of two");
+  static constexpr size_t STACK_MASK = STACK_DEPTH - 1;
+  
   emp::array<DATA_T, STACK_DEPTH> stack{0};
   size_t stack_pos = 0;
 
@@ -22,11 +25,10 @@ struct VMStack {
 
   void Push(DATA_T value) {
     stack[stack_pos] = value;
-    stack_pos = (stack_pos+1) % STACK_DEPTH;
+    stack_pos = (stack_pos+1) & STACK_MASK;
   }
   DATA_T Pop() {
-    --stack_pos;
-    if (stack_pos > STACK_DEPTH) stack_pos = STACK_DEPTH-1; // Loop if needed.
+    stack_pos = (stack_pos - 1) & STACK_MASK;  // Loop stack if needed.
     return stack[stack_pos];
   }
 
@@ -39,7 +41,7 @@ struct VMStack {
     bool printing = false;
     for (size_t i = 0; i < STACK_DEPTH; ++i) {
       if (printing) out += ',';
-      auto value = stack[(i+stack_pos)%STACK_DEPTH];
+      auto value = stack[(i+stack_pos) & STACK_MASK];
       if (printing || value != 0) {
         printing = true;
         out.Append(value);
