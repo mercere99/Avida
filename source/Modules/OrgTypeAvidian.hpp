@@ -45,8 +45,40 @@ public:
     AvidaVM::BuildInstSet(inst_set);  // Build the standard AvidaVM instruction set.
   }
 
-  void AddCallback(const emp::String & name, std::function<void(size_t)> callback) {
-    AvidaVM::AddCallback(inst_set, name, callback);
+  static constexpr size_t MAX_CALLBACKS = 32;  // Max number of callback instructions allowed.
+
+  // Number of callback slots assigned so far (shared across all instances).
+  [[nodiscard]] static size_t & GetNumCallbacks() {
+    static size_t num_callbacks = 0;
+    return num_callbacks;
+  }
+
+  // Callback functions stored by slot index.
+  [[nodiscard]] static auto & GetCallbackStorage(size_t id) {
+    static std::array<std::function<void(size_t)>, MAX_CALLBACKS> callbacks;
+    emp_assert(id < GetNumCallbacks());
+    return callbacks[id];
+  }
+
+  // A simple template function that forwards to the std::function in CallbackStorage.
+  // This is to allow a plain function pointer that can be stored in InstSet.
+  template <size_t ID>
+  static void DoCallback(AvidaVM & vm) { GetCallbackStorage(ID)(vm.GetBiotaID()); }
+
+  // Pre-built table of all MAX_CALLBACKS possible redirects.
+  // Indexed by slot number so AddCallback can look up the right function in O(1).
+  [[nodiscard]] static const auto & GetRedirectTable() {
+    static const auto table = []<size_t... Is>(std::index_sequence<Is...>) {
+      return std::array<AvidaVM::callback_t, MAX_CALLBACKS>{ DoCallback<Is>... };
+    }(std::make_index_sequence<MAX_CALLBACKS>{});
+    return table;
+  }
+
+  // Register a new callback instruction: store the function, wire up the trampoline, add to inst_set.
+  void AddCallback(const emp::String & name, const std::function<void(size_t)> & callback) {
+    emp_always_assert(GetNumCallbacks() < MAX_CALLBACKS, "Too many callbacks; failed to add '", name, "'");
+    GetCallbackStorage(GetNumCallbacks()) = callback;
+    AvidaVM::AddCallback(inst_set, name, GetRedirectTable()[GetNumCallbacks()++]);
   }
 
   // === Signal Listeners ===
