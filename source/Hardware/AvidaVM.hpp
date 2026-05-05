@@ -41,7 +41,7 @@ public:
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM
   using inst_id_t = typename genome_t::value_t;   // Type used for inst IDs in a genome
   using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU
-  using callback_t = std::function<void(size_t)>; // Special functions added to inst set
+  using callback_t = void (*)(AvidaVM &);         // Special functions added to inst set
 
   enum class Nop {
     A = 0, B = 1, C = 2, D = 3, E = 4, F = 5, // Nops referring to specific stacks or heads
@@ -67,12 +67,11 @@ private:
   genome_t genome;              // Genome of this organism, being executed.
   mem_t memory{};               // Storage of values being manipulated by this organism.
   emp::Ptr<const inst_set_t> inst_set_ptr = nullptr;  // Map of instruction names to functionality.
-  size_t biota_id;              // ID of organism from the biota.
-  inst_id_t exec_id;            // ID of instruction being executed.
 
   emp::array<size_t, NUM_NOPS> heads;
   emp::array<Stack, NUM_NOPS> stacks;
   size_t error_count = 0;
+  size_t biota_id;              // ID of organism from the biota.
 
   // =========== Helper Functions ============
 
@@ -209,7 +208,7 @@ public:
 
   void ProcessStep() {
     emp_assert(OK());
-    exec_id = ReadIP();
+    const inst_id_t exec_id = ReadIP();
     AdvanceIP();
     GetInstSet().Execute(*this, exec_id);
   }
@@ -275,7 +274,10 @@ public:
 
   static void BuildInstSet(inst_set_t & inst_set);
 
-  static bool AddCallback(inst_set_t & inst_set, emp::String name, callback_t callback_fun);
+  static bool AddCallback(inst_set_t & inst_set, emp::String name, callback_t callback_fun) {
+    inst_set.AddInst(name, callback_fun);
+    return true;
+  }
 
   /////////////////////////////////////////////
   //
@@ -545,11 +547,6 @@ struct AvidaVM_Insts {
     const auto [head_id, stack_id] = vm.GetArgs<vm_t::Nop::F, vm_t::Nop::A>();
     vm.heads[head_id] += vm.stacks[stack_id].Pop();
   }
-
-  // Trampoline for callback instructions.
-  static void Callback(vm_t & vm) {
-    vm.GetInstSet().ExecuteCallback(vm, vm.exec_id);
-  }
 };
 
 void AvidaVM::BuildInstSet(inst_set_t & inst_set) {
@@ -592,9 +589,4 @@ void AvidaVM::BuildInstSet(inst_set_t & inst_set) {
   inst_set.AddInst("SetHead",    Inst::SetHead);
   inst_set.AddInst("JumpHead",   Inst::JumpHead);
   inst_set.AddInst("OffsetHead", Inst::OffsetHead);
-}
-
-bool AvidaVM::AddCallback(inst_set_t & inst_set, emp::String name, callback_t callback_fun) {
-  inst_set.AddInst(name, AvidaVM_Insts::Callback, callback_fun);
-  return true;
 }
