@@ -1,13 +1,18 @@
-# IDE generated
+# Tool generated files
 .vscode/
 *~
+*.dSYM
 
 # Web
 *.wasm
 *.wasm.map
 *.worker.js
 
+# Backup files
 bak/
+*-bak
+old
 
 # Avida specific
-source/Avida
+build/Avida
+build/avida.log
