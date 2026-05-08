@@ -18,7 +18,9 @@
 #include "emp/datastructs/map_utils.hpp"
 #include "emp/datastructs/UnorderedIndexMap.hpp"
 #include "emp/meta/TypePack.hpp"
+#include "emp/tools/Timer.hpp"
 
+#include "Biota.hpp"
 #include "concepts.hpp"
 #include "ModuleBase.hpp"
 #include "Organism.hpp"
@@ -53,7 +55,7 @@ public:
   // Isolate the types used in this Avida instance.
   using genome_t = global_types_t::genome_t;           // Type of genomes used in organisms
   using organism_t = Organism<genome_t, phenotype_t>;  // Type for each individual organism
-  using biota_t = emp::vector<organism_t>;             // All current organisms in Avida
+  using biota_t = Biota<organism_t>;                   // All current organisms in Avida
 
   // Make sure all of the components fit the proper concepts.
   static_assert(concepts::Genome<genome_t>);
@@ -67,36 +69,9 @@ private:
   size_t update = 0;              // Times update was run on this population
   emp::Random random{0};          // Central random number generator
   biota_t biota{};                // Collection of all current organisms
-  emp::BitVector occupied{};      // Which organisms in biota are active?
-  uint32_t num_orgs = 0;          // Current number of active organisms
-  size_t total_orgs = 0;          // Total orgs that have ever existed (used for global IDs)
 
   enum class RunState { INITIALIZING, PAUSED, RUNNING, EXITING, ERROR };
   RunState run_state = RunState::INITIALIZING;
-
-  // ===== Helper Functions =====
-
-  // Set up a new organism in the biota, returning a reference to it.
-  organism_t & ReserveOrganism(genome_t && new_genome) {
-    size_t index = occupied.FindZero();    // Find empty position in biota.
-    if (index == emp::BitVector::npos) {   // If no empty position available, add one.
-      index = occupied.PushBack(true);
-      emp_assert(biota.capacity() > biota.size(),
-        "Failed to reserve enough organisms in biota!",
-        biota.capacity(), biota.size(),
-        plug_ins.CountReservedOrgs());
-      biota.emplace_back(std::move(new_genome));
-    } else {
-      occupied.Set(index);
-      biota[index].SetGenome(std::move(new_genome));
-    }
-    ++num_orgs;
-    organism_t & reserved_org = biota[index];
-    reserved_org.SetBiotaID(index);
-    reserved_org.SetGlobalID(total_orgs++);
-
-    return reserved_org;
-  }
 
 public:
   Avida() : plug_ins(*this) {
@@ -139,33 +114,24 @@ public:
 
   [[nodiscard]] size_t GetUpdate() const { return update; }
   [[nodiscard]] emp::Random & GetRandom() { return random; }
-  [[nodiscard]] auto & GetOrg(this auto & self, size_t id) {
-    emp_assert(self.IsOccupied(id));
+  [[nodiscard]] auto & GetOrg(this auto & self, size_t id) { return self.biota[id]; }
+  [[nodiscard]] bool IsOccupied(size_t id) const { return biota.IsActive(id); }
+  [[nodiscard]] uint32_t GetNumOrgs() const { return biota.GetNumOrgs(); }
+  [[nodiscard]] size_t GetBiotaSize() const { return biota.GetSize(); }
+  [[nodiscard]] size_t GetTotalOrgs() const { return biota.GetTotalOrgs(); }
+
+  [[nodiscard]] auto & GetFirstOrg(this auto & self) {
+    size_t id = self.biota.FindFirstActive();
     return self.biota[id];
   }
-  [[nodiscard]] auto & GetFirstOrg(this auto & self) {
-    emp_assert(self.GetNumOrgs() > 0);
-    return self.biota[self.occupied.FindOne()];
-  }
-  [[nodiscard]] bool IsOccupied(size_t id) const { return id < occupied.size() && occupied[id]; }
-  [[nodiscard]] uint32_t GetNumOrgs() const { return num_orgs; }
-  [[nodiscard]] size_t GetBiotaSize() const { return biota.size(); }
-  [[nodiscard]] size_t GetTotalOrgs() const { return total_orgs; }
 
-  template <std::invocable<const organism_t &> FUN_T>
-  [[nodiscard]] double GetAveTrait(const FUN_T & fun) const {
-    double total = 0.0;    
-    for (size_t index : occupied) total += fun(biota[index]);
-    return total / GetNumOrgs();
-  }
-
-  const auto & GetTrait(const emp::String & name) const {
-    return trait_man.Get(name);
-  }
+  const auto & GetTrait(const emp::String & name) const { return trait_man.Get(name); }
 
   [[nodiscard]] double GetAveTrait(const emp::String & name) const {
     const auto & trait = GetTrait(name);
-    return GetAveTrait([&trait](const organism_t & org){ return trait.AsDouble(org.GetPhenotype()); });
+    return biota.CalcAverage([&trait](const organism_t & org){
+      return trait.AsDouble(org.GetPhenotype());
+    });
   }
 
   // Get a plug-in by realized type.
@@ -205,7 +171,7 @@ public:
   // ====== Organism Management ======
 
   organism_t & Inject(genome_t && genome) {
-    organism_t & inject_org = ReserveOrganism(std::move(genome));
+    organism_t & inject_org = biota.ReserveOrganism(std::move(genome));
     inject_org.ResetHardware();
     plug_ins.OnInjectReady(inject_org);    // Trigger for injections only
     plug_ins.BeforePlacement(inject_org);  // Trigger to set up organisms for activation
@@ -231,7 +197,7 @@ public:
     if (offspring_genome.size()) {
       // ReserveOrganism may call biota.emplace_back, reallocating the vector and
       // invalidating any prior reference to biota elements.  Re-fetch parent after.
-      organism_t & offspring = ReserveOrganism(std::move(offspring_genome));
+      organism_t & offspring = biota.ReserveOrganism(std::move(offspring_genome));
       organism_t & parent = biota[parent_id];
       plug_ins.OnOffspringInit(offspring, parent);   // Trigger: set up offspring (e.g., mutations)
       offspring.ResetHardware();
@@ -243,12 +209,11 @@ public:
 
   // Delete an organism at a specific position in the biota.
   void DeleteOrg(size_t delete_id) {
-    emp_assert(IsOccupied(delete_id));
+    emp_assert(biota.IsActive(delete_id));
 
     plug_ins.BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
     biota[delete_id].SignalDeath();         // Notify organism before deletion.
-    occupied.Clear(delete_id);
-    --num_orgs;
+    biota.Remove(delete_id);
   }
 
   // ====== Run Management ======
@@ -271,7 +236,7 @@ public:
   void Run() {
     switch (run_state) {
     case RunState::INITIALIZING:
-      biota.reserve(plug_ins.CountReservedOrgs() + 1);
+      biota.Reserve(plug_ins.CountReservedOrgs() + 1);
       plug_ins.OnStart(); // Trigger plug-ins to initialize.
       [[fallthrough]];
     case RunState::PAUSED: run_state = RunState::RUNNING; [[fallthrough]];
@@ -284,14 +249,9 @@ public:
     if (run_state == RunState::EXITING) return; // Already exiting.
     run_state = RunState::EXITING;              // Change run_state in case check by plug-ins
     plug_ins.BeforeExit();                      // Notify plug-ins of impending exit
-    biota.clear();                              // Clean up organisms
+    biota.Clear();                              // Clean up organisms
     trait_man.Clear();                          // Clean up traits
   }
 
-  bool OK() {
-    emp_assert(occupied.size() == biota.size());
-    emp_assert(occupied.CountOnes() == num_orgs);
-    for (size_t index : occupied) if (!biota[index].OK()) return false;
-    return true;
-  }
+  bool OK() { return biota.OK(); }
 };
