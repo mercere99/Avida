@@ -40,7 +40,10 @@ FLAGS_main    := $(FLAGS_version) $(FLAGS_warn) $(FLAGS_include) # -pthread
 
 FLAGS_QUICK    := $(FLAGS_main) -DNDEBUG
 FLAGS_DEBUG    := $(FLAGS_main) -g -DEMP_TRACK_MEM
-FLAGS_OPT      := $(FLAGS_main) -O3 -DNDEBUG
+# Not using opts:
+# -flto (link-time optimization; we have only one compilation unit)
+# -ffast-math (may cause issues with some floating-point calculations)
+FLAGS_OPT      := $(FLAGS_main) -O3 -DNDEBUG -march=native -fno-exceptions
 FLAGS_GRUMPY   := $(FLAGS_main) -DNDEBUG -Wconversion -Weffc++
 FLAGS_COVERAGE := $(FLAGS_main)  -O0 -DEMP_TRACK_MEM -ftemplate-backtrace-limit=0 -fprofile-instr-generate -fcoverage-mapping -fno-inline -fno-elide-constructors
 
@@ -95,10 +98,10 @@ CLEAN_EXE = $(NATIVE_EXE) $(WEB_EXE)
 CLEAN_FILES = $(CLEAN_BACKUP) $(CLEAN_TEST) $(CLEAN_EXE)
 
 server:
-	cd tests ; python -m http.server
+	cd $(WEB_DIR) ; python $(CURDIR)/web/serve.py
 
 # Always run the tests, even if nothing has changed
-.PHONY: clean debug grumpy native quick tests web web-debug web-quick
+.PHONY: clean debug grumpy native quick server tests web web-debug web-quick
 
 # Changes in any header file in SOURCE_DIR should trigger recompilation
 KEY_HEADERS := $(shell find $(SOURCE_DIR) -name '*.hpp')
