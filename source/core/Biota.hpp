@@ -11,6 +11,13 @@
 #include "emp/base/vector.hpp"
 #include "emp/bits/BitVector.hpp"
 
+/// Genome extracted from a parent at division time, waiting for end-of-update placement.
+template <typename GENOME_T>
+struct PendingOffspring {
+  size_t parent_id;
+  GENOME_T offspring_genome;
+};
+
 template <typename ORGANISM_T>
 class Biota {
 public:
@@ -42,8 +49,10 @@ public:
 
   void Reserve(size_t max_size) {
     orgs.reserve(max_size);
-    active_bits.Resize(max_size);
+    if (max_size > active_bits.GetSize()) active_bits.Resize(max_size);
   }
+
+  [[nodiscard]] size_t GetCapacity() const { return orgs.capacity(); }
 
   // Set up a new organism in the Biota, returning a reference to it.
   organism_t & ReserveOrganism(genome_t && new_genome) {
