@@ -89,10 +89,10 @@ public:
     return *this;
   }
 
-  [[nodiscard]] genome_t DivideGenome() {
+  [[nodiscard]] genome_t GetOffspringGenome() {
     emp_assert(OK());
     if constexpr (HasHardware()) {
-      return phenotype.hardware.DivideGenome();
+      return phenotype.hardware.GetOffspringGenome();
     } else {
       return genome; // Return a COPY of the current genome.
     }
