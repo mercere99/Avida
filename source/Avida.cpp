@@ -7,6 +7,8 @@
 #include "core/Avida.hpp"
 
 #include "Modules/DriverBasic.hpp"
+#include "Modules/DriverBuffered.hpp"
+#include "Modules/DriverConstant.hpp"
 #include "Modules/LogModule.hpp"
 #include "Modules/MutationsDivideSub.hpp"
 #include "Modules/OrgTypeAvidian.hpp"
@@ -15,14 +17,20 @@
 #include "Modules/TrackGeneration.hpp"
 #include "Modules/TrackGenotypes.hpp"
 
+// Which POPULATION to use?
+template <typename T> using pop_t = 
+// PopWellMixed<T>;
+PopGrid<T>;
+
+// Which DRIVER to use?
+template <typename T> using driver_t = 
+// DriverBasic<T>;
+DriverBuffered<T>;
+// DriverConstant<T>;
+
 int main(int argc, char * argv[])
 {
-  // Well Mixed:
-  // using avida_t = Avida<OrgTypeAvidian, PopWellMixed, DriverBasic, MutationsDivideSub, TrackGeneration>;
-
-  // Grid:
-  using avida_t = Avida<OrgTypeAvidian, PopGrid, DriverBasic, MutationsDivideSub, TrackGeneration, TrackGenotypes>;
-  // using avida_t = Avida<OrgTypeAvidian, PopGrid, DriverBasic, MutationsDivideSub, TrackGeneration>;
+  using avida_t = Avida<OrgTypeAvidian, pop_t, driver_t, MutationsDivideSub, TrackGeneration>;
 
   avida_t avida(emp::ArgsToStrings(argc, argv));
   avida.OK();
