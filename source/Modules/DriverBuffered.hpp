@@ -28,6 +28,8 @@ private:
   static constexpr int32_t ave_cycles_per_org = 30; // Average cycles to execute per org per update.
   int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
+  emp::vector<PendingOffspring<typename AVIDA_T::genome_t>> pending_offspring;
+
   void PrintStats(size_t ud) {
     std::cout << "UD:" << ud
               << "  PopSize:" << avida.GetNumOrgs()
@@ -71,8 +73,12 @@ public:
   }
 
   void RegisterCallbacks() {
-    // Register callback for a cell to signal that it is ready to divide.
-    avida.AddCallback("DivideCell", [this](size_t biota_id){ avida.DivideOrg(biota_id); });
+    // Buffer division requests; births are processed in bulk at end of each update.
+    // Genome must be extracted immediately (AvidaVM heads are reset after this call).
+    avida.AddCallback("DivideCell", [this](size_t biota_id){
+      auto genome = avida.GetOffspringGenome(avida.GetOrg(biota_id));
+      if (genome.size() > 0) pending_offspring.emplace_back(biota_id, std::move(genome));
+    });
   }
 
   // === Signal Listeners ===
@@ -100,7 +106,14 @@ public:
     }
     cycles_executed += ud_cycles;
 
-    if (update % 100 == 0) std::println("ud_cycles = {}; target = {}", ud_cycles, total_cycles);
+    // Replicate all buffered parents (two-phase: build all offspring, then place all).
+    avida.AddOffspringSet(pending_offspring);
+
+    if (update % 100 == 0) {
+      std::println("ud_cycles = {}; target = {}; parents = {}",
+        ud_cycles, total_cycles, pending_offspring.size());
+    }
+    pending_offspring.clear();
   }
 
   void OnUpdateEnd(size_t update) {
@@ -114,11 +127,8 @@ public:
     const size_t org_id = org.GetBiotaID();
     const double rate = CalcMetabolicRate(org);
 
-    if (speed_map.size() <= org_id) speed_map.resize(org_id+1, 0.0);
+    if (org_id >= speed_map.size()) speed_map.resize(org_id+1, 0.0);
     else total_speed -= speed_map[org_id];
-
-    if (org_id < speed_map.size()) total_speed -= speed_map[org_id];
-    else speed_map.resize(org_id+1, 0.0);
     speed_map[org_id] = rate;
     total_speed += rate;
   }
