@@ -134,7 +134,7 @@ namespace concepts {
     { org.SetBiotaID(id) } -> std::same_as<ORG_T&>;
     { org.SetGlobalID(id) } -> std::same_as<ORG_T&>;
 
-    { org.DivideGenome() } -> std::same_as<typename ORG_T::genome_t>;
+    { org.GetOffspringGenome() } -> std::same_as<typename ORG_T::genome_t>;
   };
 
 } // namespace concepts
