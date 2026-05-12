@@ -77,8 +77,9 @@ public:
   // Register a new callback instruction: store the function, wire up the trampoline, add to inst_set.
   void AddCallback(const emp::String & name, const std::function<void(size_t)> & callback) {
     emp_always_assert(GetNumCallbacks() < MAX_CALLBACKS, "Too many callbacks; failed to add '", name, "'");
-    GetCallbackStorage(GetNumCallbacks()) = callback;
-    AvidaVM::AddCallback(inst_set, name, GetRedirectTable()[GetNumCallbacks()++]);
+    const size_t id = GetNumCallbacks()++;  // Claim slot and increment before GetCallbackStorage.
+    GetCallbackStorage(id) = callback;
+    AvidaVM::AddCallback(inst_set, name, GetRedirectTable()[id]);
   }
 
   // === Signal Listeners ===
