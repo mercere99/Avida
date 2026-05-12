@@ -242,7 +242,7 @@ public:
     Reset();
   }
 
-  genome_t DivideGenome() {
+  genome_t GetOffspringGenome() {
     const auto [head1_id, head2_id] = GetArgs<Nop::B, Nop::C>();
 
     size_t & head1 = heads[head1_id];
