@@ -32,9 +32,8 @@ template <template <typename> typename... PLUG_IN_Ts>
 class Avida {
 public:
   using this_t = Avida<PLUG_IN_Ts...>;
-  using plug_in_pack_t = emp::TypePack<PLUG_IN_Ts<this_t>...>;
 
-  // Convert a type pack of types into a single, merged types.
+  // Helper to merge a TypePack of types into a single merged type.
   template <typename T> struct merge_from_TypePack;
 
   template <typename... Ts>
@@ -42,18 +41,27 @@ public:
     struct merged_t : Ts... { };
   };
 
+  // Pre-compute GlobalTypes using a stub type before instantiating modules with this_t.
+  // Makes genome_t available when modules are instantiated (e.g., so a member can be genome_t).
+  struct avida_stub_t {
+    struct stub_genome_t {};
+    using genome_t = stub_genome_t;
+  };
+  template <typename T> using to_global_types = typename T::GlobalTypes;
+  using stub_pack_t = emp::TypePack<PLUG_IN_Ts<avida_stub_t>...>;
+  using global_types_pack_t = stub_pack_t::template filter<to_global_types>::template wrap<to_global_types>;
+  using global_types_t = merge_from_TypePack<global_types_pack_t>::merged_t;
+  using genome_t = global_types_t::genome_t;  // Available as this_t::genome_t hereafter.
+
+  // Instantiate modules with this_t (genome_t is already defined above).
+  using plug_in_pack_t = emp::TypePack<PLUG_IN_Ts<this_t>...>;
+
   // Merge the Phenotype members from the modules.
   template <typename T> using to_pheno_member = typename T::Phenotype;
   using pheno_pack_t = plug_in_pack_t::template filter<to_pheno_member>::template wrap<to_pheno_member>;
   using phenotype_t = merge_from_TypePack<pheno_pack_t>::merged_t;
 
-  // Merge the GlobalTypes from the modules.
-  template <typename T> using to_global_types = typename T::GlobalTypes;
-  using global_types_pack_t = plug_in_pack_t::template filter<to_global_types>::template wrap<to_global_types>;
-  using global_types_t = merge_from_TypePack<global_types_pack_t>::merged_t;
-
   // Isolate the types used in this Avida instance.
-  using genome_t = global_types_t::genome_t;           // Type of genomes used in organisms
   using organism_t = Organism<genome_t, phenotype_t>;  // Type for each individual organism
   using biota_t = Biota<organism_t>;                   // All current organisms in Avida
 
@@ -121,11 +129,13 @@ public:
   [[nodiscard]] size_t GetTotalOrgs() const { return biota.GetTotalOrgs(); }
 
   [[nodiscard]] auto & GetFirstOrg(this auto & self) {
-    size_t id = self.biota.FindFirstActive();
+    const size_t id = self.biota.FindFirstActive();
     return self.biota[id];
   }
 
-  const auto & GetTrait(const emp::String & name) const { return trait_man.Get(name); }
+  [[nodiscard]] const auto & GetTrait(const emp::String & name) const {
+    return trait_man.Get(name);
+  }
 
   [[nodiscard]] double GetAveTrait(const emp::String & name) const {
     const auto & trait = GetTrait(name);
@@ -187,24 +197,56 @@ public:
     return Inject(std::move(*exp_genome));
   }
 
+
+  genome_t GetOffspringGenome(organism_t & parent) {
+    emp_assert(IsOccupied(parent.GetBiotaID()), "parent is not active", parent.GetBiotaID());
+    plug_ins.BeforeRepro(parent);
+    return parent.GetOffspringGenome();
+  }
+
+  /// Place an offspring into the population.
+  /// Parent may still be running, so should not reallocate memory.
+  organism_t & BuildOffspring(organism_t & parent, genome_t && offspring_genome) {
+    emp_assert(biota.GetNumOrgs() < biota.GetCapacity(), "Biota is not large enough to add offspring");
+    emp_assert(IsOccupied(parent.GetBiotaID()), "parent is not active", parent.GetBiotaID());
+    emp_assert(offspring_genome.size() > 0);
+    organism_t & offspring = biota.ReserveOrganism(std::move(offspring_genome));
+    plug_ins.OnOffspringInit(offspring, parent);   // Trigger: set up offspring (e.g., mutations)
+    offspring.ResetHardware();
+    plug_ins.OnOffspringReady(offspring, parent);  // Trigger: offspring is all set up
+    return offspring;
+  }
+
+  void PlaceOffspring(organism_t & offspring) {
+    plug_ins.BeforePlacement(offspring);           // Trigger: set up ANY organism for activation
+    plug_ins.OnPlacement(offspring);               // Trigger: activate organism in populations
+  }
+
   /// Collect an offspring from a designated parent organism.
   void DivideOrg(size_t parent_id) {
-    emp_assert(IsOccupied(parent_id));
-    emp_assert(biota[parent_id].OK());
-    plug_ins.BeforeRepro(biota[parent_id]);
-    genome_t offspring_genome = biota[parent_id].DivideGenome();
+    organism_t & parent = biota[parent_id];
+    genome_t offspring_genome = GetOffspringGenome(parent);
+    if (offspring_genome.size() == 0) return;               // Stop early if no genome was provided.
+    organism_t & offspring = BuildOffspring(parent, std::move(offspring_genome));
+    PlaceOffspring(offspring);
+  }
 
-    if (offspring_genome.size()) {
-      // ReserveOrganism may call biota.emplace_back, reallocating the vector and
-      // invalidating any prior reference to biota elements.  Re-fetch parent after.
-      organism_t & offspring = biota.ReserveOrganism(std::move(offspring_genome));
-      organism_t & parent = biota[parent_id];
-      plug_ins.OnOffspringInit(offspring, parent);   // Trigger: set up offspring (e.g., mutations)
-      offspring.ResetHardware();
-      plug_ins.OnOffspringReady(offspring, parent);  // Trigger: offspring is all set up
-      plug_ins.BeforePlacement(offspring);           // Trigger: set up ANY organism for activation
-      plug_ins.OnPlacement(offspring);               // Trigger: activate organism in populations
+  using PendingOffspring = ::PendingOffspring<genome_t>;
+
+  /// Build and place offspring from a SET of designated parent organisms.
+  /// No organisms should be running when this is called; any orgs may be removed.
+  void AddOffspringSet(std::span<PendingOffspring> pending_set) {
+    std::vector<emp::Ptr<organism_t>> new_orgs;              // Pointers to track new organisms
+    new_orgs.reserve(pending_set.size());
+    biota.Reserve(biota.GetNumOrgs() + pending_set.size());  // Expand biota to fit offspring
+
+    // Phase 1: build all offspring before any placements (so parents stay alive).
+    for (auto & [parent_id, genome] : pending_set) {
+      new_orgs.push_back(&BuildOffspring(biota[parent_id], std::move(genome)));
     }
+
+    // Phase 2: place all offspring (may kill organisms, including other parents).
+    for (emp::Ptr<organism_t> org_ptr : new_orgs) PlaceOffspring(*org_ptr);
   }
 
   // Delete an organism at a specific position in the biota.
