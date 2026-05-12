@@ -13,6 +13,8 @@
 
 #include "../core/Avida.hpp"
 
+#include "emp/datastructs/UnorderedIndexMap.hpp"
+
 template <typename AVIDA_T>
 class DriverBasic : public ModuleBase<AVIDA_T> {
 private:
@@ -23,7 +25,7 @@ private:
 
   // CPU Execution Management
   emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
-  static constexpr int32_t ave_cycles_per_org = 30; // Total cycles to execute per org per update.
+  static constexpr int32_t ave_cycles_per_org = 30; // Average cycles to execute per org per update.
   static constexpr int32_t CPU_chunk_size = 15;     // Num cycles executed each time org is picked.
   int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
