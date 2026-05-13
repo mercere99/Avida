@@ -123,6 +123,7 @@ public:
   [[nodiscard]] size_t GetUpdate() const { return update; }
   [[nodiscard]] emp::Random & GetRandom() { return random; }
   [[nodiscard]] auto & GetOrg(this auto & self, size_t id) { return self.biota[id]; }
+  [[nodiscard]] auto & GetOrgs(this auto & self) { return self.biota.GetOrgs(); }
   [[nodiscard]] bool IsOccupied(size_t id) const { return biota.IsActive(id); }
   [[nodiscard]] uint32_t GetNumOrgs() const { return biota.GetNumOrgs(); }
   [[nodiscard]] size_t GetBiotaSize() const { return biota.GetSize(); }
