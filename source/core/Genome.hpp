@@ -101,6 +101,7 @@ public:
 
   [[nodiscard]] value_t operator[](size_t pos) const { return genome[pos]; }
   [[nodiscard]] value_t & operator[](size_t pos) { return genome[pos]; }
+  [[nodiscard]] auto & Values(this auto & self) { return self.genome; }
 
   [[nodiscard]] bool HasManager() const { return !manager_ptr.IsNull(); }
   [[nodiscard]] auto & Manager(this auto self) {
@@ -109,6 +110,10 @@ public:
   }
 
   [[nodiscard]] bool IsEmpty() const { return genome.empty(); }
+
+  [[nodiscard]] size_t FindMaxID() const {
+    return std::ranges::max_element(genome) - genome.begin();
+  }
   void Clear() { genome.clear(); }
 
   void RandomizeSite(emp::Random & random, size_t pos) {
