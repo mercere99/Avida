@@ -11,6 +11,8 @@
 #include "emp/base/vector.hpp"
 #include "emp/bits/BitVector.hpp"
 
+#include "concepts.hpp"
+
 /// Genome extracted from a parent at division time, waiting for end-of-update placement.
 template <typename GENOME_T>
 struct PendingOffspring {
@@ -34,6 +36,7 @@ public:
   [[nodiscard]] size_t GetSize() const { return orgs.size(); }
   [[nodiscard]] uint32_t GetNumOrgs() const { return num_orgs; }
   [[nodiscard]] bool IsActive(size_t id) const { return active_bits.Get(id); }
+  [[nodiscard]] const emp::BitVector & GetActiveSet() const { return active_bits; }
   [[nodiscard]] size_t GetTotalOrgs() const { return total_orgs; }
 
   [[nodiscard]] auto & GetOrg(this auto & self, size_t id) {
@@ -42,9 +45,18 @@ public:
   }
   [[nodiscard]] auto & operator[](this auto & self, size_t id) { return self.GetOrg(id); }
 
+  [[nodiscard]] auto & GetOrgs(this auto & self) { return self.orgs; }
+
   [[nodiscard]] size_t FindFirstActive() const {
     emp_assert(GetNumOrgs() > 0, "No active organisms");
     return active_bits.FindOne();
+  }
+
+  [[nodiscard]] emp::vector<size_t> GetActiveIDs() const {
+    emp::vector<size_t> active_ids;
+    active_ids.reserve(active_bits.CountOnes());
+    for (size_t id : active_bits) active_ids.push_back(id);
+    return active_ids;
   }
 
   void Reserve(size_t max_size) {
@@ -55,13 +67,15 @@ public:
   [[nodiscard]] size_t GetCapacity() const { return orgs.capacity(); }
 
   // Set up a new organism in the Biota, returning a reference to it.
-  organism_t & ReserveOrganism(genome_t && new_genome) {
+  template <typename GENOME_T>
+    requires concepts::Genome<std::remove_cvref_t<GENOME_T>>
+  organism_t & ReserveOrganism(GENOME_T && new_genome) {
     size_t index = active_bits.ToggleZero();  // Find empty position in Biota and set it.
     emp_assert(index <= orgs.size());
     if (index < orgs.size()) {
-      orgs[index].SetGenome(std::move(new_genome));
+      orgs[index].SetGenome(std::forward<GENOME_T>(new_genome));
     } else {
-      orgs.emplace_back(std::move(new_genome));
+      orgs.emplace_back(std::forward<GENOME_T>(new_genome));
       orgs.back().SetBiotaID(index);
     }
 
