@@ -49,7 +49,10 @@ public:
 
   // === Signal Listeners ===
 
-  // Triggered: Once at the very beginning of a run, after all configurations have been loaded.
+  // Triggered: Once, just before a run starts, after all configurations have been loaded.
+  void BeforeStart() { }
+
+  // Triggered: Once as a run begins; typically injects starting organisms.
   void OnStart() { }
 
   // Triggered: Every update before organisms are executed (run organisms here).
