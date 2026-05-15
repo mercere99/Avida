@@ -244,11 +244,13 @@ public:
   }
 
   void BeforeExit() {
-    const auto & org = avida.GetFirstOrg();
-    const auto & genome = org.GetGenome();
-    const auto & traits = org.GetPhenotype().trait_values;
-    for (size_t i = 0; i < genome.size(); ++i) {
-      std::println("{} -> {}", genome[i], traits[i]);
-    }
+    // if (avida.GetNumOrgs()) {
+    //   const auto & org = avida.GetFirstOrg();
+    //   const auto & genome = org.GetGenome();
+    //   const auto & traits = org.GetPhenotype().trait_values;
+    //   for (size_t i = 0; i < genome.size(); ++i) {
+    //     std::println("{} -> {}", genome[i], traits[i]);
+    //   }
+    // }
   }
 };
