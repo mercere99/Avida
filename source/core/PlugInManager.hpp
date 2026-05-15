@@ -128,10 +128,12 @@ public:
 
   void BeforeExit() { AVIDA_SIGNAL_DEF(BeforeExit(), ); }
   void OnHelp() { AVIDA_SIGNAL_DEF(OnHelp(), ); }
-  
+
+  // Start-up sequence
   void RegisterTraits() { AVIDA_SIGNAL_DEF(RegisterTraits(), ); }
   void RegisterSettings() { AVIDA_SIGNAL_DEF(RegisterSettings(), ); }
   void RegisterCallbacks() { AVIDA_SIGNAL_DEF(RegisterCallbacks(), ); }
+  void BeforeStart() { AVIDA_SIGNAL_DEF(BeforeStart(), ); }
   void OnStart() { AVIDA_SIGNAL_DEF(OnStart(), ); }
 
   // ======== HANDLERS ========
