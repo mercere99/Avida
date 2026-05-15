@@ -17,8 +17,8 @@ class MutationsDivideSub : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
 
-  double sub_prob{0.0075};
-  double mut_scale{1.0 / emp::Log2(1.0 - sub_prob)};
+  double substitution_prob{0.0075};
+  double mut_scale{1.0 / emp::Log2(1.0 - substitution_prob)};
 
 public:
   MutationsDivideSub(AVIDA_T & avida)
@@ -26,9 +26,9 @@ public:
   ~MutationsDivideSub() { }
 
   void RegisterSettings() {
-    avida.AddSetting("mutations.sub_prob",
-      [this](){ return sub_prob; },
-      [this](double p){ sub_prob = p; mut_scale = 1.0 / emp::Log2(1.0 - sub_prob); },
+    avida.AddSetting("mutations.substitution_prob",
+      [this](){ return substitution_prob; },
+      [this](double p){ substitution_prob = p; mut_scale = 1.0 / emp::Log2(1.0 - substitution_prob); },
       "Per-site substitution probability", 'p');
   }
 
