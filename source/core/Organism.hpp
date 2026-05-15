@@ -30,6 +30,9 @@ public:
   Organism(Organism && in) = default;
 
   // Build organism from a genome.
+  Organism(const genome_t & in_genome) : genome(in_genome) {
+    if constexpr (HasHardware()) phenotype.hardware.Reset(genome);
+  }
   Organism(genome_t && in_genome) : genome(std::move(in_genome)) {
     if constexpr (HasHardware()) phenotype.hardware.Reset(genome);
   }
@@ -74,6 +77,10 @@ public:
     return *this;
   }
 
+  void SetGenome(const genome_t & in_genome) {
+    genome = in_genome;
+    is_mutant = false;
+  }
   void SetGenome(genome_t && in_genome) {
     genome = std::move(in_genome);
     is_mutant = false;
@@ -122,8 +129,7 @@ public:
         emp::notify::Error("Organism: Failed hardware OK() check.");
         return false;
       }
-
-      return true;
     }
+    return true;
   }
 };
