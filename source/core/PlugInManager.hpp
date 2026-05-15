@@ -109,7 +109,8 @@ public:
   }
 
   void OnUpdateStart(size_t update) { AVIDA_SIGNAL_DEF(OnUpdateStart(update), update); }
-  void OnUpdateEnd(size_t update) { AVIDA_SIGNAL_DEF(OnUpdateEnd(update), update); }
+  void OnUpdate(size_t update)      { AVIDA_SIGNAL_DEF(OnUpdate(update), update); }
+  void OnUpdateEnd(size_t update)   { AVIDA_SIGNAL_DEF(OnUpdateEnd(update), update); }
 
   void BeforeRepro(organism_t & parent) { AVIDA_SIGNAL_DEF(BeforeRepro(parent), &parent); }
 

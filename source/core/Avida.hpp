@@ -278,7 +278,8 @@ public:
   void DoUpdate() {
     emp_assert(GetNumOrgs() > 0, "Running DoUpdate() with no organisms.");
     ++update;
-    plug_ins.OnUpdateStart(update);  // Run organisms
+    plug_ins.OnUpdateStart(update);  // Set up for a new update
+    plug_ins.OnUpdate(update);       // Run organisms
     plug_ins.OnUpdateEnd(update);    // Report stats / check stop condition
   }
 
