@@ -1,3 +1,5 @@
+#pragma once
+
 /*
  *  This file is part of the Avida Digital Evolution Research Platform, v5.0
  *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
