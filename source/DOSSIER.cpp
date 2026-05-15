@@ -7,17 +7,15 @@
 #include "core/Avida.hpp"
 
 #include "Modules/DriverTournament.hpp"
-#include "Modules/LogModule.hpp"
 #include "Modules/OrgTypeDOSSIER.hpp"
-#include "Modules/TrackGeneration.hpp"
-#include "Modules/TrackGenotypes.hpp"
+#include "Modules/TrackPareto.hpp"
 
 // Which DRIVER to use?
 template <typename T> using driver_t = DriverTournament<T>;
 
 int main(int argc, char * argv[])
 {
-  using avida_t = Avida<OrgTypeDOSSIER, driver_t>;
+  using avida_t = Avida<OrgTypeDOSSIER, driver_t, TrackPareto>;
 
   avida_t avida(emp::ArgsToStrings(argc, argv));
   avida.OK();
