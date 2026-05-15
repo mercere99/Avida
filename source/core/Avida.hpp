@@ -128,6 +128,7 @@ public:
   [[nodiscard]] uint32_t GetNumOrgs() const { return biota.GetNumOrgs(); }
   [[nodiscard]] size_t GetBiotaSize() const { return biota.GetSize(); }
   [[nodiscard]] size_t GetTotalOrgs() const { return biota.GetTotalOrgs(); }
+  [[nodiscard]] emp::vector<size_t> GetActiveIDs() const { return biota.GetActiveIDs(); }
 
   [[nodiscard]] auto & GetFirstOrg(this auto & self) {
     const size_t id = self.biota.FindFirstActive();
@@ -181,13 +182,25 @@ public:
 
   // ====== Organism Management ======
 
-  organism_t & Inject(genome_t && genome) {
-    organism_t & inject_org = biota.ReserveOrganism(std::move(genome));
-    inject_org.ResetHardware();
+  organism_t & Inject(organism_t & inject_org) {
+    inject_org.ResetHardware();            // Reset organism as placed into pop.
     plug_ins.OnInjectReady(inject_org);    // Trigger for injections only
     plug_ins.BeforePlacement(inject_org);  // Trigger to set up organisms for activation
     plug_ins.OnPlacement(inject_org);      // Trigger to activate organism in populations
     return inject_org;
+  }
+
+  void Inject(const genome_t & genome, size_t count=1) {
+    emp_assert(count > 0);
+    for (size_t i = 0; i < count; ++i) {
+      organism_t & inject_org = biota.ReserveOrganism(genome);
+      Inject(inject_org);
+    }
+  }
+  
+  organism_t & Inject(genome_t && genome) {
+    organism_t & inject_org = biota.ReserveOrganism(std::move(genome));
+    return Inject(inject_org);
   }
   
   /// @brief Inject an organism using a genome loaded from a file.
@@ -280,7 +293,8 @@ public:
     switch (run_state) {
     case RunState::INITIALIZING:
       biota.Reserve(plug_ins.CountReservedOrgs() + 1);
-      plug_ins.OnStart(); // Trigger plug-ins to initialize.
+      plug_ins.BeforeStart(); // Trigger plug-ins to initialize.
+      plug_ins.OnStart();     // Trigger injection of start organisms.
       [[fallthrough]];
     case RunState::PAUSED: run_state = RunState::RUNNING; [[fallthrough]];
     case RunState::RUNNING: while (run_state == RunState::RUNNING) DoUpdate(); [[fallthrough]];
