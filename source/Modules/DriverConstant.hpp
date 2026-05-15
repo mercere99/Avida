@@ -61,7 +61,7 @@ public:
     PrintStats(0);  // Report initial state before any organisms run.
   }
 
-  void OnUpdateStart(size_t update) {
+  void OnUpdate(size_t update) {
     // Loop through organisms in order.
     size_t ud_cycles = 0;
     for (size_t org_id = 0; org_id < avida.GetBiotaSize(); ++org_id) {

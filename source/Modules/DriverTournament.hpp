@@ -64,7 +64,7 @@ public:
     PrintStats(0);  // Report initial state before any organisms run.
   }
 
-  void OnUpdateStart(size_t /*update*/) {
+  void OnUpdate(size_t /*update*/) {
     // Get the trait that we need for determining fitness.
     const auto & fit_trait = avida.GetTrait(fitness_name);
 

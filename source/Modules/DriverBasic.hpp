@@ -85,7 +85,7 @@ public:
     PrintStats(0);  // Report initial state before any organisms run.
   }
 
-  void OnUpdateStart(size_t /*update*/) {
+  void OnUpdate(size_t /*update*/) {
     // Execute all organisms for this update.
     const int32_t total_cycles = avida.GetNumOrgs() * ave_cycles_per_org;
     for (int32_t rounds = total_cycles / CPU_chunk_size; rounds; --rounds) {

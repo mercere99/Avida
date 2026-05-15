@@ -100,7 +100,7 @@ public:
     PrintStats(0);  // Report initial state before any organisms run.
   }
 
-  void OnUpdateStart(size_t update) {
+  void OnUpdate(size_t update) {
     const int32_t total_cycles = avida.GetNumOrgs() * ave_cycles_per_org;
 
     // Execute all organisms in parallel; inactive slots have speed 0.0 and are skipped.
