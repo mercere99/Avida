@@ -16,6 +16,9 @@
 
 TARGET := Avida
 
+# Additional executables to build from source/<name>.cpp (each also gets a <name>-debug target)
+ALTERNATES := DOSSIER
+
 # Identify all directory locations
 EMP_DIR      = ../Empirical
 BUILD_DIR    = build
@@ -93,7 +96,7 @@ print-%: ; @echo '$(subst ','\'',$*=$($*))'
 
 CLEAN_BACKUP = *~ *.dSYM
 CLEAN_TEST = *.out	*.o	*.gcda	*.gcno	*.info	*.gcov	./Coverage* ./temp
-CLEAN_EXE = $(NATIVE_EXE) $(WEB_EXE)
+CLEAN_EXE = $(NATIVE_EXE) $(WEB_EXE) $(addprefix $(BUILD_DIR)/, $(ALTERNATES))
 
 CLEAN_FILES = $(CLEAN_BACKUP) $(CLEAN_TEST) $(CLEAN_EXE)
 
@@ -101,7 +104,8 @@ server:
 	cd $(WEB_DIR) ; python $(CURDIR)/web/serve.py
 
 # Always run the tests, even if nothing has changed
-.PHONY: clean debug grumpy native quick server tests web web-debug web-quick
+.PHONY: clean debug grumpy native quick server tests web web-debug web-quick \
+        $(ALTERNATES) $(addsuffix -debug, $(ALTERNATES))
 
 # Changes in any header file in SOURCE_DIR should trigger recompilation
 KEY_HEADERS := $(shell find $(SOURCE_DIR) -name '*.hpp')
@@ -117,6 +121,14 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 $(WEB_DIR):
 	mkdir -p $(WEB_DIR)
+
+$(ALTERNATES): FLAGS := $(FLAGS_OPT)
+$(ALTERNATES): % : $(SOURCE_DIR)/%.cpp $(KEY_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(FLAGS) $< -o $(BUILD_DIR)/$@
+
+$(addsuffix -debug, $(ALTERNATES)): FLAGS := $(FLAGS_DEBUG)
+$(addsuffix -debug, $(ALTERNATES)): %-debug : $(SOURCE_DIR)/%.cpp $(KEY_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(FLAGS) $< -o $(BUILD_DIR)/$*
 
 # Compile the command-line version.
 $(NATIVE_EXE): $(NATIVE_CODE) $(KEY_HEADERS) | $(BUILD_DIR)
