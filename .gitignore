@@ -15,4 +15,9 @@ old
 
 # Avida specific
 build/Avida
+build/Avida.cfg
 build/avida.log
+
+# DOSSIER
+build/DOSSIER
+build/DOSSIER.cfg
