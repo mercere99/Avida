@@ -11,6 +11,12 @@
 #include <cstddef>   // for size_t
 #include <iostream>
 
+#include "emp/base/notify.hpp"
+#include "emp/base/vector.hpp"
+#include "emp/data/DataOutput.hpp"
+#include "emp/math/Random.hpp"
+#include "emp/tools/String.hpp"
+
 #include "../core/Avida.hpp"
 #include "../core/Genome.hpp"
 
@@ -19,6 +25,9 @@ class OrgTypeDOSSIER : public ModuleBase<AVIDA_T> {
 private:
   using this_t = OrgTypeDOSSIER<AVIDA_T>;
   AVIDA_T & avida;
+
+  emp::DataOutput output;
+  size_t output_frequency = 100;
 
   size_t genome_length = 100;
   double target_value = 100.0;
@@ -163,7 +172,7 @@ public:
   OrgTypeDOSSIER(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>("OrgTypeDOSSIER", "Representation",
       "Vector of doubles for DOSSIER diagnostics")
-    , avida(avida)
+    , avida(avida), output("DOSSIER.csv")
     { }
   ~OrgTypeDOSSIER() {}
 
@@ -184,6 +193,12 @@ public:
   }
 
   void RegisterSettings() {
+    avida.AddSetting("DOSSIER.data_filename",
+      [this](){ return output.GetFilename(); },
+      [this](emp::String in){ output.SetFilename(in); },
+      "File to output DOSSIER data (placed in default data directory)");
+    avida.AddSetting("DOSSIER.output_frequency", output_frequency,
+      "Updates between DOSSIER stat outputs");
     avida.AddSetting("DOSSIER.genome_length", genome_length, "Maximum number of updates to run", 'l');
     avida.AddSetting("DOSSIER.target_value", target_value, "Target value for each genome position");
     avida.AddSetting("DOSSIER.starting_count", starting_count, "Initial number of organisms to inject");
@@ -201,8 +216,22 @@ public:
 
   // === Signal Listeners ===
 
+  void BeforeStart() {
+    if (output.GetFilename().size()) {
+      output.SetFilepath(avida.GetDataDir());
+      output.AddColumn("Update", [this](){ return avida.GetUpdate(); });
+      output.AddColumn("Fittest Organism ID", [this](){ return avida.FindOrg_MaxTrait("fitness").GetBiotaID(); });
+      output.AddColumn("Fittest Organism Fitness", [this](){ return avida.CalcTraitMax("fitness"); });
+      output.AddColumn("Fittest Organism Genotype", 
+        [this](){ return avida.FindOrg_MaxTrait("fitness").GetGenomeSequence(); });
+      output.AddColumn("Fittest Organism Phenotype", 
+        [this](){ return avida.FindOrg_MaxTrait("fitness").GetPhenotype().trait_values; });
+    }
+  }
+
   void OnStart() {
     std::println("Using diagnostic: {}", ToName(landscape));
+    output.DoOutput();
 
     genome_manager.SetSizeRange(genome_length, genome_length); // Fixed length.
     Genome<double> empty_genome{genome_manager, genome_length, 0.0};
@@ -240,6 +269,12 @@ public:
     if (offspring.IsMutated()) Evaluate(offspring);
     else {
       offspring.GetPhenotype() = parent.GetPhenotype();
+    }
+  }
+
+  void OnUpdateEnd(size_t update) {
+    if (update % output_frequency == 0) {
+      output.DoOutput();
     }
   }
 
