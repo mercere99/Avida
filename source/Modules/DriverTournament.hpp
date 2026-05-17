@@ -13,14 +13,21 @@
 #include <filesystem> // for path joining
 #include <iostream>
 
-namespace fs = std::filesystem;
+#include "emp/base/vector.hpp"
+#include "emp/data/DataOutput.hpp"
+#include "emp/tools/String.hpp"
 
 #include "../core/Avida.hpp"
+
+namespace fs = std::filesystem;
 
 template <typename AVIDA_T>
 class DriverTournament : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
+
+  emp::DataOutput output;
+  size_t output_frequency = 100;
 
   size_t max_generations = 10000;             // How many updates should the run go for?
   size_t tourny_size = 7;
@@ -37,7 +44,7 @@ private:
 public:
   DriverTournament(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>("DriverTournament", "Execution", "Run an EA with Tournament Selection.")
-    , avida(avida) { }
+    , avida(avida), output("Tournament.csv") { }
   ~DriverTournament() { }
 
   // === Phenotypic Traits ===
@@ -50,6 +57,11 @@ public:
   }
 
   void RegisterSettings() {
+    avida.AddSetting("base.data_filename",
+      [this](){ return output.GetFilename(); },
+      [this](emp::String in){ output.SetFilename(in); },
+      "File to output tournament data (placed in default data directory)");
+    avida.AddSetting("base.output_frequency", output_frequency, "Updates between data outputs");
     avida.AddSetting("base.tourny_size", tourny_size, "How big should tournaments be?", 'T');
     avida.AddSetting("base.pop_size", pop_size, "How big should populations be?", 'P');
     avida.AddSetting("base.max_generations", max_generations, "Maximum umber of generations to run", 'G');
@@ -60,8 +72,19 @@ public:
 
   // === Signal Listeners ===
 
+  void BeforeStart() {
+    // If we have a filename, set up the date file columns.
+    if (output.GetFilename().size()) {
+      output.SetFilepath(avida.GetDataDir());
+      output.AddColumn("Update", [this](){ return avida.GetUpdate(); });
+      output.AddColumn("Max Fitness", [this](){ return avida.CalcTraitMax(fitness_name); });
+      output.AddColumn("Average Fitness", [this](){ return avida.CalcTraitAve(fitness_name); });
+    }
+  }
+
   void OnStart() {
     PrintStats(0);  // Report initial state before any organisms run.
+    output.DoOutput();
   }
 
   void OnUpdate(size_t /*update*/) {
@@ -82,10 +105,10 @@ public:
 
       // Determine winner of this tournament.
       size_t best_id = tourny_ids[0];
-      double best_fit = fit_trait.AsDouble(avida.GetOrg(tourny_ids[0]).GetPhenotype());
+      double best_fit = fit_trait.AsDouble(avida.GetOrg(tourny_ids[0]));
 
       for (size_t i = 1; i < tourny_size; ++i) {
-        const double cur_fit = fit_trait.AsDouble(avida.GetOrg(tourny_ids[i]).GetPhenotype());
+        const double cur_fit = fit_trait.AsDouble(avida.GetOrg(tourny_ids[i]));
         if (best_fit < cur_fit) {
           best_id = tourny_ids[i];
           best_fit = cur_fit;
@@ -100,8 +123,11 @@ public:
   }
 
   void OnUpdateEnd(size_t update) {
-    if (update % 100 == 0) PrintStats(update);
+    if (update % output_frequency == 0) {
+      PrintStats(update);
+      output.DoOutput();
+    }
     if (update >= max_generations) avida.Exit();
-  }   
+  }
 
 };
