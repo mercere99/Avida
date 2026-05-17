@@ -12,6 +12,7 @@
 #include <cstddef>    // for size_t
 #include <filesystem> // for path joining
 #include <iostream>
+#include <numeric>    // for std::iota
 #include <span>
 
 #include "emp/base/vector.hpp"
@@ -88,87 +89,56 @@ public:
     output.DoOutput();
   }
 
-  /// Select a parent from the list of choices available and the specific traits provided.
-  /// @param parent_bits A bit vector specifying which org IDs we should be considering as parents.
-  /// @param test_case_ids Indices into organism score vectors indicating which tests to apply.
-  ///   test_case_ids may be shuffled in place, but the set of IDs will not change.
-  size_t SelectParent(emp::BitVector parent_bits, std::span<size_t> test_case_ids) {
+  /// Select a parent via lexicase selection from the candidates and test cases provided.
+  /// @param score_accessor Direct (non-virtual) accessor for the scores trait.
+  /// @param parent_bits    Bit vector of candidate org IDs (copied; modifications are local).
+  /// @param test_case_ids  Indices into each organism's score vector; shuffled in place.
+  size_t SelectParent(const auto & score_accessor,
+                      emp::BitVector parent_bits, std::span<size_t> test_case_ids) {
     emp_assert(parent_bits.CountOnes() > 0);
     emp_assert(test_case_ids.size() > 0);
     emp::Random & random = avida.GetRandom();
-    const auto & scores_trait = avida.GetTrait(scores_name);
     size_t next_pos = 0;  // Fisher-Yates frontier: test_case_ids[0..next_pos) already used.
 
     while (parent_bits.CountOnes() > 1 && next_pos < test_case_ids.size()) {
       // Randomly select the next test case from the remaining ones (Fisher-Yates step).
       std::swap(test_case_ids[next_pos],
                 test_case_ids[random.GetUInt32(next_pos, test_case_ids.size())]);
-      const size_t test_case_id = test_case_ids[next_pos++];
-      auto score_fun = [&](size_t org_id){
-        return scores_trait(avida.GetOrg(org_id))[test_case_id];
+      const size_t test_case_id = test_case_ids[next_pos++];  // Index into each org's score vector.
+      auto score_fun = [&](size_t org_id) {
+        return score_accessor(avida.GetOrg(org_id))[test_case_id];
       };
 
-      // Find highest score on this test case.
-      const size_t max_id = parent_bits.MaxIndex(score_fun);
-      const double max_score = score_fun(max_id);
-
+      // Find highest score on this test case, then eliminate all candidates below it.
+      const double max_score = score_fun(parent_bits.MaxIndex(score_fun));
       parent_bits.ClearIf([&](size_t org_id){ return score_fun(org_id) < max_score; });
     }
 
-    // Choose parent to return.
-    const size_t num_remaining = parent_bits.CountOnes();
-    const size_t parent_pick = random.GetUInt32(num_remaining);
-    return parent_bits.FindNthOne(parent_pick);
+    // Choose randomly from the surviving candidates.
+    return parent_bits.FindNthOne(random.GetUInt32(parent_bits.CountOnes()));
   }
 
   void OnUpdate(size_t /*update*/) {
-    // Get the trait that we need for determining fitness.
-    const auto & scores_trait = avida.GetTrait(scores_name);
+    // Look up the typed scores accessor once per update (avoids per-offspring map lookups).
+    const auto & score_accessor =
+      avida.template GetTypedTrait<emp::vector<double>>(scores_name).GetConstAccessFun();
 
-    // Collect the initial organisms in the population
+    // Collect the parent population.
     const emp::BitVector parent_bits = avida.GetActiveBits();
-    emp_assert(parent_bits.CountsOnes() > 0);
+    emp_assert(parent_bits.CountOnes() > 0);
 
-    // Build a set of all of the trait IDs.
-    emp::vector<size_t> test_case_ids = 
+    // Build test case IDs [0, num_test_cases); size is read from the first organism's scores.
+    const size_t num_test_cases = score_accessor(avida.GetFirstOrg()).size();
+    emp::vector<size_t> test_case_ids(num_test_cases);
+    std::iota(test_case_ids.begin(), test_case_ids.end(), 0);
 
-    auto vec = std::views::iota(0, num_test_cases) 
-             | std::ranges::to<std::vector<int>>()
-
-    // Generate offspring (do pop_size rounds)
+    // Run pop_size rounds of lexicase selection to generate the next generation.
     for (size_t round = 0; round < pop_size; ++round) {
-      // Select parent to produce an offspring.
-      avida.DivideOrg( SelectParent(parent_bits, test_case_ids) );
+      avida.DivideOrg(SelectParent(score_accessor, parent_bits, test_case_ids));
     }
 
-
-
-
-    // Run Tournaments.
-    emp::vector<size_t> tourny_ids(tourny_size); // Org IDs in a tournament.
-    for (size_t tourny_round = 0; tourny_round < pop_size; ++tourny_round) {
-      // Collect orgs for this tournament.
-      for (size_t & id : tourny_ids) {
-        id = parent_ids[avida.GetRandom().GetUInt(parent_ids.size())];
-      }
-
-      // Determine winner of this tournament.
-      size_t best_id = tourny_ids[0];
-      double best_fit = fit_trait.AsDouble(avida.GetOrg(tourny_ids[0]).GetPhenotype());
-
-      for (size_t i = 1; i < tourny_size; ++i) {
-        const double cur_fit = fit_trait.AsDouble(avida.GetOrg(tourny_ids[i]).GetPhenotype());
-        if (best_fit < cur_fit) {
-          best_id = tourny_ids[i];
-          best_fit = cur_fit;
-        }
-      }
-
-      avida.DivideOrg(best_id);  // Have the winner produce an offspring.
-    }
-
-    // Now that the offspring have been produced, remove the parents.
-    for (size_t id : parent_ids) avida.DeleteOrg(id);
+    // Remove the parent generation now that offspring have been placed.
+    for (size_t id : parent_bits) avida.DeleteOrg(id);
   }
 
   void OnUpdateEnd(size_t update) {
