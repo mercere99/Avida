@@ -12,6 +12,7 @@
 #include <unordered_set>
 
 #include "emp/base/vector.hpp"
+#include "emp/data/DataOutput.hpp"
 
 #include "../core/Avida.hpp"
 
@@ -78,40 +79,48 @@ public:
 
     // Check against live global entries: dominated by any->reject; dominates any->remove.
     for (size_t i = 0; i < global.size(); ) {
-      auto result = Compare(trait_set, global[i].traits);
-      if (result == CompareResult::EXACT_MATCH)     return AddResult::NOT_ADDED;
-      if (result == CompareResult::RIGHT_DOMINATES) return AddResult::NOT_ADDED;
-      if (result == CompareResult::LEFT_DOMINATES)  { SwapRemove(global, i); continue; }
-      ++i;
+      switch (Compare(trait_set, global[i].traits)) {
+        case CompareResult::EXACT_MATCH:
+        case CompareResult::RIGHT_DOMINATES:
+          return AddResult::NOT_ADDED;
+        case CompareResult::LEFT_DOMINATES:
+          SwapRemove(global, i); continue;
+        case CompareResult::NO_DOMINATE:
+          ++i;
+      }
     }
 
     // Check against live current-only entries: dominated by any->reject; dominates any->remove.
     for (size_t i = 0; i < current_only.size(); ) {
-      auto result = Compare(trait_set, current_only[i].traits);
-      if (result == CompareResult::EXACT_MATCH)     return AddResult::NOT_ADDED;
-      if (result == CompareResult::RIGHT_DOMINATES) return AddResult::NOT_ADDED;
-      if (result == CompareResult::LEFT_DOMINATES)  { SwapRemove(current_only, i); continue; }
-      ++i;
+      switch (Compare(trait_set, current_only[i].traits)) {
+        case CompareResult::EXACT_MATCH:
+        case CompareResult::RIGHT_DOMINATES:
+          return AddResult::NOT_ADDED;
+        case CompareResult::LEFT_DOMINATES:
+          SwapRemove(current_only, i); continue;
+        case CompareResult::NO_DOMINATE:
+          ++i;
+      }
     }
 
     // Check against archived entries: dominated by any->at most CURRENT_ONLY;
     // exact match->restore to global; dominates any->remove from archive.
     for (size_t i = 0; i < archive.size(); ) {
-      auto result = Compare(trait_set, archive[i].traits);
-      if (result == CompareResult::EXACT_MATCH) {
-        if (archive[i].gain_gen != archive[i].loss_gen) {
-          size_t t = gen_id - archive[i].loss_gen;
-          if (t >= restore_times.size()) restore_times.resize(t + 1, 0);
-          ++restore_times[t];
-        }
-        archive[i].loss_gen = 0;
-        global.push_back(std::move(archive[i]));
-        SwapRemove(archive, i);
-        return AddResult::ADDED_GLOBAL;  // Restored; new organism represents this global entry.
+      switch (Compare(trait_set, archive[i].traits)) {
+        case CompareResult::EXACT_MATCH:
+          if (archive[i].gain_gen != archive[i].loss_gen) {
+            size_t t = gen_id - archive[i].loss_gen;
+            if (t >= restore_times.size()) restore_times.resize(t + 1, 0);
+            ++restore_times[t];
+          }
+          archive[i].loss_gen = 0;
+          global.push_back(std::move(archive[i]));
+          SwapRemove(archive, i);
+          return AddResult::ADDED_GLOBAL;  // Restored; new organism represents this global entry.
+        case CompareResult::RIGHT_DOMINATES: can_be_global = false; ++i; continue;
+        case CompareResult::LEFT_DOMINATES:  SwapRemove(archive, i); continue;
+        case CompareResult::NO_DOMINATE:     ++i;
       }
-      if (result == CompareResult::RIGHT_DOMINATES) { can_be_global = false; ++i; continue; }
-      if (result == CompareResult::LEFT_DOMINATES)  { SwapRemove(archive, i); continue; }
-      ++i;
     }
 
     // New entry survived all comparisons; add it to the appropriate vector.
@@ -143,7 +152,7 @@ private:
   AVIDA_T & avida;
   ParetoFront<emp::vector<double>> pareto_front;
 
-  size_t current_update = 0;
+  emp::DataOutput output;
   size_t output_frequency = 100;
   double epsilon = 0.01;
 
@@ -161,7 +170,7 @@ private:
   size_t mutation_losses = 0;   // Front-member orgs that reproduced (offspring may have mutated).
   size_t loss_updates = 0;      // Updates where at least one global front member was archived.
 
-  void PrintStats(size_t update) {
+  void PrintStats() {
     const size_t global_size  = pareto_front.GetGlobalSize();
     const size_t current_size = pareto_front.GetCurrentSize();
     const size_t lost_size    = pareto_front.GetLostSize();
@@ -171,18 +180,21 @@ private:
     std::println(
       "Update: {}; Current front={}; All-time front={}; on front and lost={}; coverage={:.3f} "
       "; Cumulative losses={} (selection={} mutation={})",
-      update, current_size, global_size, lost_size, coverage,
-      pareto_front.GetTotalLossEvents(), loss_updates,
-      selection_losses, mutation_losses);
+      avida.GetUpdate(), current_size, global_size, lost_size, coverage,
+      pareto_front.GetTotalLossEvents(), selection_losses, mutation_losses);
   }
 
 public:
   TrackPareto(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>("TrackPareto", "Analysis", "Track the current (and cumulative) Pareto Front.")
-    , avida(avida) {}
+    , avida(avida), output("Pareto.csv") {}
   ~TrackPareto() {}
 
   void RegisterSettings() {
+    avida.AddSetting("TrackPareto.data_filename",
+      [this](){ return output.GetFilename(); },
+      [this](emp::String in){ output.SetFilename(in); },
+      "File to output Pareto data (placed in default data directory)");
     avida.AddSetting("TrackPareto.output_frequency", output_frequency,
       "Updates between Pareto front stat outputs");
     avida.AddSetting("TrackPareto.epsilon", epsilon,
@@ -193,6 +205,32 @@ public:
 
   void BeforeStart() {
     pareto_front.SetEpsilon(epsilon);
+
+    // If we have a filename, set up the columns.
+    if (output.GetFilename().size()) {
+      output.SetFilepath(avida.GetDataDir());
+      output.AddColumn("Update", [this](){ return avida.GetUpdate(); });
+      output.AddColumn("Phenotypes count on current front",
+        [this](){ return pareto_front.GetCurrentSize(); });
+      output.AddColumn("Phenotypes count on all-time front",
+        [this](){ return pareto_front.GetGlobalSize(); });
+      output.AddColumn("Phenotypes lost and not yet recovered",
+        [this](){ return pareto_front.GetLostSize(); });
+      output.AddColumn("Known front coverage",
+        [this](){
+          const double current_size = static_cast<double>(pareto_front.GetCurrentSize());
+          const double global_size = static_cast<double>(pareto_front.GetGlobalSize());
+          return current_size / static_cast<double>(global_size)+0.0001;
+        });
+      output.AddColumn("Phenotypes lost ever",
+        [this](){ return pareto_front.GetTotalLossEvents(); });
+      output.AddColumn("Selection losses", selection_losses);
+      output.AddColumn("Mutation losses", mutation_losses);      
+    }
+  }
+
+  void OnStart() {
+    output.DoOutput();
   }
 
   /// Setup: classify losses from the previous generation, then archive the current front.
@@ -211,14 +249,12 @@ public:
     // Archive the current global front and record whether any losses occurred.
     pareto_front.ArchiveAll(update);
     if (pareto_front.GetNewlyArchivedCount() > 0) ++loss_updates;
-
-    current_update = update;
   }
 
   /// New organisms entering the population are tested against the Pareto front.
   template <concepts::Organism ORG_T>
   void OnPlacement(ORG_T & org) {
-    auto result = pareto_front.AddEntry(org.GetPhenotype().trait_values, current_update);
+    auto result = pareto_front.AddEntry(org.GetPhenotype().trait_values, avida.GetUpdate());
     if (result == ParetoFront<emp::vector<double>>::AddResult::ADDED_GLOBAL) {
       current_global_front_ids.insert(org.GetBiotaID());
     }
@@ -234,6 +270,9 @@ public:
 
   /// Output Pareto front statistics.
   void OnUpdateEnd(size_t update) {
-    if (update % output_frequency == 0) PrintStats(update);
+    if (update % output_frequency == 0) {
+      PrintStats();
+      output.DoOutput();
+    }
   }
 };
