@@ -27,6 +27,8 @@
 #include "Phenotype.hpp"
 #include "PlugInManager.hpp"
 
+namespace fs = std::filesystem;
+
 /// Main Avida-control object.
 template <template <typename> typename... PLUG_IN_Ts>
 class Avida {
@@ -73,10 +75,11 @@ private:
   TraitManager<this_t> trait_man;
   PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
 
-  emp::SettingsManager settings;  // Collection of all configurable settings
-  size_t update = 0;              // Times update was run on this population
-  emp::Random random{0};          // Central random number generator
-  biota_t biota{};                // Collection of all current organisms
+  emp::SettingsManager settings; // Collection of all configurable settings
+  fs::path data_dir = "data/";   // Directory for all data files
+  size_t update = 0;             // Times update was run on this population
+  emp::Random random{0};         // Central random number generator
+  biota_t biota{};               // Collection of all current organisms
 
   enum class RunState { INITIALIZING, PAUSED, RUNNING, EXITING, ERROR };
   RunState run_state = RunState::INITIALIZING;
@@ -91,6 +94,10 @@ public:
       [this](){ return settings.GetConfigDir().string(); },
       [this](const emp::String & s){ settings.SetConfigDir(s); },
       "Default directory to find configuration files.");
+    AddSetting("base.data_dir",
+      [this](){ return data_dir.string(); },
+      [this](const emp::String & s){ data_dir = s.str(); },
+      "Default directory to write data files.", 'D');
 
     AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
@@ -122,6 +129,7 @@ public:
 
   [[nodiscard]] size_t GetUpdate() const { return update; }
   [[nodiscard]] emp::Random & GetRandom() { return random; }
+  [[nodiscard]] const fs::path & GetDataDir() { return data_dir; }  
   [[nodiscard]] auto & GetOrg(this auto & self, size_t id) { return self.biota[id]; }
   [[nodiscard]] auto & GetOrgs(this auto & self) { return self.biota.GetOrgs(); }
   [[nodiscard]] bool IsOccupied(size_t id) const { return biota.IsActive(id); }
@@ -129,6 +137,7 @@ public:
   [[nodiscard]] size_t GetBiotaSize() const { return biota.GetSize(); }
   [[nodiscard]] size_t GetTotalOrgs() const { return biota.GetTotalOrgs(); }
   [[nodiscard]] emp::vector<size_t> GetActiveIDs() const { return biota.GetActiveIDs(); }
+  [[nodiscard]] emp::BitVector GetActiveBits() const { return biota.GetActiveBits(); }
 
   [[nodiscard]] auto & GetFirstOrg(this auto & self) {
     const size_t id = self.biota.FindFirstActive();
@@ -139,11 +148,48 @@ public:
     return trait_man.Get(name);
   }
 
-  [[nodiscard]] double GetAveTrait(const emp::String & name) const {
+  // Typed trait lookup: returns a Trait<TRAIT_T> reference with direct organism-level accessors,
+  // bypassing virtual dispatch. Use this in performance-sensitive loops.
+  template <typename TRAIT_T>
+  [[nodiscard]] const auto & GetTypedTrait(const emp::String & name) const {
+    return trait_man.template GetTyped<TRAIT_T>(name);
+  }
+
+  [[nodiscard]] double CalcTraitMin(const emp::String & name) const {
+    const auto & trait = GetTrait(name);
+    return biota.CalcMinimum([&trait](const organism_t & org){
+      return trait.AsDouble(org);
+    });
+  }
+
+  [[nodiscard]] double CalcTraitMax(const emp::String & name) const {
+    const auto & trait = GetTrait(name);
+    return biota.CalcMaximum([&trait](const organism_t & org){
+      return trait.AsDouble(org);
+    });
+  }
+
+  [[nodiscard]] double CalcTraitAve(const emp::String & name) const {
     const auto & trait = GetTrait(name);
     return biota.CalcAverage([&trait](const organism_t & org){
-      return trait.AsDouble(org.GetPhenotype());
+      return trait.AsDouble(org);
     });
+  }
+
+  [[nodiscard]] auto & FindOrg_MinTrait(const emp::String & name) const {
+    const auto & trait = GetTrait(name);
+    const size_t id = biota.FindMinimumID([&trait](const organism_t & org){
+      return trait.AsDouble(org);
+    });
+    return biota[id];
+  }
+
+  [[nodiscard]] auto & FindOrg_MaxTrait(const emp::String & name) const {
+    const auto & trait = GetTrait(name);
+    const size_t id = biota.FindMaximumID([&trait](const organism_t & org){
+      return trait.AsDouble(org);
+    });
+    return biota[id];
   }
 
   // Get a plug-in by realized type.
@@ -205,7 +251,7 @@ public:
   
   /// @brief Inject an organism using a genome loaded from a file.
   /// @param filepath - Path to the file with the genome information.
-  organism_t & Inject(const std::filesystem::path & filepath) {
+  organism_t & Inject(const fs::path & filepath) {
     auto exp_genome = plug_ins.LoadGenome(filepath);
     if (!exp_genome) emp::notify::Error("Failed to inject from file '", filepath.string(), "'.");
     return Inject(std::move(*exp_genome));
@@ -290,17 +336,29 @@ public:
     }
   }
 
-  void Run() {
-    switch (run_state) {
-    case RunState::INITIALIZING:
-      biota.Reserve(plug_ins.CountReservedOrgs() + 1);
-      plug_ins.BeforeStart(); // Trigger plug-ins to initialize.
-      plug_ins.OnStart();     // Trigger injection of start organisms.
-      [[fallthrough]];
-    case RunState::PAUSED: run_state = RunState::RUNNING; [[fallthrough]];
-    case RunState::RUNNING: while (run_state == RunState::RUNNING) DoUpdate(); [[fallthrough]];
-    case RunState::EXITING: case RunState::ERROR: ; // Do nothing.
+  void SetupDataDir() {
+    fs::create_directories(data_dir);
+    if (!fs::is_directory(data_dir)) {
+      if (fs::exists(data_dir)) {
+        emp::notify::Error("Specified data_dir '", data_dir, "' exists, but is not a directory.");
+      } else {
+        emp::notify::Error("Failed to create data directory '", data_dir, "'.");
+      }
     }
+  }
+
+  void Initialize() {
+    biota.Reserve(plug_ins.CountReservedOrgs() + 1);
+    SetupDataDir();
+    plug_ins.BeforeStart(); // Trigger plug-ins to initialize.
+    plug_ins.OnStart();     // Trigger injection of start organisms.
+  }
+
+  void Run() {
+    if (run_state == RunState::EXITING) return;
+    if (run_state == RunState::INITIALIZING) Initialize();
+    run_state = RunState::RUNNING;
+    while (run_state == RunState::RUNNING) DoUpdate();
   }
 
   void Exit() {
