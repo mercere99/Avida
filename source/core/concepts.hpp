@@ -120,19 +120,18 @@ namespace concepts {
   // ===  Organism  ===
 
   template <typename ORG_T>
-  concept Organism = requires(
-      ORG_T org,
-      const ORG_T const_org,
-      std::size_t id
-    ) {
+  concept ConstOrganism = requires(const ORG_T const_org) {
     typename ORG_T::genome_t;
     typename ORG_T::phenotype_t;
 
-    { const_org.GetGenome() } -> std::same_as<const typename ORG_T::genome_t&>;
+    { const_org.GetGenome() } -> std::same_as<const typename ORG_T::genome_t &>;
     { const_org.GetGenomeSequence() } -> std::same_as<emp::String>;
+  };
 
-    { org.SetBiotaID(id) } -> std::same_as<ORG_T&>;
-    { org.SetGlobalID(id) } -> std::same_as<ORG_T&>;
+  template <typename ORG_T>
+  concept Organism = ConstOrganism<ORG_T> && requires(ORG_T org, std::size_t id) {
+    { org.SetBiotaID(id) } -> std::same_as<ORG_T &>;
+    { org.SetGlobalID(id) } -> std::same_as<ORG_T &>;
 
     { org.GetOffspringGenome() } -> std::same_as<typename ORG_T::genome_t>;
   };
