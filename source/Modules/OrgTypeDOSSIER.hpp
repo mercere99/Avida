@@ -9,6 +9,7 @@
  */
 
 #include <cstddef>   // for size_t
+#include <fstream>
 #include <iostream>
 
 #include "emp/base/notify.hpp"
@@ -54,6 +55,17 @@ private:
 
   Landscape landscape = Landscape::BASE;
 
+  struct ActivationStats {
+    size_t mode_pos = npos;  // Most common activation point
+    size_t mode_count = 0;   // How many orgs with most common activation point?
+    size_t min_pos = npos;   // Lowest activation point
+    size_t max_pos = npos;   // Highest activation point
+    size_t richness = 0;     // Number of distinct activation positions.
+    double entropy = 0.0;    // Entropy of activation positions
+  };
+
+  ActivationStats stats;
+
   [[nodiscard]] static emp::String ToName(Landscape landscape) {
     switch (landscape) {
     case Landscape::BASE: return "base";
@@ -64,7 +76,7 @@ private:
     case Landscape::STRUCTURE_VALLEYS: return "structure,valleys";
     case Landscape::MULTIPATH_VALLEYS: return "multipath,valleys";
     case Landscape::FULL: return "full";
-    case Landscape::ERROR: return "ERROR";    
+    case Landscape::ERROR: return "ERROR";
     }
   }
 
@@ -89,17 +101,24 @@ private:
     return Landscape::ERROR;
   }
 
+  emp::vector<double> & TraitValues(concepts::Organism auto & org) {
+    return org.GetPhenotype().trait_values;
+  }
+
+  const emp::vector<double> & TraitValues(const concepts::ConstOrganism auto & org) {
+    return org.GetPhenotype().trait_values;
+  }
+
   template <concepts::Organism ORG_T>
   void EvalBasic(ORG_T & org) {
     // Trait values are directly set as genome values in "base".
-    emp::vector<double> & trait_values = org.GetPhenotype().trait_values;
-    trait_values = org.GetGenome().Values();
+    TraitValues(org) = org.GetGenome().Values();
   }
 
   template <concepts::Organism ORG_T>
   void EvalStructured(ORG_T & org) {
     const auto & genome = org.GetGenome();
-    emp::vector<double> & trait_values = org.GetPhenotype().trait_values;
+    emp::vector<double> & trait_values = TraitValues(org);
     trait_values.resize(genome.size());
 
     auto cut = std::is_sorted_until(genome.begin(), genome.end(), std::greater_equal<double>{});
@@ -111,19 +130,19 @@ private:
   template <concepts::Organism ORG_T>
   void EvalMultipath(ORG_T & org) {
     const auto & genome = org.GetGenome();
-    emp::vector<double> & trait_values = org.GetPhenotype().trait_values;
+    emp::vector<double> & trait_values = TraitValues(org);
     trait_values.assign(genome.size(), 0.0);
-    size_t peak = genome.FindMaxID();
+    const size_t peak = genome.FindMaxID();
     trait_values[peak] = genome[peak];
   }
 
   template <concepts::Organism ORG_T>
   void EvalStructuredMultipath(ORG_T & org) {
     const auto & genome = org.GetGenome();
-    emp::vector<double> & trait_values = org.GetPhenotype().trait_values;
+    emp::vector<double> & trait_values = TraitValues(org);
     trait_values.resize(genome.size());
 
-    size_t peak = genome.FindMaxID();
+    const size_t peak = genome.FindMaxID();
     auto peak_it = genome.begin() + peak;
     auto cut = std::is_sorted_until(peak_it, genome.end(), std::greater_equal<double>{});
     size_t cut_pos = cut - genome.begin();
@@ -146,9 +165,9 @@ private:
 
   template <concepts::Organism ORG_T>
   void ApplyValleys(ORG_T & org) {
-    for (double & v : org.GetPhenotype().trait_values) v = ApplyValley(v);
+    for (double & v : TraitValues(org)) v = ApplyValley(v);
   }
-  
+
   template <concepts::Organism ORG_T>
   void Evaluate(ORG_T & org) {
     // For now, always use base landscape.
@@ -164,7 +183,7 @@ private:
     default: emp::notify::Error("Invalid Landscape");
     }
 
-    emp::vector<double> & trait_values = org.GetPhenotype().trait_values;
+    emp::vector<double> & trait_values = TraitValues(org);
     org.GetPhenotype().fitness = std::accumulate(trait_values.begin(), trait_values.end(), 0.0);
   }
 
@@ -175,6 +194,8 @@ public:
     , avida(avida), output("DOSSIER.csv")
     { }
   ~OrgTypeDOSSIER() {}
+
+  static constexpr size_t npos = static_cast<size_t>(-1);
 
   // === Phenotypic Traits ===
 
@@ -219,15 +240,43 @@ public:
   void BeforeStart() {
     if (output.GetFilename().size()) {
       output.SetFilepath(avida.GetDataDir());
-      output.AddColumn("Update", [this](){ return avida.GetUpdate(); });
-      output.AddColumn("Fittest Organism ID", [this](){ return avida.FindOrg_MaxTrait("fitness").GetBiotaID(); });
-      output.AddColumn("Fittest Organism Fitness", [this](){ return avida.CalcTraitMax("fitness"); });
-      output.AddColumn("Fittest Organism Genotype", 
-        [this](){ return avida.FindOrg_MaxTrait("fitness").GetGenomeSequence(); });
-      output.AddColumn("Fittest Organism Phenotype", 
-        [this](){ return avida.FindOrg_MaxTrait("fitness").GetPhenotype().trait_values; });
+      output.AddColumn("Update", [this](){
+        return avida.GetUpdate();
+      });
+      output.AddColumn("Fittest Organism ID", [this](){
+        return avida.FindOrg_MaxTrait("fitness").GetBiotaID();
+      });
+      output.AddColumn("Fittest Organism Fitness", [this](){
+        return avida.CalcTraitMax("fitness");
+      });
+      output.AddColumn("Dominant Activation Pos", [this](){
+        stats = AnalyzeActivation();
+        return stats.mode_pos;
+      });
+      output.AddColumn("Dominant Activation Count", [this](){
+        return stats.mode_count;
+      });
+      output.AddColumn("Min Activation Pos", [this](){
+        return stats.min_pos;
+      });
+      output.AddColumn("Max Activation Pos", [this](){
+        return stats.max_pos;
+      });
+      output.AddColumn("Num Activation Pos", [this](){
+        return stats.richness;
+      });
+      output.AddColumn("Activation Entropy", [this](){
+        return stats.entropy;
+      });
+      output.AddColumn("Fittest Organism Genotype", [this](){
+        return avida.FindOrg_MaxTrait("fitness").GetGenomeSequence();
+      });
+      output.AddColumn("Fittest Organism Phenotype",  [this](){
+        return avida.FindOrg_MaxTrait("fitness").GetPhenotype().trait_values;
+      });
     }
   }
+
 
   void OnStart() {
     std::println("Using diagnostic: {}", ToName(landscape));
@@ -279,13 +328,55 @@ public:
   }
 
   void BeforeExit() {
+    PrintPopulation();
     // if (avida.GetNumOrgs()) {
     //   const auto & org = avida.GetFirstOrg();
     //   const auto & genome = org.GetGenome();
-    //   const auto & traits = org.GetPhenotype().trait_values;
+    //   const auto & traits = TraitValues(org);
     //   for (size_t i = 0; i < genome.size(); ++i) {
     //     std::println("{} -> {}", genome[i], traits[i]);
     //   }
     // }
   }
+
+  ActivationStats AnalyzeActivation() {
+    // Collect the distribution of activation positions.
+    emp::vector<size_t> activation_count(genome_length, 0); // Num orgs activated at each position
+    avida.GetBiota().ForEachOrg([&activation_count](const auto & org) {
+      const size_t peak = org.GetGenome().FindMaxID();
+      ++activation_count[peak];
+    });
+
+    ActivationStats stats;
+
+    // Analyze the positions.
+    for (size_t pos = 0; pos < genome_length; ++pos) {
+      const size_t cur_count = activation_count[pos];
+      if (cur_count == 0) continue; // Nothing at this position.
+
+      if (cur_count > stats.mode_count) {
+        stats.mode_pos = pos;
+        stats.mode_count = cur_count;
+      }
+      if (stats.min_pos == npos) stats.min_pos = pos;
+      stats.max_pos = pos;
+      ++stats.richness;
+      double p = activation_count[pos] / static_cast<double>(avida.GetNumOrgs());
+      stats.entropy -= p * std::log(p);
+    }
+
+    return stats;
+  }
+
+  void PrintPopulation() {
+    emp::String filename = emp::MakeString("FullPop-", avida.GetUpdate());
+    std::ofstream out_stream(avida.GetDataDir() / filename.str());
+    out_stream << "fitness,genotype,phenotype\n";
+    avida.GetBiota().ForEachOrg([&](const auto & org) {
+      std::println(out_stream, "{},{},{}",
+        org.GetPhenotype().fitness, org.GetGenomeSequence(), TraitValues(org));
+    });
+  }
+
+
 };
