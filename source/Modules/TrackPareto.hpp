@@ -26,11 +26,11 @@
 
 #include "../core/Avida.hpp"
 
-template <typename DATA_T=emp::vector<double>, bool SORTED=false>
+template <typename SCORES_T=emp::vector<double>, bool SORTED=false>
 class ParetoFront {
 private:
   struct FrontEntry {
-    DATA_T traits;
+    SCORES_T score_set;
     size_t insert_gen = 0;  // Generation when this entry was added to front
   };
 
@@ -48,7 +48,7 @@ private:
       front.erase(front.begin() + static_cast<ptrdiff_t>(i));
     }
     else {
-      // If not sorted, swap the last trait into place.
+      // If not sorted, swap the last score_set into place.
       front[i] = std::move(front.back());
       front.pop_back();
     }
@@ -56,7 +56,7 @@ private:
   }
 
   // Does the test_entry cover the target?
-  bool TestCover(const DATA_T & test_entry, const DATA_T & target) const {
+  bool TestCover(const SCORES_T & test_entry, const SCORES_T & target) const {
     // If test entry ever fails to cover, return false.
     for (size_t i = 0; i < target.size(); ++i) {
       if (test_entry[i] + epsilon < target[i]) { return false; }
@@ -87,10 +87,10 @@ public:
     ResetCounts();
   }
 
-  // True if any member of this front dominates or at least matches `traits`.
-  [[nodiscard]] bool IsCovered(const DATA_T & traits) const {
+  // True if any member of this front dominates or at least matches `score_set`.
+  [[nodiscard]] bool IsCovered(const SCORES_T & score_set) const {
     for (const auto & entry : front) {
-      if (TestCover(entry.traits, traits)) return true;
+      if (TestCover(entry.score_set, score_set)) return true;
     }
     return false;
   }
@@ -107,7 +107,7 @@ public:
     size_t remove_count = 0;
     for (size_t i = 0; i < front.size();) {
       // @CAO If we are removing a bunch from a sorted front, we could do all at once.
-      if (in.IsCovered(front[i].traits)) { Remove(i, cur_gen); ++remove_count; }
+      if (in.IsCovered(front[i].score_set)) { Remove(i, cur_gen); ++remove_count; }
       else ++i;
     };
     return remove_count;
@@ -136,35 +136,50 @@ public:
   }
 
 
-  // Add new trait if not dominated or matched; return success.
-  bool AddEntry(const DATA_T & test_traits, size_t cur_gen) {
+  // Add new score_set if not dominated or matched; return success.
+  bool AddEntry(const SCORES_T & test_score_set, size_t cur_gen) {
     for (size_t i = 0; i < front.size(); ) {
-      // If test traits is covered, return false.
-      if (TestCover(front[i].traits, test_traits)) return false;
+      // If test score_set is covered, return false.
+      if (TestCover(front[i].score_set, test_score_set)) return false;
 
       // If it covers an existing entry, remove that entry.
-      if (TestCover(test_traits, front[i].traits)) Remove(i, cur_gen);
+      if (TestCover(test_score_set, front[i].score_set)) Remove(i, cur_gen);
       else ++i;
     }
 
-    // If we made it here, test_traits should be added to the front.
-    front.push_back({test_traits, cur_gen});
+    // If we made it here, test_score_set should be added to the front.
+    front.push_back({test_score_set, cur_gen});
     ++add_count;
     return true;
   }
 
   void AddFront(const ParetoFront & in, size_t cur_gen) {
+    emp_assert(OK());
     ResetCounts();
     for (auto & entry : in.front) AddEntry(entry, cur_gen);
   }
+
+  // No member of this front should dominate any other member.
+  bool OK() const {
+    for (size_t i = 1; i < front.size(); ++i) {
+      for (size_t j = 0; j < i; ++j) {
+        if (TestCover(front[i], front[j]) || TestCover(front[j], front[i])) {
+          std::println("Error: Pareto front members not independent\nScores 1: {}, Scores 2: {}",
+                       front[i], front[j]);
+          return false;
+        }
+      }
+    }
+    return false;
+  }
 };
 
-template <typename DATA_T=emp::vector<double>>
+template <typename SCORES_T=emp::vector<double>>
 class FrontManager {
 private:
-  ParetoFront<DATA_T> cur_front;   // Exact Pareto front of the current population
-  ParetoFront<DATA_T> prev_front;  // Exact Pareto front from the previous generation
-  ParetoFront<DATA_T> archive;     // Lost entries (possibly sampled) sorted by generation lost
+  ParetoFront<SCORES_T> cur_front;      // Exact Pareto front of the current population
+  ParetoFront<SCORES_T> prev_front;     // Exact Pareto front from the previous generation
+  ParetoFront<SCORES_T, true> archive;  // Lost entries (possibly sampled); sort by generation lost
 
   emp::Histogram restore_times;  // Histogram of recovery durations (gen - loss_gen)
 
@@ -203,8 +218,8 @@ public:
 
   // Add new entry to the cur_front if not dominated or matched.
   // Returns true if the entry was added to the front.
-  bool AddEntry(const DATA_T & trait_set, size_t gen_id) {
-    return cur_front.AddEntry(trait_set, gen_id);
+  bool AddEntry(const SCORES_T & score_set, size_t gen_id) {
+    return cur_front.AddEntry(score_set, gen_id);
   }
 
   // Rotate fronts between generations and update the archive.
@@ -219,7 +234,7 @@ public:
     lost_count = prev_front.GetSize();
     total_loss_events += lost_count;
     for (auto & entry : prev_front.GetEntries()) {
-      if (random.P(sample_p)) archive.AddEntry(entry.traits, gen_id);
+      if (random.P(sample_p)) archive.AddEntry(entry.score_set, gen_id);
     }
 
     // Evict from the archive for age or archive size.
@@ -271,7 +286,7 @@ public:
     avida.AddSetting("TrackPareto.output_frequency", output_frequency,
       "Updates between Pareto front stat outputs");
     avida.AddSetting("TrackPareto.epsilon", epsilon,
-      "Minimum per-trait improvement to count as dominance");
+      "Minimum per-score improvement to count as dominance");
     avida.AddSetting("TrackPareto.sample_p", sample_p,
       "Probability of archiving each lost front entry (0 disables archive)");
     avida.AddSetting("TrackPareto.max_archive_size", max_archive_size,
