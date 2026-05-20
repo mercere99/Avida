@@ -5,143 +5,230 @@
  *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
- *  Track the current Pareto front in the population.
+ *  Track the Pareto front across generations.
+ *
+ *  Three collections are maintained:
+ *    cur_front - exact Pareto front of the current population
+ *    prev_front    - exact Pareto front from the previous generation
+ *    archive       - sampled historical front entries that have been lost
+ *
+ *  OnPlacement feeds organisms into cur_front.
+ *  UpdateGen (called each OnUpdateStart) identifies losses, samples into archive,
+ *  checks for recoveries, evicts stale archive entries, then rotates the fronts.
  */
 
 #include <print>
-#include <unordered_set>
 
 #include "emp/base/vector.hpp"
 #include "emp/data/DataOutput.hpp"
+#include "emp/math/Histogram.hpp"
+#include "emp/math/Random.hpp"
 
 #include "../core/Avida.hpp"
 
-template <typename DATA_T=emp::vector<double>>
+template <typename DATA_T=emp::vector<double>, bool SORTED=false>
 class ParetoFront {
-public:
-  using data_t = DATA_T;
-
-  enum class AddResult { NOT_ADDED, ADDED_CURRENT, ADDED_GLOBAL };
-
 private:
-  struct EntryInfo {
-    DATA_T traits;      // Phenotype of this entry.
-    size_t gain_gen=0;  // When did this entry first appear?
-    size_t loss_gen=0;  // When was this entry last archived?
+  struct FrontEntry {
+    DATA_T traits;
+    size_t insert_gen = 0;  // Generation when this entry was added to front
   };
 
-  emp::vector<EntryInfo> current_only;  // In current front, but dominated historically.
-  emp::vector<EntryInfo> global;        // In current front, never dominated.
-  emp::vector<EntryInfo> archive;       // Not in current front, never dominated.
-  emp::vector<size_t> restore_times;   // Histogram of restoration durations (in updates).
+  emp::vector<FrontEntry> front;
+  int add_count = 0;            // Num entries added since last reset
+  int remove_count = 0;         // Num entries removed since last reset
+  emp::Histogram persist_times; // How long were entries on this front?
 
-  size_t newly_archived_count = 0;  // Entries moved to archive in the most recent ArchiveAll.
-  size_t total_loss_events = 0;     // Cumulative count of archived entries across all updates.
-  double epsilon = 0.0;             // Minimum per-trait improvement required for dominance.
+  double epsilon = 0.0;         // Amount to beat an existing solution by to remove it
 
-  enum class CompareResult { EXACT_MATCH, LEFT_DOMINATES, RIGHT_DOMINATES, NO_DOMINATE };
-
-  CompareResult Compare(const DATA_T & left, const DATA_T & right) {
-    emp_assert(left.size() == right.size(), "trait sizes do not match.", left.size(), right.size());
-    bool left_any_greater = false, right_any_greater = false;
-    for (size_t i = 0; i < left.size(); ++i) {
-      if (left[i] > right[i] + epsilon) { left_any_greater = true; break; }
+  void Remove(size_t i, size_t cur_gen) {
+    persist_times.Insert(cur_gen - front[i].insert_gen);
+    if constexpr (SORTED) {
+      // If sorted, use erase to keep in order (expensive)
+      front.erase(front.begin() + static_cast<ptrdiff_t>(i));
     }
-    for (size_t i = 0; i < left.size(); ++i) {
-      if (right[i] > left[i] + epsilon) { right_any_greater = true; break; }
+    else {
+      // If not sorted, swap the last trait into place.
+      front[i] = std::move(front.back());
+      front.pop_back();
     }
-    if (!left_any_greater && !right_any_greater) return CompareResult::EXACT_MATCH;
-    if ( left_any_greater && !right_any_greater) return CompareResult::LEFT_DOMINATES;
-    if (!left_any_greater &&  right_any_greater) return CompareResult::RIGHT_DOMINATES;
-    return CompareResult::NO_DOMINATE;
+    ++remove_count;
   }
 
-  static void SwapRemove(emp::vector<EntryInfo> & vec, size_t i) {
-    vec[i] = std::move(vec.back());
-    vec.pop_back();
+  // Does the test_entry cover the target?
+  bool TestCover(const DATA_T & test_entry, const DATA_T & target) const {
+    // If test entry ever fails to cover, return false.
+    for (size_t i = 0; i < target.size(); ++i) {
+      if (test_entry[i] + epsilon < target[i]) { return false; }
+    }
+    return true;
   }
 
 public:
-  void   SetEpsilon(double eps)          { epsilon = eps; }
-  double GetEpsilon()              const { return epsilon; }
+  [[nodiscard]] size_t GetSize() const { return front.size(); }
+  [[nodiscard]] const emp::vector<FrontEntry> & GetEntries() const { return front; }
+  [[nodiscard]] size_t GetAddCount() const { return add_count; }
+  [[nodiscard]] size_t GetRemoveCount() const { return remove_count; }
+  [[nodiscard]] const emp::Histogram & GetPersistTimes() const { return persist_times; }
+  [[nodiscard]] double GetEpsilon() const { return epsilon; }
 
-  size_t GetCurrentSize()        const { return global.size() + current_only.size(); }
-  size_t GetGlobalSize()         const { return global.size() + archive.size(); }
-  size_t GetLostSize()           const { return archive.size(); }
-  size_t GetNewlyArchivedCount() const { return newly_archived_count; }
-  size_t GetTotalLossEvents()    const { return total_loss_events; }
+  void SetEpsilon(double in) { epsilon = in; }
 
-  const emp::vector<size_t> & GetRestoreTimes() const { return restore_times; }
-
-  // Add a potential member to the front; return indicates how it was classified.
-  AddResult AddEntry(const data_t & trait_set, size_t gen_id) {
-    bool can_be_global = true;
-
-    // Check against live global entries: dominated by any->reject; dominates any->remove.
-    for (size_t i = 0; i < global.size(); ) {
-      switch (Compare(trait_set, global[i].traits)) {
-        case CompareResult::EXACT_MATCH:
-        case CompareResult::RIGHT_DOMINATES:
-          return AddResult::NOT_ADDED;
-        case CompareResult::LEFT_DOMINATES:
-          SwapRemove(global, i); continue;
-        case CompareResult::NO_DOMINATE:
-          ++i;
-      }
-    }
-
-    // Check against live current-only entries: dominated by any->reject; dominates any->remove.
-    for (size_t i = 0; i < current_only.size(); ) {
-      switch (Compare(trait_set, current_only[i].traits)) {
-        case CompareResult::EXACT_MATCH:
-        case CompareResult::RIGHT_DOMINATES:
-          return AddResult::NOT_ADDED;
-        case CompareResult::LEFT_DOMINATES:
-          SwapRemove(current_only, i); continue;
-        case CompareResult::NO_DOMINATE:
-          ++i;
-      }
-    }
-
-    // Check against archived entries: dominated by any->at most CURRENT_ONLY;
-    // exact match->restore to global; dominates any->remove from archive.
-    for (size_t i = 0; i < archive.size(); ) {
-      switch (Compare(trait_set, archive[i].traits)) {
-        case CompareResult::EXACT_MATCH:
-          if (archive[i].gain_gen != archive[i].loss_gen) {
-            size_t t = gen_id - archive[i].loss_gen;
-            if (t >= restore_times.size()) restore_times.resize(t + 1, 0);
-            ++restore_times[t];
-          }
-          archive[i].loss_gen = 0;
-          global.push_back(std::move(archive[i]));
-          SwapRemove(archive, i);
-          return AddResult::ADDED_GLOBAL;  // Restored; new organism represents this global entry.
-        case CompareResult::RIGHT_DOMINATES: can_be_global = false; ++i; continue;
-        case CompareResult::LEFT_DOMINATES:  SwapRemove(archive, i); continue;
-        case CompareResult::NO_DOMINATE:     ++i;
-      }
-    }
-
-    // New entry survived all comparisons; add it to the appropriate vector.
-    if (can_be_global) {
-      global.push_back({trait_set, gen_id, 0});
-      return AddResult::ADDED_GLOBAL;
-    }
-    current_only.push_back({trait_set, gen_id, 0});
-    return AddResult::ADDED_CURRENT;
+  // Reset the stats associated with this front.
+  void ResetCounts() {
+    add_count = 0;
+    remove_count = 0;
+    persist_times.Reset();
   }
 
-  // Archive the current generation's front entries to prepare for the next generation.
-  void ArchiveAll(size_t gen_id) {
-    newly_archived_count = global.size();
-    total_loss_events += newly_archived_count;
-    current_only.clear();  // Drop; not globally significant.
-    for (auto & entry : global) {
-      entry.loss_gen = gen_id;
-      archive.push_back(std::move(entry));
+  // Reset this entire front.
+  void Reset() {
+    front.clear();
+    ResetCounts();
+  }
+
+  // True if any member of this front dominates or at least matches `traits`.
+  [[nodiscard]] bool IsCovered(const DATA_T & traits) const {
+    for (const auto & entry : front) {
+      if (TestCover(entry.traits, traits)) return true;
     }
-    global.clear();
+    return false;
+  }
+
+  // Count the number of entries in another front covered by this one.
+  [[nodiscard]] size_t CountCovered(const ParetoFront & in) const {
+    return std::ranges::count_if(in.front, [this](const auto & entry) {
+      return IsCovered(entry);
+    });
+  }
+
+  // Count the number of entries in another front covered by this one AND REMOVE THEM.
+  size_t PruneCovered(const ParetoFront & in, size_t cur_gen) {
+    size_t remove_count = 0;
+    for (size_t i = 0; i < front.size();) {
+      // @CAO If we are removing a bunch from a sorted front, we could do all at once.
+      if (in.IsCovered(front[i].traits)) { Remove(i, cur_gen); ++remove_count; }
+      else ++i;
+    };
+    return remove_count;
+  }
+
+  // Remove a specified number of entries from the beginning of front.
+  size_t EvictCount(size_t count) {
+    emp_assert(count >= front.size());
+    front.erase(front.begin(), front.begin() + static_cast<ptrdiff_t>(count));
+    return count;
+  }
+
+  // Remove entries inserted before a specified generation.
+  size_t EvictOlder(size_t min_gen) {
+    emp_assert(SORTED, "EvictOlder can only be run on sorted Pareto fronts.");
+    size_t evict_count = 0;
+    while (evict_count < front.size() && front[evict_count].insert_gen < min_gen) ++evict_count;
+    return EvictCount(evict_count);
+  }
+
+  // If there are too many entries, remove excess.
+  size_t CapSize(size_t max_size) {
+    emp_assert(SORTED, "CapSize can only be run on sorted Pareto fronts.");
+    if (max_size >= front.size()) return 0;
+    return EvictCount(front.size() - max_size);
+  }
+
+
+  // Add new trait if not dominated or matched; return success.
+  bool AddEntry(const DATA_T & test_traits, size_t cur_gen) {
+    for (size_t i = 0; i < front.size(); ) {
+      // If test traits is covered, return false.
+      if (TestCover(front[i].traits, test_traits)) return false;
+
+      // If it covers an existing entry, remove that entry.
+      if (TestCover(test_traits, front[i].traits)) Remove(i, cur_gen);
+      else ++i;
+    }
+
+    // If we made it here, test_traits should be added to the front.
+    front.push_back({test_traits, cur_gen});
+    ++add_count;
+    return true;
+  }
+
+  void AddFront(const ParetoFront & in, size_t cur_gen) {
+    ResetCounts();
+    for (auto & entry : in.front) AddEntry(entry, cur_gen);
+  }
+};
+
+template <typename DATA_T=emp::vector<double>>
+class FrontManager {
+private:
+  ParetoFront<DATA_T> cur_front;   // Exact Pareto front of the current population
+  ParetoFront<DATA_T> prev_front;  // Exact Pareto front from the previous generation
+  ParetoFront<DATA_T> archive;     // Lost entries (possibly sampled) sorted by generation lost
+
+  emp::Histogram restore_times;  // Histogram of recovery durations (gen - loss_gen)
+
+  // Config parameters
+  double epsilon = 0.0;
+  double sample_p = 0.1;        // Probability of archiving each lost entry (0 = disabled)
+  size_t max_archive_size = 0;  // 0 = unlimited; oldest entries removed first when exceeded
+  size_t max_archive_gen = 0;   // 0 = unlimited; entries older than this many gens are evicted
+
+  // Stats
+  size_t lost_count = 0;          // Prev-front entries not covered in cur_front this rotation
+  size_t newly_recovered = 0;     // Archive entries recovered this rotation
+  size_t total_loss_events = 0;   // Cumulative lost_count across all rotations
+
+public:
+  // === Configuration ===
+  void SetEpsilon(double e)        { cur_front.SetEpsilon(e); prev_front.SetEpsilon(e); archive.SetEpsilon(e); }
+  void SetSampleP(double p)        { sample_p = p; }
+  void SetMaxArchiveSize(size_t s) { max_archive_size = s; }
+  void SetMaxArchiveGen(size_t g)  { max_archive_gen = g; }
+
+  double GetEpsilon() const { return archive.GetEpsilon(); }
+  double GetSampleP() const { return sample_p; }
+
+  // === Statistics ===
+  size_t GetCurrentSize()     const { return cur_front.GetSize(); }
+  size_t GetPrevSize()        const { return prev_front.GetSize(); }
+  size_t GetArchiveSize()     const { return archive.GetSize(); }
+  size_t GetLostCount()       const { return lost_count; }
+  size_t GetNewlyRecovered()  const { return newly_recovered; }
+  size_t GetTotalLossEvents() const { return total_loss_events; }
+
+  const emp::Histogram & GetRestoreTimes() const { return restore_times; }
+
+  // === Core Operations ===
+
+  // Add new entry to the cur_front if not dominated or matched.
+  // Returns true if the entry was added to the front.
+  bool AddEntry(const DATA_T & trait_set, size_t gen_id) {
+    return cur_front.AddEntry(trait_set, gen_id);
+  }
+
+  // Rotate fronts between generations and update the archive.
+  void UpdateGen(size_t gen_id, emp::Random & random) {
+    // Archive should be stripped of any entries covered by the current population.
+    archive.ResetCounts();
+    newly_recovered = archive.PruneCovered(cur_front, gen_id);
+    restore_times += archive.GetPersistTimes();
+
+    // Add some non-dominated entries being lost from the previous front.
+    prev_front.PruneCovered(cur_front, gen_id);
+    lost_count = prev_front.GetSize();
+    total_loss_events += lost_count;
+    for (auto & entry : prev_front.GetEntries()) {
+      if (random.P(sample_p)) archive.AddEntry(entry.traits, gen_id);
+    }
+
+    // Evict from the archive for age or archive size.
+    if (max_archive_gen && gen_id > max_archive_gen) archive.EvictOlder(gen_id - max_archive_gen);
+    if (max_archive_size) archive.CapSize(max_archive_size);
+
+    // Rotate fronts.
+    prev_front = std::move(cur_front);
+    cur_front.Reset();
   }
 };
 
@@ -150,38 +237,24 @@ template <typename AVIDA_T>
 class TrackPareto : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
-  ParetoFront<emp::vector<double>> pareto_front;
+  FrontManager<emp::vector<double>> pareto_front;
 
   emp::DataOutput output;
   size_t output_frequency = 100;
   double epsilon = 0.01;
-
-  // Organism IDs on the global front from the previous generation.
-  std::unordered_set<size_t> prev_global_front_ids;
-  // Organism IDs added to the global front during the current generation.
-  std::unordered_set<size_t> current_global_front_ids;
-  // Prev-generation front member IDs that reproduced during the current generation.
-  std::unordered_set<size_t> reproduced_front_ids;
-
-  // Cumulative loss-reason counters (approximated at organism level).
-  // Note: multiple organisms may share a phenotype; counts reflect individual organisms,
-  // not unique phenotypes.
-  size_t selection_losses = 0;  // Front-member orgs not selected to reproduce.
-  size_t mutation_losses = 0;   // Front-member orgs that reproduced (offspring may have mutated).
-  size_t loss_updates = 0;      // Updates where at least one global front member was archived.
+  double sample_p = 0.1;
+  size_t max_archive_size = 10000;
+  size_t max_archive_gen = 0;
 
   void PrintStats() {
-    const size_t global_size  = pareto_front.GetGlobalSize();
-    const size_t current_size = pareto_front.GetCurrentSize();
-    const size_t lost_size    = pareto_front.GetLostSize();
-    const double coverage = global_size > 0
-      ? static_cast<double>(current_size) / static_cast<double>(global_size) : 1.0;
-
     std::println(
-      "Update: {}; Current front={}; All-time front={}; on front and lost={}; coverage={:.3f} "
-      "; Cumulative losses={} (selection={} mutation={})",
-      avida.GetUpdate(), current_size, global_size, lost_size, coverage,
-      pareto_front.GetTotalLossEvents(), selection_losses, mutation_losses);
+      "Update: {}; Current front={}; Prev front={}; Lost={}; Archive={}; "
+      "Recovered={}; Total losses={}",
+      avida.GetUpdate(),
+      pareto_front.GetCurrentSize(), pareto_front.GetPrevSize(),
+      pareto_front.GetLostCount(),   pareto_front.GetArchiveSize(),
+      pareto_front.GetNewlyRecovered(), pareto_front.GetTotalLossEvents()
+    );
   }
 
 public:
@@ -198,34 +271,32 @@ public:
     avida.AddSetting("TrackPareto.output_frequency", output_frequency,
       "Updates between Pareto front stat outputs");
     avida.AddSetting("TrackPareto.epsilon", epsilon,
-      "Minimum per-trait improvement required to count as dominance");
+      "Minimum per-trait improvement to count as dominance");
+    avida.AddSetting("TrackPareto.sample_p", sample_p,
+      "Probability of archiving each lost front entry (0 disables archive)");
+    avida.AddSetting("TrackPareto.max_archive_size", max_archive_size,
+      "Max entries in the archive (0 = unlimited; oldest removed first when exceeded)");
+    avida.AddSetting("TrackPareto.max_archive_gen", max_archive_gen,
+      "Generations before archive entries expire (0 = unlimited)");
   }
 
   // === Signal Listeners ===
 
   void BeforeStart() {
     pareto_front.SetEpsilon(epsilon);
+    pareto_front.SetSampleP(sample_p);
+    pareto_front.SetMaxArchiveSize(max_archive_size);
+    pareto_front.SetMaxArchiveGen(max_archive_gen);
 
-    // If we have a filename, set up the columns.
     if (output.GetFilename().size()) {
       output.SetFilepath(avida.GetDataDir());
-      output.AddColumn("Update", [this](){ return avida.GetUpdate(); });
-      output.AddColumn("Phenotypes count on current front",
-        [this](){ return pareto_front.GetCurrentSize(); });
-      output.AddColumn("Phenotypes count on all-time front",
-        [this](){ return pareto_front.GetGlobalSize(); });
-      output.AddColumn("Phenotypes lost and not yet recovered",
-        [this](){ return pareto_front.GetLostSize(); });
-      output.AddColumn("Known front coverage",
-        [this](){
-          const double current_size = static_cast<double>(pareto_front.GetCurrentSize());
-          const double global_size = static_cast<double>(pareto_front.GetGlobalSize());
-          return current_size / static_cast<double>(global_size)+0.0001;
-        });
-      output.AddColumn("Phenotypes lost ever",
-        [this](){ return pareto_front.GetTotalLossEvents(); });
-      output.AddColumn("Selection losses", selection_losses);
-      output.AddColumn("Mutation losses", mutation_losses);      
+      output.AddColumn("Update",             [this](){ return avida.GetUpdate(); });
+      output.AddColumn("Current front size", [this](){ return pareto_front.GetCurrentSize(); });
+      output.AddColumn("Prev front size",    [this](){ return pareto_front.GetPrevSize(); });
+      output.AddColumn("Lost this gen",      [this](){ return pareto_front.GetLostCount(); });
+      output.AddColumn("Archive size",       [this](){ return pareto_front.GetArchiveSize(); });
+      output.AddColumn("Recovered this gen", [this](){ return pareto_front.GetNewlyRecovered(); });
+      output.AddColumn("Total loss events",  [this](){ return pareto_front.GetTotalLossEvents(); });
     }
   }
 
@@ -233,42 +304,15 @@ public:
     output.DoOutput();
   }
 
-  /// Setup: classify losses from the previous generation, then archive the current front.
   void OnUpdateStart(size_t update) {
-    // Classify loss reasons for organisms that were on the global front last generation.
-    for (size_t id : prev_global_front_ids) {
-      if (reproduced_front_ids.count(id)) ++mutation_losses;
-      else                                ++selection_losses;
-    }
-
-    // Rotate tracking sets: current->prev, clear current and reproduced.
-    prev_global_front_ids = std::move(current_global_front_ids);
-    current_global_front_ids.clear();
-    reproduced_front_ids.clear();
-
-    // Archive the current global front and record whether any losses occurred.
-    pareto_front.ArchiveAll(update);
-    if (pareto_front.GetNewlyArchivedCount() > 0) ++loss_updates;
+    pareto_front.UpdateGen(update, avida.GetRandom());
   }
 
-  /// New organisms entering the population are tested against the Pareto front.
   template <concepts::Organism ORG_T>
   void OnPlacement(ORG_T & org) {
-    auto result = pareto_front.AddEntry(org.GetPhenotype().trait_values, avida.GetUpdate());
-    if (result == ParetoFront<emp::vector<double>>::AddResult::ADDED_GLOBAL) {
-      current_global_front_ids.insert(org.GetBiotaID());
-    }
+    pareto_front.AddEntry(org.GetPhenotype().trait_values, avida.GetUpdate());
   }
 
-  /// Track which global front members reproduced so we can classify loss reasons.
-  template <concepts::Organism ORG_T>
-  void OnOffspringInit(ORG_T & /*offspring*/, ORG_T & parent) {
-    if (prev_global_front_ids.count(parent.GetBiotaID())) {
-      reproduced_front_ids.insert(parent.GetBiotaID());
-    }
-  }
-
-  /// Output Pareto front statistics.
   void OnUpdateEnd(size_t update) {
     if (update % output_frequency == 0) {
       PrintStats();
