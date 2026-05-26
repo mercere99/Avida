@@ -72,12 +72,13 @@ private:
     case Landscape::STRUCTURE: return "structure";
     case Landscape::MULTIPATH: return "multipath";
     case Landscape::STRUCTURE_MULTIPATH: return "structure,multipath";
-    case Landscape::VALLEYS: return "valleys";
-    case Landscape::STRUCTURE_VALLEYS: return "structure,valleys";
-    case Landscape::MULTIPATH_VALLEYS: return "multipath,valleys";
+    case Landscape::VALLEYS: return "valley";
+    case Landscape::STRUCTURE_VALLEYS: return "structure,valley";
+    case Landscape::MULTIPATH_VALLEYS: return "multipath,valley";
     case Landscape::FULL: return "full";
-    case Landscape::ERROR: return "ERROR";
+    case Landscape::ERROR: ;
     }
+    return "ERROR"; 
   }
 
   [[nodiscard]] static Landscape ToLandscape(emp::String name) {
@@ -89,7 +90,7 @@ private:
     name.SetLower();
     bool has_structure = name.contains("structure") || name == "full";
     bool has_multipath = name.contains("multipath") || name == "full";
-    bool has_valleys = name.contains("valleys") || name == "full";
+    bool has_valleys = name.contains("valley") || name == "full";
     if (!has_structure && !has_multipath && !has_valleys) return Landscape::BASE;
     if (has_structure  && !has_multipath && !has_valleys) return Landscape::STRUCTURE;
     if (!has_structure && has_multipath  && !has_valleys) return Landscape::MULTIPATH;
@@ -111,12 +112,14 @@ private:
 
   template <concepts::Organism ORG_T>
   void EvalBasic(ORG_T & org) {
+    emp::Timer<"EvalBasic"> lexi_timer;
     // Trait values are directly set as genome values in "base".
     TraitValues(org) = org.GetGenome().Values();
   }
 
   template <concepts::Organism ORG_T>
   void EvalStructured(ORG_T & org) {
+    emp::Timer<"EvalStructured"> timer;
     const auto & genome = org.GetGenome();
     emp::vector<double> & trait_values = TraitValues(org);
     trait_values.resize(genome.size());
@@ -129,6 +132,7 @@ private:
 
   template <concepts::Organism ORG_T>
   void EvalMultipath(ORG_T & org) {
+    emp::Timer<"EvalMultipath"> timer;
     const auto & genome = org.GetGenome();
     emp::vector<double> & trait_values = TraitValues(org);
     trait_values.assign(genome.size(), 0.0);
@@ -138,6 +142,7 @@ private:
 
   template <concepts::Organism ORG_T>
   void EvalStructuredMultipath(ORG_T & org) {
+    emp::Timer<"EvalStructuredMultipath"> timer;
     const auto & genome = org.GetGenome();
     emp::vector<double> & trait_values = TraitValues(org);
     trait_values.resize(genome.size());
@@ -165,11 +170,13 @@ private:
 
   template <concepts::Organism ORG_T>
   void ApplyValleys(ORG_T & org) {
+    emp::Timer<"ApplyValleys"> lexi_timer;
     for (double & v : TraitValues(org)) v = ApplyValley(v);
   }
 
   template <concepts::Organism ORG_T>
   void Evaluate(ORG_T & org) {
+    emp::Timer<"Evaluate"> timer;
     // For now, always use base landscape.
     switch (landscape) {
     case Landscape::BASE:                EvalBasic(org);               break;
@@ -220,13 +227,13 @@ public:
       "File to output DOSSIER data (placed in default data directory)");
     avida.AddSetting("DOSSIER.output_frequency", output_frequency,
       "Updates between DOSSIER stat outputs");
-    avida.AddSetting("DOSSIER.genome_length", genome_length, "Maximum number of updates to run", 'l');
+    avida.AddSetting("DOSSIER.genome_length", genome_length, "Number of genes in the genomes");
     avida.AddSetting("DOSSIER.target_value", target_value, "Target value for each genome position");
     avida.AddSetting("DOSSIER.starting_count", starting_count, "Initial number of organisms to inject");
     avida.AddSetting("DOSSIER.mut_prob",
       [this](){ return mut_prob; },
       [this](double p){ mut_prob = p; mut_scale = 1.0 / emp::Log2(1.0 - mut_prob); },
-      "Per-site substitution probability", 'p');
+      "Per-site substitution probability", 'P');
     avida.AddSetting("DOSSIER.mut_size", mut_size, "standard deviation on mutation change");
     avida.AddSetting("DOSSIER.landscape",
       [this](){ return ToName(landscape); },
@@ -280,13 +287,13 @@ public:
 
   void OnStart() {
     std::println("Using diagnostic: {}", ToName(landscape));
-    output.DoOutput();
 
     genome_manager.SetSizeRange(genome_length, genome_length); // Fixed length.
     Genome<double> empty_genome{genome_manager, genome_length, 0.0};
 
     // Inject starting organisms...
     avida.Inject(empty_genome, starting_count);
+    output.DoOutput();
   }
 
   template <concepts::Organism ORG_T>
@@ -296,6 +303,7 @@ public:
 
   template <concepts::Organism ORG_T>
   void OnOffspringInit(ORG_T & offspring, ORG_T & parent) {
+    emp::Timer<"OnOffspringInit"> timer;
     // Possibly mutate this genome.
     auto & genome = offspring.GetGenome();
     emp::Random & random = avida.GetRandom();
