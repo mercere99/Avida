@@ -26,7 +26,7 @@
 
 #include "../core/Avida.hpp"
 
-template <typename SCORES_T=emp::vector<double>, bool SORTED=false>
+template <typename SCORES_T=emp::vector<double>>
 class ParetoFront {
 private:
   struct FrontEntry {
@@ -41,27 +41,27 @@ private:
 
   double epsilon = 0.0;         // Amount to beat an existing solution by to remove it
 
+  /// Remove an entry from the specified position; swap the last score_set into place.
   void Remove(size_t i, size_t cur_gen) {
     persist_times.Insert(cur_gen - front[i].insert_gen);
-    if constexpr (SORTED) {
-      // If sorted, use erase to keep in order (expensive)
-      front.erase(front.begin() + static_cast<ptrdiff_t>(i));
-    }
-    else {
-      // If not sorted, swap the last score_set into place.
-      front[i] = std::move(front.back());
-      front.pop_back();
-    }
+    front[i] = std::move(front.back());
+    front.pop_back();
     ++remove_count;
   }
 
-  // Does the test_entry cover the target?
+  /// Does the test_entry cover the target?
   bool TestCover(const SCORES_T & test_entry, const SCORES_T & target) const {
     // If test entry ever fails to cover, return false.
     for (size_t i = 0; i < target.size(); ++i) {
       if (test_entry[i] + epsilon < target[i]) { return false; }
     }
     return true;
+  }
+
+  ///
+  void SortFront() {
+    std::sort(front.begin(), front.end(),
+      [](const FrontEntry & a, const FrontEntry & b){ return a.insert_gen < b.insert_gen; });
   }
 
 public:
@@ -115,14 +115,14 @@ public:
 
   // Remove a specified number of entries from the beginning of front.
   size_t EvictCount(size_t count) {
-    emp_assert(count >= front.size());
+    emp_assert(count <= front.size());
     front.erase(front.begin(), front.begin() + static_cast<ptrdiff_t>(count));
     return count;
   }
 
   // Remove entries inserted before a specified generation.
   size_t EvictOlder(size_t min_gen) {
-    emp_assert(SORTED, "EvictOlder can only be run on sorted Pareto fronts.");
+    SortFront();
     size_t evict_count = 0;
     while (evict_count < front.size() && front[evict_count].insert_gen < min_gen) ++evict_count;
     return EvictCount(evict_count);
@@ -130,7 +130,7 @@ public:
 
   // If there are too many entries, remove excess.
   size_t CapSize(size_t max_size) {
-    emp_assert(SORTED, "CapSize can only be run on sorted Pareto fronts.");
+    SortFront();
     if (max_size >= front.size()) return 0;
     return EvictCount(front.size() - max_size);
   }
@@ -176,10 +176,10 @@ public:
 
 template <typename SCORES_T=emp::vector<double>>
 class FrontManager {
-private:
-  ParetoFront<SCORES_T> cur_front;      // Exact Pareto front of the current population
-  ParetoFront<SCORES_T> prev_front;     // Exact Pareto front from the previous generation
-  ParetoFront<SCORES_T, true> archive;  // Lost entries (possibly sampled); sort by generation lost
+private: 
+  ParetoFront<SCORES_T> cur_front;   // Exact Pareto front of the current population
+  ParetoFront<SCORES_T> prev_front;  // Exact Pareto front from the previous generation
+  ParetoFront<SCORES_T> archive;     // Lost entries (possibly sampled); sort by generation lost
 
   emp::Histogram restore_times;  // Histogram of recovery durations (gen - loss_gen)
 
