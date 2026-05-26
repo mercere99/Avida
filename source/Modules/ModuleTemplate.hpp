@@ -36,8 +36,8 @@ public:
   }
 
   void RegisterSettings() {
-    avida.AddSetting("example_setting", example_setting, "Description of example setting", 'x');
-    avida.AddSetting("example_setting2",
+    avida.AddSetting("example.setting", example_setting, "Description of example setting", 'x');
+    avida.AddSetting("example.setting2",
       [this](){ return example_setting2; },
       [this](int in){ example_setting2 = in; },
       "Description of example function-based setting", 'y');
@@ -57,8 +57,11 @@ public:
   // Triggered: Once as a run begins; typically injects starting organisms.
   void OnStart() { }
 
-  // Triggered: Every update before organisms are executed (run organisms here).
+  // Triggered: Every update before organisms are executed.
   void OnUpdateStart([[maybe_unused]] size_t update) { }
+
+  // Triggered: Every update (run organisms here).
+  void OnUpdate([[maybe_unused]] size_t update) { }
 
   // Triggered: Every update after organisms are executed (report stats / check stop here).
   void OnUpdateEnd([[maybe_unused]] size_t update) { }
