@@ -45,6 +45,11 @@ public:
     , avida(avida) { }
   ~DriverBasic() { }
 
+  void Serialize(emp::SerialPod & pod) {
+    // All settings in the SettingsManager are automatically synced.
+    pod(speed_map, cycles_executed);
+  }
+
   // === Phenotypic Traits ===
 
   struct Phenotype {
@@ -65,7 +70,7 @@ public:
   }
 
   void RegisterSettings() {
-    avida.AddSetting("base.max_updates", max_updates, "Maximum number of updates to run", 'U');
+    avida.AddSetting("base.max_updates", max_updates, "Maximum number of updates to run", 'm');
     avida.AddSetting("base.ancestor_filename",
       [this](){ return ancestor_filename.string(); },
       [this](std::string s){ ancestor_filename = s; },

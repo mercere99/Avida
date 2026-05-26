@@ -17,6 +17,7 @@
 
 #include "emp/base/vector.hpp"
 #include "emp/data/DataOutput.hpp"
+#include "emp/math/random_utils.hpp"
 #include "emp/tools/String.hpp"
 
 #include "../core/Avida.hpp"
@@ -33,12 +34,14 @@ private:
 
   size_t max_generations = 10000;             // How many updates should the run go for?
   size_t pop_size = 1000;
+  double downsample_frac = 1.0;               // Fraction of test cases to each generation
+  double epsilon = 0.0;                       // Distance from max to not be eliminated
   emp::String scores_name = "trait_values";   // Which traits to test for lexicase?
   emp::String fitness_name = "fitness";       // Which traits to test for combined fitness? (output only)
 
   void PrintStats(size_t ud) {
     std::println("Generation: {} ; PopSize: {} ; Fitness0: {}\nGenome0:{}",
-      ud, avida.GetNumOrgs(), avida.GetOrg(0).GetPhenotype().fitness,
+      ud, avida.GetNumOrgs(), avida.GetFirstOrg().GetPhenotype().fitness,
       avida.GetFirstOrg().GetGenomeSequence()
     );
   }
@@ -48,6 +51,10 @@ public:
     : ModuleBase<AVIDA_T>("DriverLexicase", "Execution", "Run an EA with Lexicase Selection.")
     , avida(avida), output("Lexicase.csv") { }
   ~DriverLexicase() { }
+
+  void Serialize(emp::SerialPod & /* pod */) {
+    // Nothing extra to serialize; everything should be in the SettingsManager
+  }
 
   // === Phenotypic Traits ===
 
@@ -59,15 +66,17 @@ public:
   }
 
   void RegisterSettings() {
-    avida.AddSetting("base.data_filename",
+    avida.AddSetting("lexicase.data_filename",
       [this](){ return output.GetFilename(); },
       [this](emp::String in){ output.SetFilename(in); },
       "File to output lexicase data (placed in default data directory)");
-    avida.AddSetting("base.output_frequency", output_frequency, "Updates between data outputs");
-    avida.AddSetting("base.pop_size", pop_size, "How big should populations be?", 'P');
-    avida.AddSetting("base.max_generations", max_generations, "Maximum umber of generations to run", 'G');
-    avida.AddSetting("base.scores_name", scores_name, "Name of trait to use for scores");
-    avida.AddSetting("base.fitness_name", fitness_name, "Name of trait to use for fitness");
+    avida.AddSetting("lexicase.output_frequency", output_frequency, "Updates between data outputs");
+    avida.AddSetting("lexicase.pop_size", pop_size, "How big should populations be?", 'p');
+    avida.AddSetting("lexicase.downsample_frac", downsample_frac, "Fraction of test cases to use each generation (1.0 for ALL)", 'D');
+    avida.AddSetting("lexicase.epsilon", epsilon, "Max score deficit to not be eliminated (0.0 = strict lexicase)", 'e');
+    avida.AddSetting("lexicase.max_generations", max_generations, "Maximum number of generations to run", 'm');
+    avida.AddSetting("lexicase.scores_name", scores_name, "Name of trait to use for scores");
+    avida.AddSetting("lexicase.fitness_name", fitness_name, "Name of trait to use for fitness");
   }
 
   size_t GetOrgReserveCount() const { return pop_size * 2; }
@@ -109,9 +118,9 @@ public:
         return score_accessor(avida.GetOrg(org_id))[test_case_id];
       };
 
-      // Find highest score on this test case, then eliminate all candidates below it.
-      const double max_score = score_fun(parent_bits.MaxIndex(score_fun));
-      parent_bits.ClearIf([&](size_t org_id){ return score_fun(org_id) < max_score; });
+      // Find highest score on this test case, then eliminate all candidates below the threshold.
+      const double score_threshold = score_fun(parent_bits.MaxIndex(score_fun)) - epsilon;
+      parent_bits.ClearIf([&](size_t org_id){ return score_fun(org_id) < score_threshold; });
     }
 
     // Choose randomly from the surviving candidates.
@@ -119,6 +128,7 @@ public:
   }
 
   void OnUpdate(size_t /*update*/) {
+    emp::Timer<"OnUpdate"> fun_timer;
     // Look up the typed scores accessor once per update (avoids per-offspring map lookups).
     const auto & score_accessor =
       avida.template GetTypedTrait<emp::vector<double>>(scores_name).GetConstAccessFun();
@@ -132,10 +142,20 @@ public:
     emp::vector<size_t> test_case_ids(num_test_cases);
     std::iota(test_case_ids.begin(), test_case_ids.end(), 0);
 
-    // Run pop_size rounds of lexicase selection to generate the next generation.
-    for (size_t round = 0; round < pop_size; ++round) {
-      avida.DivideOrg(SelectParent(score_accessor, parent_bits, test_case_ids));
+    // Set up downsampling
+    const size_t tests_used = std::max<size_t>(num_test_cases * downsample_frac, 1);
+    if (tests_used < num_test_cases) {
+      emp::Shuffle(avida.GetRandom(), test_case_ids, tests_used);
     }
+
+    // Run pop_size rounds of lexicase selection to generate the next generation.
+    emp::Timer<"Do Lexicase"> lexi_timer;
+    for (size_t round = 0; round < pop_size; ++round) {      
+      const size_t parent_id =
+        SelectParent(score_accessor, parent_bits, std::span{test_case_ids}.first(tests_used));
+      avida.DivideOrg(parent_id);
+    }
+    lexi_timer.Stop();
 
     // Remove the parent generation now that offspring have been placed.
     for (size_t id : parent_bits) avida.DeleteOrg(id);

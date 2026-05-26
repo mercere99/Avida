@@ -47,13 +47,10 @@ public:
     , avida(avida), output("Tournament.csv") { }
   ~DriverTournament() { }
 
-  // === Phenotypic Traits ===
-
-  struct Phenotype {
-  };
-
-  void RegisterTraits() {
-    // AVIDA_REQUIRE_TRAIT(size_t, generation);
+  void Serialize(emp::SerialPod & pod) {
+    // All settings in the SettingsManager are automatically synced.
+    emp_assert(pending_offspring.size() == 0);
+    pod(speed_map, total_speed, cycles_executed);
   }
 
   void RegisterSettings() {
@@ -62,9 +59,9 @@ public:
       [this](emp::String in){ output.SetFilename(in); },
       "File to output tournament data (placed in default data directory)");
     avida.AddSetting("base.output_frequency", output_frequency, "Updates between data outputs");
-    avida.AddSetting("base.tourny_size", tourny_size, "How big should tournaments be?", 'T');
-    avida.AddSetting("base.pop_size", pop_size, "How big should populations be?", 'P');
-    avida.AddSetting("base.max_generations", max_generations, "Maximum umber of generations to run", 'G');
+    avida.AddSetting("base.tourny_size", tourny_size, "How big should tournaments be?", 't');
+    avida.AddSetting("base.pop_size", pop_size, "How big should populations be?", 'p');
+    avida.AddSetting("base.max_generations", max_generations, "Maximum number of generations to run", 'G');
     avida.AddSetting("base.fitness_name", fitness_name, "Name of trait to use for fitness");
   }
 

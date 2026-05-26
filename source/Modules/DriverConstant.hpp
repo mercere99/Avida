@@ -40,6 +40,12 @@ public:
     , avida(avida) { }
   ~DriverConstant() { }
 
+  void Serialize(emp::SerialPod & pod) {
+    // All settings in the SettingsManager are automatically synced.
+    emp_assert(pending_offspring.size() == 0);
+    pod(cycles_executed);
+  }
+
   void RegisterSettings() {
     avida.AddSetting("base.max_updates", max_updates, "Maximum number of updates to run", 'U');
     avida.AddSetting("base.ancestor_filename",

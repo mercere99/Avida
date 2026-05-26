@@ -35,7 +35,7 @@ private:
   void PrintStats(size_t ud) {
     std::cout << "UD:" << ud
               << "  PopSize:" << avida.GetNumOrgs()
-              << "  Generation: " << avida.GetAveTrait("generation")
+              << "  Generation: " << avida.CalcTraitAve("generation")
               << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
               << std::endl;
   }
@@ -46,6 +46,12 @@ public:
         "Execute organisms in order based on metabolic rate (buffering callbacks).")
     , avida(avida) { }
   ~DriverBuffered() { }
+
+  void Serialize(emp::SerialPod & pod) {
+    // All settings in the SettingsManager are automatically synced.
+    emp_assert(pending_offspring.size() == 0);
+    pod(speed_map, total_speed, cycles_executed);
+  }
 
   // === Phenotypic Traits ===
 

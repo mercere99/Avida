@@ -52,6 +52,13 @@ public:
         "Execute organisms in order based on metabolic rate (buffering callbacks).")
     , avida(avida) { }
 
+
+  void Serialize(emp::SerialPod & pod) {
+    // All settings in the SettingsManager are automatically synced.
+    emp_assert(pending_offspring.size() == 0);
+    pod(speed_map, total_speed, cycles_executed);
+  }
+
   // === Phenotypic Traits ===
 
   struct Phenotype {
