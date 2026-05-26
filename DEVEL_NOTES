@@ -1,27 +1,34 @@
  NEXT MODULES:
- - Add module TrackGenotypes
- - Add module GridFacing (with dependency on PopGrid)
- - Add module PrintGrid that prints grid every X updates (with dependency on PopGrid)
  - Add module EnvironmentLogic9 (it should register tasks and trigger OnTask as needed)
+ - Add module PrintGrid that prints grid every X updates (with dependency on PopGrid)
+
  - Add module OutputManager for printing to screen or files
  - Add module Reactions that listens for OnTask to provide rewards?
  - Add module LimitedResources that listens for OnTask
  - Add module PopulationDemes
  - Add module PhylogenyTracker
+
+ - Add module GridFacing (with dependency on PopGrid)
  - Add module EventManager for dynamic events (population bottlenecks, environment changes, etc.)
+ - Add GENERIC module that takes a set of other modules and allows you to decide at run time which one is used.
  
 CORE FEATURES / REFACTORING
- - Switch from pre-defined concepts for plug-in member functions to automated ones.
+ - Serialization
+ - Tools to ensure bounds on config inputs.
+ - When calling a signal function, allow for fewer args.  For example, OnUpdate() instead of OnUpdate(size_t update)
  - Improve command-line handling:
-   - Add flag to generate config files
    - Control if configs are printed by scope or not (e.g., "grid { width=10; height=10 }" vs. "grid.width=10; grid.height=10;")
    - Allow a more dynamic system of single-char flags to avoid collisions across modules.
    - Create a list of help options based on modules with OnHelp() defined.
+ - Clean up output file handling.  All output files should be managed in Avida object; modules simply add outputs to them.
+ - Setup pre-defined order for module types to be run? (sort when building PlugInManager)
+   - OrgModule=0, DriverModule=1, PopulationModule=2, MutationModule=3, AnalysisModule=4, IOModule=5, etc. 
+   - Should be overridable.  Perhaps have a priority associated with each module determined by enumerated type BUT have extras
  - Make a master list of module TYPES with rules on how each type should be managed (e.g., one pop manager, any number of analysis modules)
  - Test out alternative VM
- - Allow hardware variant to form special type of organism that can use any listed hardware.
+ - Add hardware variant that can redirect to any listed hardware.
 
-LONGER TERM:
+LONG TERM:
  - Simple language that compiles to Avida modules.
 
 MODULE TYPES:
