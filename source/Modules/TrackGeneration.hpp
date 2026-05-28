@@ -24,6 +24,10 @@ public:
     , avida(avida) {}
   ~TrackGeneration() {}
 
+  void Serialize(emp::SerialPod & /* pod */) {
+    // Nothing to serialize
+  }
+
   // === Phenotypic Traits ===
 
   struct Phenotype {

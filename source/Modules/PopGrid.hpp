@@ -44,6 +44,10 @@ public:
   { }
   ~PopGrid() { }
 
+  void Serialize(emp::SerialPod & pod) {
+    pod(org_grid);
+  }
+
   // === Phenotypic Traits ===
 
   struct Phenotype {

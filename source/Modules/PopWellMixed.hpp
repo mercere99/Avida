@@ -38,6 +38,10 @@ public:
     , avida(avida) { }
   ~PopWellMixed() { }
 
+  void Serialize(emp::SerialPod & /* pod */) {
+    // Nothing extra to serialize; everything should be in the SettingsManager
+  }
+
   void RegisterSettings() {
     avida.AddSetting("pop.cap", pop_cap, "Max number of organism allows in population.");
   }

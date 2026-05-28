@@ -25,6 +25,12 @@ public:
     : ModuleBase<AVIDA_T>("ModuleName", "ModuleType", "Module description text"), avida(avida) { }
   ~ModuleTemplate() { }
 
+  void Serialize(emp::SerialPod & /* pod */) {
+    // Everything in the SettingsManager will be automatically serialized
+    // For all other internal state do:
+    // pod(internal_var1, internal_var2);
+  }
+
   // === General Configuration ===
 
   struct Phenotype {

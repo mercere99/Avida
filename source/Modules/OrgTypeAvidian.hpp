@@ -27,6 +27,10 @@ public:
     , avida(avida) {}
   ~OrgTypeAvidian() {}
 
+  void Serialize(emp::SerialPod & /* pod */) {
+    // Nothing extra to serialize; inst_set should be rebuilt correctly.
+  }
+
   // === Phenotypic Traits ===
 
   struct Phenotype {

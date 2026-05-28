@@ -21,7 +21,7 @@ class LogModule : public ModuleBase<AVIDA_T> {
 private:
   AVIDA_T & avida;
   emp::Ptr<std::ostream> os_ptr = &std::cout;
-  std::string filename{};  // File to print to; empty mean standard out.
+  std::string filename{};  // File to print to; empty means standard out.
 
   template <typename... Ts>
   void Log(Ts... args) {
@@ -33,6 +33,10 @@ public:
     : ModuleBase<AVIDA_T>("LogModule", "Analysis", "Record each time a signal is triggered")
     , avida(avida) { }
   ~LogModule() { if (filename.size()) os_ptr.Delete(); }
+
+  void Serialize(emp::SerialPod & /* pod */) {
+    // Nothing extra to serialize; everything should be in the SettingsManager
+  }
 
   // === Configuration Helpers ===
 

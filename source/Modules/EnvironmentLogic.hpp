@@ -94,6 +94,10 @@ public:
     , avida(avida) {}
   ~EnvironmentLogic() {}
 
+  void Serialize(emp::SerialPod & /* pod */) {
+    // Nothing extra to serialize; everything should be in the SettingsManager
+  }
+
   constexpr static uint32_t PerformOp(LogicOp op, uint32_t valA, uint32_t valB) {
     switch (op) {
     case LogicOp::FALSE:       return 0;

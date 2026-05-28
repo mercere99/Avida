@@ -39,6 +39,10 @@ public:
 
   void SetRank(int8_t in) { rank = in; }
   void SetTag(int8_t in)  { tag_id = in; }
+
+  void Serialize(emp::SerialPod & pod) {
+    pod(id, total_count, cur_count, rank, tag_id);
+  }
 };
 
 template <typename AVIDA_T>
@@ -143,6 +147,10 @@ public:
     : ModuleBase<AVIDA_T>("TrackGenotypes", "Analysis", "Track identical genomes.")
     , avida(avida) {}
   ~TrackGenotypes() {}
+
+  void Serialize(emp::SerialPod & pod) {
+    pod(total_genotypes, id_map);
+  }
 
   // === Phenotypic Traits ===
 

@@ -202,6 +202,10 @@ public:
     { }
   ~OrgTypeDOSSIER() {}
 
+  void Serialize(emp::SerialPod & /* pod */) {
+    // Nothing extra to serialize; everything should be in the SettingsManager
+  }
+
   static constexpr size_t npos = static_cast<size_t>(-1);
 
   // === Phenotypic Traits ===

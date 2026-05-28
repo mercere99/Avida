@@ -27,6 +27,10 @@ public:
     : ModuleBase<AVIDA_T>("MutationsDivideSub", "Mutation", "Handle substitution mutations on birth."), avida(avida) { }
   ~MutationsDivideSub() { }
 
+  void Serialize(emp::SerialPod & /* pod */) {
+    // Nothing extra to serialize; everything should be in the SettingsManager
+  }
+
   void RegisterSettings() {
     avida.AddSetting("mutations.substitution_prob",
       [this](){ return substitution_prob; },
