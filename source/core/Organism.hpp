@@ -37,6 +37,11 @@ public:
     if constexpr (HasHardware()) phenotype.hardware.Reset(genome);
   }
 
+  Organism(emp::SerialPod & pod) {
+    pod(biota_id, global_id, is_mutant, genome);
+    if constexpr (HasHardware()) phenotype.hardware.Reset(genome);
+  }
+
   ~Organism() = default;
 
   Organism & operator=(const Organism&) = delete;  // No direct copying of organism is allowed.
@@ -114,6 +119,10 @@ public:
     os << "Genome:" << GetGenomeSequence()
       << " biota_id:" << biota_id
       << " global_id:" << global_id;
+  }
+
+  void SerialSave(emp::SerialPod & pod) {
+    pod(biota_id, global_id, is_mutant, genome);
   }
 
   /// Check to make sure there aren't any problems with this organism object.
