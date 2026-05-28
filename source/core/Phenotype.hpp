@@ -57,6 +57,8 @@ public:
   [[nodiscard]] virtual double AsDouble(const organism_t &) const = 0;
   [[nodiscard]] virtual emp::String AsString(const organism_t &) const = 0;
   [[nodiscard]] virtual std::span<double> AsSpan(const organism_t &) const = 0;
+
+  virtual void SerializeOrg(emp::SerialPod & pod, organism_t & org) = 0;
 };
 
 // Typed trait: stores direct organism-level accessors, avoiding virtual dispatch.
@@ -115,12 +117,17 @@ public:
       return std::span<double>{};
     }
   }
+
+  void SerializeOrg(emp::SerialPod & pod, organism_t & org) override {
+    pod(get_fun(org));
+  }
 };
 
 template <typename AVIDA_T>
 class TraitManager {
 private:
   using trait_base_t = TraitBase<AVIDA_T>;
+  using organism_t = typename AVIDA_T::organism_t;
   emp::RobinHoodMap<emp::String, emp::Ptr<trait_base_t>> trait_map;
 
 public:
@@ -163,5 +170,11 @@ public:
   void Clear() {
     for (auto [name, ptr] : trait_map) ptr.Delete();
     trait_map.clear();
+  }
+
+  void SerializeOrg(emp::SerialPod & pod, organism_t & org) {
+    for (auto [_, trait_ptr] : trait_map) {
+      trait_ptr->SerializeOrg(pod, org);
+    }
   }
 };
