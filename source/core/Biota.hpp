@@ -99,6 +99,11 @@ public:
     num_orgs = 0;
   }
 
+  /// Run each active organism through a provided function.
+  void ForEachOrg(auto fun) {
+    for (size_t index : active_bits) { fun(orgs[index]); }
+  }
+
   /// Return the biota ID of the organisms with the minimum value in this function.
   template <std::invocable<const organism_t &> FUN_T>
   [[nodiscard]] size_t FindMinimumID(const FUN_T & fun) const {
@@ -156,6 +161,10 @@ public:
       total += fun(orgs[index]);
     }
     return total / GetNumOrgs();
+  }
+
+  void Serialize(emp::SerialPod & pod) {
+    pod(orgs, active_bits, num_orgs, total_orgs);
   }
 
   bool OK() {
