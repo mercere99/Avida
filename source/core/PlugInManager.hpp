@@ -20,7 +20,7 @@ private:
 
   std::tuple<PLUG_IN_Ts...> plug_ins;
 
-// === Signals ===
+  // === Signals ===
 
   // Pass all plug-ins through signal_fun, ignoring returns.
   void TriggerSignal(auto signal_fun) {
@@ -70,6 +70,11 @@ public:
     emp::vector<emp::String> out;
     std::apply([&out](auto &... p){ out = { p.GetType()... }; }, plug_ins);
     return out;
+  }
+
+  // Call Serialize on ALL plug-ins; function is required to avoid accidental failures to save.
+  void Serialize(emp::SerialPod & pod) {
+    std::apply([&pod](auto &... p){ (pod(p), ...); }, plug_ins);
   }
 
   // Build out all of the individual signals.
