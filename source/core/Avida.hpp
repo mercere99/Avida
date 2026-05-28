@@ -9,6 +9,7 @@
  */
 
 #include <filesystem>  // std::filesystem::path
+#include <fstream>     // std::ifstream, std::ofstream
 
 #include "emp/base/Ptr.hpp"
 #include "emp/base/vector.hpp"
@@ -18,6 +19,7 @@
 #include "emp/datastructs/map_utils.hpp"
 #include "emp/datastructs/UnorderedIndexMap.hpp"
 #include "emp/meta/TypePack.hpp"
+#include "emp/serialize/SerialPod.hpp"
 #include "emp/tools/Timer.hpp"
 
 #include "Biota.hpp"
@@ -86,7 +88,7 @@ private:
 
 public:
   Avida() : plug_ins(*this) {
-    AddSetting("random.seed",
+    AddSetting("base.random_seed",
       [this](){ return random.GetSeed(); },
       [this](size_t new_seed){ random.ResetSeed(new_seed); },
       "Main random number seed", 's', "0");
@@ -97,7 +99,7 @@ public:
     AddSetting("base.data_dir",
       [this](){ return data_dir.string(); },
       [this](const emp::String & s){ data_dir = s.str(); },
-      "Default directory to write data files.", 'D');
+      "Default directory to write data files.", 'd');
 
     AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
@@ -107,13 +109,20 @@ public:
         Exit();
       }, "Print help info for this program", 'h', /*max_args=*/ 1);
 
+    AddKeyword("config",
+      [this](emp::vector<emp::String> kw_args) {
+        emp::String filename = kw_args.size() ? kw_args[0] : "Avida.cfg";
+        std::println("Loading config file '{}'...", filename);
+        settings.Load(filename);
+      }, "Load a config file with the provided name (default: Avida.cfg)", 'c', /*max_args=*/ 1);
+
     AddKeyword("generate",
       [this](emp::vector<emp::String> kw_args) {
         emp::String filename = kw_args.size() ? kw_args[0] : "Avida.cfg";
-        std::println("Generating config file '", filename, "'...");
+        std::println("Generating config file '{}'...", filename);
         settings.Save(filename);
         Exit();
-      }, "Generate a config file with the provided name (or Avida.cfg)", 'g', /*max_args=*/ 1);
+      }, "Generate a config file with the provided name (default: Avida.cfg) and stop", 'g', /*max_args=*/ 1);
 
     // Allow plug-ins to register anything that they need to...
     plug_ins.RegisterTraits();    // Set up any traits in the phenotype.
@@ -132,6 +141,7 @@ public:
   [[nodiscard]] const fs::path & GetDataDir() { return data_dir; }  
   [[nodiscard]] auto & GetOrg(this auto & self, size_t id) { return self.biota[id]; }
   [[nodiscard]] auto & GetOrgs(this auto & self) { return self.biota.GetOrgs(); }
+  [[nodiscard]] auto & GetBiota(this auto & self) { return self.biota; }
   [[nodiscard]] bool IsOccupied(size_t id) const { return biota.IsActive(id); }
   [[nodiscard]] uint32_t GetNumOrgs() const { return biota.GetNumOrgs(); }
   [[nodiscard]] size_t GetBiotaSize() const { return biota.GetSize(); }
@@ -177,6 +187,7 @@ public:
   }
 
   [[nodiscard]] auto & FindOrg_MinTrait(const emp::String & name) const {
+    emp_assert(biota.GetNumOrgs() > 0);
     const auto & trait = GetTrait(name);
     const size_t id = biota.FindMinimumID([&trait](const organism_t & org){
       return trait.AsDouble(org);
@@ -185,6 +196,7 @@ public:
   }
 
   [[nodiscard]] auto & FindOrg_MaxTrait(const emp::String & name) const {
+    emp_assert(biota.GetNumOrgs() > 0);
     const auto & trait = GetTrait(name);
     const size_t id = biota.FindMaximumID([&trait](const organism_t & org){
       return trait.AsDouble(org);
@@ -324,8 +336,13 @@ public:
   void DoUpdate() {
     emp_assert(GetNumOrgs() > 0, "Running DoUpdate() with no organisms.");
     ++update;
+    emp::Timer<"plug_ins.OnUpdateStart()"> timer1;
     plug_ins.OnUpdateStart(update);  // Set up for a new update
+    timer1.Stop();
+    emp::Timer<"plug_ins.OnUpdate()"> timer2;
     plug_ins.OnUpdate(update);       // Run organisms
+    timer2.Stop();
+    emp::Timer<"plug_ins.OnUpdateEnd()"> timer3;
     plug_ins.OnUpdateEnd(update);    // Report stats / check stop condition
   }
 
@@ -362,6 +379,8 @@ public:
   }
 
   void Exit() {
+    SaveState("final_save");
+
     if (run_state == RunState::EXITING) return; // Already exiting.
     run_state = RunState::EXITING;              // Change run_state in case check by plug-ins
     plug_ins.BeforeExit();                      // Notify plug-ins of impending exit
@@ -369,5 +388,32 @@ public:
     trait_man.Clear();                          // Clean up traits
   }
 
-  bool OK() { return biota.OK(); }
+  void Serialize(emp::SerialPod & pod) {
+    // Note: `trait_man` is constructed at the start and should re-build correctly. 
+    pod(plug_ins,
+        settings,
+        data_dir,
+        update,
+        random,
+        biota,
+        run_state
+       );
+
+    // Use trait manager to save/load phenotypes.
+    biota.ForEachOrg([&](auto & org){ trait_man.SerializeOrg(pod, org); });
+  }
+
+  void SaveState(const emp::String & filename) {
+    std::ofstream ofs{filename.str()};
+    emp::SerialPod pod{ofs};
+    pod(*this);
+  }
+
+  void LoadState(const emp::String & filename) {
+    std::ifstream ifs{filename.str()};
+    emp::SerialPod pod{ifs};
+    pod(*this);
+  }
+
+    bool OK() { return biota.OK(); }
 };
