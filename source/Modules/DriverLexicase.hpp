@@ -172,33 +172,44 @@ public:
     return score_matrix;
   }
 
-  /// Given a set of test cases where the first num_tests have been chosen, pick the remaining index
-  /// that is most informative.
-  [[nodiscard]] size_t FindNextInformativeID(
-    const emp::vector<size_t> & test_case_ids,
-    size_t num_tests,
-    const emp::vector<emp::BitVector> & score_matrix) const
+  /// Farthest Point Sampling: fill the first tests_used slots of test_case_ids with the most
+  /// mutually-distant test cases (by BitVector Hamming distance on org profiles).
+  void InformedDownsample(
+    emp::vector<size_t> & test_case_ids,
+    const emp::BitVector & org_set,
+    const auto & score_accessor,
+    size_t tests_used) const
   {
-    emp_assert(num_tests > 0, "At least one test must be locked in for others to be informative.");
-    emp_assert(num_tests < test_case_ids.size(), "No test cases available to select.");
+    static emp::vector<size_t> min_distances;  // Smallest distances to current set.
 
-    // Collect profiles of the already-chosen test cases (order in test_case_ids != order in score_matrix).
-    emp::vector<emp::BitVector> used_profiles;
-    used_profiles.reserve(num_tests);
-    for (size_t i = 0; i < num_tests; ++i) used_profiles.push_back(score_matrix[test_case_ids[i]]);
-    auto used_span = std::span{used_profiles};
+    const size_t num_test_cases = test_case_ids.size();
+    auto score_matrix = CalcScoreMatrix(score_accessor, org_set);
 
-    // Among the remaining candidates, find the position (in test_case_ids) with max min-distance.
-    size_t max_dist = score_matrix[test_case_ids[num_tests]].CalcMinDistance(used_span);
-    size_t max_id = num_tests;  // index into test_case_ids, not into score_matrix
-    for (size_t test_pos = num_tests + 1; test_pos < test_case_ids.size(); ++test_pos) {
-      size_t test_dist = score_matrix[test_case_ids[test_pos]].CalcMinDistance(used_span);
-      if (test_dist > max_dist) {
-        max_dist = test_dist;
-        max_id = test_pos;
+    // Pick the first test case randomly; seed min_distances with distances from it.
+    const size_t first = avida.GetRandom().GetUInt(num_test_cases);
+    std::swap(test_case_ids[0], test_case_ids[first]);
+    min_distances.resize(num_test_cases);
+    for (size_t i = 1; i < num_test_cases; ++i) {
+      min_distances[i] = score_matrix[test_case_ids[i]].CalcDistance(score_matrix[test_case_ids[0]]);
+    }
+
+    // Repeatedly pick the remaining candidate farthest from the chosen set, then update min_distances.
+    for (size_t num_chosen = 1; num_chosen < tests_used; ++num_chosen) {
+      // Find the candidate with the largest min-distance (linear scan over remaining).
+      size_t best_pos = num_chosen;
+      for (size_t i = num_chosen + 1; i < num_test_cases; ++i) {
+        if (min_distances[i] > min_distances[best_pos]) best_pos = i;
+      }
+      std::swap(test_case_ids[num_chosen], test_case_ids[best_pos]);
+      std::swap(min_distances[num_chosen], min_distances[best_pos]);
+
+      // One CalcDistance per remaining candidate to update min_distances.
+      for (size_t i = num_chosen + 1; i < num_test_cases; ++i) {
+        const size_t d =
+          score_matrix[test_case_ids[i]].CalcDistance(score_matrix[test_case_ids[num_chosen]]);
+        if (d < min_distances[i]) min_distances[i] = d;
       }
     }
-    return max_id;
   }
 
   [[nodiscard]] std::span<size_t> GetTestCases(
@@ -216,20 +227,10 @@ public:
 
     const size_t tests_used = std::max<size_t>(num_test_cases * downsample_frac, 1);
 
-    // Test if we need to downsample.
     if (tests_used < num_test_cases) {
       if (informed_downsample) {
-        // Informed downsample: Start random and repeatedly pick most non-overlapping cases.
-        auto score_matrix = CalcScoreMatrix(score_accessor, org_set);
-        size_t case_id = avida.GetRandom().GetUInt(test_case_ids.size());
-        std::swap(test_case_ids[0], test_case_ids[case_id]);
-        
-        for (size_t num_tests = 1; num_tests < tests_used; ++num_tests) {
-          case_id = FindNextInformativeID(test_case_ids, num_tests, score_matrix);
-          std::swap(test_case_ids[num_tests], test_case_ids[case_id]);
-        }
+        InformedDownsample(test_case_ids, org_set, score_accessor, tests_used);
       } else {
-        // Do a random downsample.
         emp::Shuffle(avida.GetRandom(), test_case_ids, tests_used);
       }
       return std::span{test_case_ids}.first(tests_used);
