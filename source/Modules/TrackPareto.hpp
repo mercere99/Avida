@@ -32,6 +32,10 @@ private:
   struct FrontEntry {
     SCORES_T score_set;
     size_t insert_gen = 0;  // Generation when this entry was added to front
+
+    void Serialize(emp::SerialPod & pod) {
+      pod(score_set, insert_gen);
+    }
   };
 
   emp::vector<FrontEntry> front;
@@ -65,6 +69,10 @@ private:
   }
 
 public:
+  void Serialize(emp::SerialPod & pod) {
+    pod(front, add_count, remove_count, persist_times);
+  }
+
   [[nodiscard]] size_t GetSize() const { return front.size(); }
   [[nodiscard]] const emp::vector<FrontEntry> & GetEntries() const { return front; }
   [[nodiscard]] size_t GetAddCount() const { return add_count; }
@@ -106,7 +114,6 @@ public:
   size_t PruneCovered(const ParetoFront & in, size_t cur_gen) {
     size_t remove_count = 0;
     for (size_t i = 0; i < front.size();) {
-      // @CAO If we are removing a bunch from a sorted front, we could do all at once.
       if (in.IsCovered(front[i].score_set)) { Remove(i, cur_gen); ++remove_count; }
       else ++i;
     };
@@ -195,7 +202,12 @@ private:
   size_t total_loss_events = 0;   // Cumulative lost_count across all rotations
 
 public:
-  // === Configuration ===
+  void Serialize(emp::SerialPod & pod ) {
+    pod(cur_front, prev_front, archive, restore_times, epsilon, sample_p, max_archive_size,
+        max_archive_gen, lost_count, newly_recovered, total_loss_events);
+  }
+
+// === Configuration ===
   void SetEpsilon(double e)        { cur_front.SetEpsilon(e); prev_front.SetEpsilon(e); archive.SetEpsilon(e); }
   void SetSampleP(double p)        { sample_p = p; }
   void SetMaxArchiveSize(size_t s) { max_archive_size = s; }
@@ -277,6 +289,10 @@ public:
     : ModuleBase<AVIDA_T>("TrackPareto", "Analysis", "Track the current (and cumulative) Pareto Front.")
     , avida(avida), output("Pareto.csv") {}
   ~TrackPareto() {}
+
+  void Serialize(emp::SerialPod & pod ) {
+    pod(pareto_front);
+  }
 
   void RegisterSettings() {
     avida.AddSetting("TrackPareto.data_filename",
