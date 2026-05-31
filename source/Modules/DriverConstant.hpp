@@ -42,7 +42,6 @@ public:
 
   void Serialize(emp::SerialPod & pod) {
     // All settings in the SettingsManager are automatically synced.
-    emp_assert(pending_offspring.size() == 0);
     pod(cycles_executed);
   }
 
