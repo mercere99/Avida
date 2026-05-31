@@ -368,6 +368,7 @@ public:
     biota.Reserve(plug_ins.CountReservedOrgs() + 1);
     SetupDataDir();
     plug_ins.BeforeStart(); // Trigger plug-ins to initialize.
+    settings.PrintStatus();
     plug_ins.OnStart();     // Trigger injection of start organisms.
   }
 
@@ -379,10 +380,9 @@ public:
   }
 
   void Exit() {
-    SaveState("final_save");
-
     if (run_state == RunState::EXITING) return; // Already exiting.
     run_state = RunState::EXITING;              // Change run_state in case check by plug-ins
+    SaveState("final_save");
     plug_ins.BeforeExit();                      // Notify plug-ins of impending exit
     biota.Clear();                              // Clean up organisms
     trait_man.Clear();                          // Clean up traits
