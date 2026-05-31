@@ -39,8 +39,6 @@ private:
   // internal tool for faster location of mutated positions.
   double mut_scale{1.0 / emp::Log2(1.0 - mut_prob)};
 
-  GenomeManager<double> genome_manager;
-
   enum class Landscape { // Deceptive? Diverse? Ordered?
     BASE,                // 0          0        0
     STRUCTURE,           // 0          0        1
@@ -292,8 +290,7 @@ public:
   void OnStart() {
     std::println("Using diagnostic: {}", ToName(landscape));
 
-    genome_manager.SetSizeRange(genome_length, genome_length); // Fixed length.
-    Genome<double> empty_genome{genome_manager, genome_length, 0.0};
+    Genome<double> empty_genome{100.0, genome_length, 0.0};
 
     // Inject starting organisms...
     avida.Inject(empty_genome, starting_count);
