@@ -42,8 +42,6 @@ private:
   size_t num_insts = 0;
   size_t num_nops = 0;
 
-  genome_t::manager_t genome_manager;
-
 public:
   [[nodiscard]] size_t size() const noexcept { return num_insts; }
   [[nodiscard]] size_t NumInsts() const noexcept { return num_insts; }
@@ -100,7 +98,6 @@ public:
 
     info[num_insts] = InstInfo{name, id, symbol};
     funs[num_insts] = fun;
-    genome_manager.SetMaxValue(id); // Max values is this inst id.
 
     ++num_insts;
   }
@@ -125,7 +122,6 @@ public:
 
   /// Rebuild an existing genome based on a string sequence.
   void BuildGenome(genome_t & genome, const emp::String & sequence) const noexcept {
-    emp_assert(genome.HasManager());
     genome.Clear();
     for (char symbol : sequence) {
       const auto id = GetID(symbol);
@@ -136,7 +132,7 @@ public:
 
   /// Build a genome based on a string sequence.
   [[nodiscard]] genome_t BuildGenome(const emp::String & sequence) const noexcept {
-    genome_t genome(genome_manager);
+    genome_t genome(num_insts);
     BuildGenome(genome, sequence);
     return genome;
   }
@@ -147,7 +143,6 @@ public:
     emp_assert(num_insts > 0);
     emp_assert(num_nops <= num_insts);
     emp_assert(num_nops > 0 || nop_prob == 0.0);
-    emp_assert(genome.HasManager());
 
     const size_t non_nops = num_insts - num_nops;
     emp_assert(non_nops > 0 || nop_prob == 1.0);
@@ -163,7 +158,7 @@ public:
   }
 
   [[nodiscard]] std::expected<genome_t, emp::String> LoadGenome(std::istream & is) const {
-    genome_t genome(genome_manager);
+    genome_t genome(num_insts);
     emp::File file(is);
     file.RemoveComments("//");
     file.CompressWhitespace();

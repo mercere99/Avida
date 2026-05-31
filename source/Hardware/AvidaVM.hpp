@@ -35,7 +35,7 @@ public:
   static constexpr size_t MAX_GENOME_SIZE = 2048; // Max genome length.
 
   // Configured types.
-  using data_t = int;                             // Data type used by this VM
+  using data_t = int32_t;                             // Data type used by this VM
   using mem_t = emp::array<data_t, MEM_SIZE>;     // Memory is a fixed size
   using genome_t = Genome<uint8_t>;               // Genomes capped at 256 instructions
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM
@@ -193,6 +193,10 @@ public:
   AvidaVM(AvidaVM &&) = default;
   AvidaVM(const inst_set_t & inst_set, const genome_t & genome=genome_t{})
     : genome(genome), inst_set_ptr(&inst_set) { Reset(); }
+
+  void Serialize(emp::SerialPod & pod) {
+    pod(genome, memory, heads, stacks, error_count, biota_id);
+  }
 
   // === Accessors ===
   
