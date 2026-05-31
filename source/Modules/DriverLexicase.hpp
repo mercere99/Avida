@@ -32,13 +32,14 @@ private:
   emp::DataOutput output;
   size_t output_frequency = 100;
 
-  size_t max_generations = 10000;             // How many updates should the run go for?
-  size_t pop_size = 1000;
-  double downsample_frac = 1.0;               // Fraction of test cases to each generation
-  bool informed_downsample = false;           // Should we use "informed" downsampling?
-  double epsilon = 0.0;                       // Distance from max to not be eliminated
-  emp::String scores_name = "trait_values";   // Which traits to test for lexicase?
-  emp::String fitness_name = "fitness";       // Which traits to test for combined fitness? (output only)
+  size_t max_generations = 10000;            // How many updates should the run go for?
+  size_t pop_size = 1000;                    // Number of organisms to place in next gen
+  double epsilon = 0.0;                      // Distance from max to not be eliminated
+  double downsample_frac = 1.0;              // Fraction of test cases to each generation
+  bool informed_downsample = false;          // Should we use "informed" downsampling?
+  double info_epsilon = 0.0;                 // Max dist for scores to count as "same" info tests
+  emp::String scores_name = "trait_values";  // Traits to use for lexicase scores
+  emp::String fitness_name = "fitness";      // Trait to output for "combined" fitness
 
   void PrintStats(size_t ud) {
     std::println("Generation: {} ; PopSize: {} ; Fitness0: {}\nGenome0:{}",
@@ -73,9 +74,10 @@ public:
       "File to output lexicase data (placed in default data directory)");
     avida.AddSetting("lexicase.output_frequency", output_frequency, "Updates between data outputs");
     avida.AddSetting("lexicase.pop_size", pop_size, "How big should populations be?", 'p');
+    avida.AddSetting("lexicase.epsilon", epsilon, "Max score deficit to not be eliminated (0.0 = strict lexicase)", 'e');
     avida.AddSetting("lexicase.downsample_frac", downsample_frac, "Fraction of test cases to use each generation (1.0 for ALL)", 'D');
     avida.AddSetting("lexicase.informed_downsample", informed_downsample, "Should we use informed downsampling? (true/false)");
-    avida.AddSetting("lexicase.epsilon", epsilon, "Max score deficit to not be eliminated (0.0 = strict lexicase)", 'e');
+    avida.AddSetting("lexicase.info_epsilon", info_epsilon, "Max dist for scores to count as 'same' info tests");
     avida.AddSetting("lexicase.max_generations", max_generations, "Maximum number of generations to run", 'm');
     avida.AddSetting("lexicase.scores_name", scores_name, "Name of trait to use for scores");
     avida.AddSetting("lexicase.fitness_name", fitness_name, "Name of trait to use for fitness");
@@ -164,7 +166,7 @@ public:
       org_profile.Resize(org_set.size());
       for (size_t org_id : org_set) {
         auto & org = avida.GetOrg(org_id);
-        if (score_accessor(org)[score_id] + epsilon >= max_scores[score_id]) {
+        if (score_accessor(org)[score_id] + info_epsilon >= max_scores[score_id]) {
           org_profile.Set(org_id);
         }
       }
