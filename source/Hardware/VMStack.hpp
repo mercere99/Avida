@@ -18,6 +18,10 @@ struct VMStack {
   emp::array<DATA_T, STACK_DEPTH> stack{0};
   size_t stack_pos = 0;
 
+  void Serialize(emp::SerialPod & pod) {
+    pod(stack, stack_pos);
+  }
+
   void Reset() {
     for (auto & entry : stack) entry = 0;
     stack_pos = 0;
