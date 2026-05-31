@@ -26,7 +26,7 @@ WEB_DIR      = web
 SETTINGS_DIR = settings
 SOURCE_DIR   = source
 
-CXX = clang++
+# CXX = clang++
 CXX_web := emcc
 
 NATIVE_CODE = $(SOURCE_DIR)/$(TARGET).cpp
@@ -123,8 +123,10 @@ $(WEB_DIR):
 	mkdir -p $(WEB_DIR)
 
 $(ALTERNATES): FLAGS := $(FLAGS_OPT)
-$(ALTERNATES): % : $(SOURCE_DIR)/%.cpp $(KEY_HEADERS) | $(BUILD_DIR)
-	$(CXX) $(FLAGS) $< -o $(BUILD_DIR)/$@
+$(ALTERNATES): % : $(BUILD_DIR)/%
+
+$(addprefix $(BUILD_DIR)/, $(ALTERNATES)): $(BUILD_DIR)/% : $(SOURCE_DIR)/%.cpp $(KEY_HEADERS) | $(BUILD_DIR)
+	$(CXX) $(FLAGS) $< -o $@
 
 $(addsuffix -debug, $(ALTERNATES)): FLAGS := $(FLAGS_DEBUG)
 $(addsuffix -debug, $(ALTERNATES)): %-debug : $(SOURCE_DIR)/%.cpp $(KEY_HEADERS) | $(BUILD_DIR)
