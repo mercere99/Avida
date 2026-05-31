@@ -383,7 +383,7 @@ public:
     out_stream << "fitness,genotype,phenotype\n";
     avida.GetBiota().ForEachOrg([&](const auto & org) {
       std::println(out_stream, "{},{},{}",
-        org.GetPhenotype().fitness, org.GetGenomeSequence(), TraitValues(org));
+        org.GetPhenotype().fitness, org.GetGenomeSequence(), emp::MakeString(TraitValues(org)));
     });
   }
 
