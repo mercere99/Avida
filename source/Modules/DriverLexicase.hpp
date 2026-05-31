@@ -76,7 +76,7 @@ public:
     avida.AddSetting("lexicase.pop_size", pop_size, "How big should populations be?", 'p');
     avida.AddSetting("lexicase.epsilon", epsilon, "Max score deficit to not be eliminated (0.0 = strict lexicase)", 'e');
     avida.AddSetting("lexicase.downsample_frac", downsample_frac, "Fraction of test cases to use each generation (1.0 for ALL)", 'D');
-    avida.AddSetting("lexicase.mode", mode, "Options: 'base', 'informed', or 'cohort'");
+    avida.AddSetting("lexicase.mode", mode, "Options: 'base', 'informed', or 'cohort'", 'M');
     avida.AddSetting("lexicase.info_epsilon", info_epsilon, "Max dist for scores to count as 'same' info tests");
     avida.AddSetting("lexicase.max_generations", max_generations, "Maximum number of generations to run", 'm');
     avida.AddSetting("lexicase.scores_name", scores_name, "Name of trait to use for scores");
