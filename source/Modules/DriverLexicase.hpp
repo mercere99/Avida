@@ -36,8 +36,8 @@ private:
   size_t pop_size = 1000;                    // Number of organisms to place in next gen
   double epsilon = 0.0;                      // Distance from max to not be eliminated
   double downsample_frac = 1.0;              // Fraction of test cases to each generation
-  bool informed_downsample = false;          // Should we use "informed" downsampling?
   double info_epsilon = 0.0;                 // Max dist for scores to count as "same" info tests
+  emp::String mode = "base";                 // Modes: "base", "informed", "cohort"
   emp::String scores_name = "trait_values";  // Traits to use for lexicase scores
   emp::String fitness_name = "fitness";      // Trait to output for "combined" fitness
 
@@ -76,7 +76,7 @@ public:
     avida.AddSetting("lexicase.pop_size", pop_size, "How big should populations be?", 'p');
     avida.AddSetting("lexicase.epsilon", epsilon, "Max score deficit to not be eliminated (0.0 = strict lexicase)", 'e');
     avida.AddSetting("lexicase.downsample_frac", downsample_frac, "Fraction of test cases to use each generation (1.0 for ALL)", 'D');
-    avida.AddSetting("lexicase.informed_downsample", informed_downsample, "Should we use informed downsampling? (true/false)");
+    avida.AddSetting("lexicase.mode", mode, "Options: 'base', 'informed', or 'cohort'");
     avida.AddSetting("lexicase.info_epsilon", info_epsilon, "Max dist for scores to count as 'same' info tests");
     avida.AddSetting("lexicase.max_generations", max_generations, "Maximum number of generations to run", 'm');
     avida.AddSetting("lexicase.scores_name", scores_name, "Name of trait to use for scores");
@@ -219,6 +219,9 @@ public:
     const emp::BitVector & org_set,
     const auto & score_accessor) const
   {
+    if (downsample_frac <= 0.0) emp::notify::Error("Downsample fraction must be positive!");
+    if (downsample_frac > 1.0) emp::notify::Error("Downsample fraction must 1.0 or less!");
+
     static emp::vector<size_t> test_case_ids;
 
     // If we need to initialize or have changed the number of test cases, update the ID set.
@@ -227,10 +230,9 @@ public:
       std::iota(test_case_ids.begin(), test_case_ids.end(), 0);
     }
 
-    const size_t tests_used = std::max<size_t>(num_test_cases * downsample_frac, 1);
-
-    if (tests_used < num_test_cases) {
-      if (informed_downsample) {
+    if (mode != "cohort" && downsample_frac < 1.0) {
+      const size_t tests_used = std::max<size_t>(num_test_cases * downsample_frac, 1);
+      if (mode == "informed") {
         InformedDownsample(test_case_ids, org_set, score_accessor, tests_used);
       } else {
         emp::Shuffle(avida.GetRandom(), test_case_ids, tests_used);
@@ -239,6 +241,59 @@ public:
     }
 
     return std::span{test_case_ids};
+  }
+
+  void DoSelection(
+    const emp::BitVector & parent_bits,
+    const auto & score_accessor,
+    std::span<size_t> test_case_ids,
+    size_t num_rounds = 0)
+  {
+    if (num_rounds == 0) num_rounds = pop_size;
+
+    // Run num_rounds rounds of lexicase selection to generate the next generation.
+    for (size_t round = 0; round < num_rounds; ++round) {      
+      const size_t parent_id =
+        SelectParent(score_accessor, parent_bits, test_case_ids);
+      avida.DivideOrg(parent_id);
+    }
+  }
+
+  void DoCohortSelection(
+    emp::BitVector parent_bits,
+    const auto & score_accessor,
+    std::span<size_t> test_case_ids)
+  {
+    if (downsample_frac > 0.5) {
+      emp::notify::Error("Downsample fraction too high for cohort selection");
+    }
+
+    const size_t num_orgs = parent_bits.CountOnes();
+    const size_t num_cohorts = std::llround(1.0 / downsample_frac);
+    const size_t cohort_orgs = std::llround(num_orgs * downsample_frac);
+    const size_t cohort_scores = std::llround(test_case_ids.size() * downsample_frac);
+
+    // Shuffle the parents and test cases into cohorts.
+    emp::vector<size_t> org_ids;
+    org_ids.reserve(parent_bits.CountOnes());
+    for (size_t parent_id : parent_bits) org_ids.push_back(parent_id);
+    emp::Shuffle(avida.GetRandom(), org_ids);
+    emp::Shuffle(avida.GetRandom(), test_case_ids);
+
+    // Select from each cohort.
+    for (size_t cohort_id = 0; cohort_id < num_cohorts; ++cohort_id) {
+      // Identify parents for this cohort.
+      parent_bits.Clear();
+      const size_t org_offset = cohort_id * cohort_orgs;
+      for (size_t i=0; i < cohort_orgs; ++i) parent_bits.Set(org_ids[i + org_offset]);
+
+      // Do selection in this cohort.
+      const size_t cohort_offset = cohort_scores * cohort_id;
+      DoSelection(parent_bits,
+        score_accessor,
+        test_case_ids.subspan(cohort_offset, cohort_scores),
+        cohort_orgs);
+    }
   }
 
   void OnUpdate(size_t /*update*/) {
@@ -254,14 +309,8 @@ public:
 
     std::span<size_t> test_case_ids = GetTestCases(num_test_cases, parent_bits, score_accessor);
 
-    // Run pop_size rounds of lexicase selection to generate the next generation.
-    emp::Timer<"Do Lexicase"> lexi_timer;
-    for (size_t round = 0; round < pop_size; ++round) {      
-      const size_t parent_id =
-        SelectParent(score_accessor, parent_bits, test_case_ids);
-      avida.DivideOrg(parent_id);
-    }
-    lexi_timer.Stop();
+    if (mode == "cohort") DoCohortSelection(parent_bits, score_accessor, test_case_ids);
+    else DoSelection(parent_bits, score_accessor, test_case_ids);
 
     // Remove the parent generation now that offspring have been placed.
     for (size_t id : parent_bits) avida.DeleteOrg(id);
