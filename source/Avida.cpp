@@ -30,7 +30,7 @@ DriverBuffered<T>;
 
 int main(int argc, char * argv[])
 {
-  using avida_t = Avida<OrgTypeAvidian, pop_t, driver_t, MutationsDivideSub, TrackGeneration>;
+  using avida_t = Avida<OrgTypeAvidian, pop_t, driver_t, MutationsDivideSub, TrackGeneration, TrackGenotypes>;
 
   avida_t avida(emp::ArgsToStrings(argc, argv));
   avida.OK();
