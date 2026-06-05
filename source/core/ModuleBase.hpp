@@ -27,3 +27,17 @@ public:
   [[nodiscard]] emp::String GetType() const { return type; }
   [[nodiscard]] emp::String GetDesc() const { return desc; }
 };
+
+#define AVIDA_DEFINE_MODULE(NAME, TYPE, DESC, ...) \
+template <typename AVIDA_T>                        \
+class NAME : public ModuleBase<AVIDA_T> {          \
+private:                                           \
+  AVIDA_T & avida;                                 \
+                                                   \
+public:                                            \
+  NAME(AVIDA_T & avida)                            \
+    : ModuleBase<AVIDA_T>(#NAME, TYPE, DESC)       \
+    , avida(avida) {}                              \
+  ~NAME() {}                                       \
+  __VA_ARGS__                                      \
+}
