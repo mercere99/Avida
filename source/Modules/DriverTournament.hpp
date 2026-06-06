@@ -47,20 +47,20 @@ public:
     , avida(avida), output("Tournament.csv") { }
   ~DriverTournament() { }
 
-  void Serialize(emp::SerialPod & pod) {
+  void Serialize(emp::SerialPod & /* pod */) {
     // Settings in the SettingsManager are automatically synced; nothing else to save.
   }
 
   void RegisterSettings() {
-    avida.AddSetting("base.data_filename",
+    avida.AddSetting("tourny.data_filename",
       [this](){ return output.GetFilename(); },
       [this](emp::String in){ output.SetFilename(in); },
       "File to output tournament data (placed in default data directory)");
-    avida.AddSetting("base.output_frequency", output_frequency, "Updates between data outputs");
-    avida.AddSetting("base.tourny_size", tourny_size, "How big should tournaments be?", 't');
-    avida.AddSetting("base.pop_size", pop_size, "How big should populations be?", 'p');
-    avida.AddSetting("base.max_generations", max_generations, "Maximum number of generations to run", 'G');
-    avida.AddSetting("base.fitness_name", fitness_name, "Name of trait to use for fitness");
+    avida.AddSetting("tourny.output_frequency", output_frequency, "Updates between data outputs");
+    avida.AddSetting("tourny.tourny_size", tourny_size, "How big should tournaments be?", 't');
+    avida.AddSetting("tourny.pop_size", pop_size, "How big should populations be?", 'p');
+    avida.AddSetting("tourny.max_generations", max_generations, "Maximum number of generations to run", 'G');
+    avida.AddSetting("tourny.fitness_name", fitness_name, "Name of trait to use for fitness");
   }
 
   size_t GetOrgReserveCount() const { return pop_size * 2; }
