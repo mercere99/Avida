@@ -13,6 +13,11 @@
  - Add GENERIC module that takes a set of other modules and allows you to decide at run time which one is used.
  
 CORE FEATURES / REFACTORING
+ - Updated plug-in handling to work on lambdas passed in.  Use in `requires` then call on relevant modules.
+   - SignalAll (signal every plug-in that can work with this lambda)
+   - SignalOnly (signal first module that can take this lambda and return result; error if multiple can.)
+   - SignalOne (signal only first module that can take this lambda and return result)
+ - Split LexicaseDriver into GenerationDriver (that calls "Select") and SelectLexicase
  - Serialization
  - Tools to ensure bounds on config inputs.
  - When calling a signal function, allow for fewer args.  For example, OnUpdate() instead of OnUpdate(size_t update)
