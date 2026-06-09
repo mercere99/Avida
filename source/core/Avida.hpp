@@ -105,7 +105,7 @@ public:
       [this](emp::vector<emp::String> kw_args) {
         std::println("Avida v5.0.0\n");
         settings.PrintHelp(kw_args);
-        plug_ins.OnHelp();  // Allow plug-ins to provide help information.      
+        AVIDA_SIGNAL(OnHelp());  // Allow plug-ins to provide help information.      
         Exit();
       }, "Print help info for this program", 'h', /*max_args=*/ 1);
 
@@ -125,9 +125,9 @@ public:
       }, "Generate a config file with the provided name (default: Avida.cfg) and stop", 'g', /*max_args=*/ 1);
 
     // Allow plug-ins to register anything that they need to...
-    plug_ins.RegisterTraits();    // Set up any traits in the phenotype.
-    plug_ins.RegisterSettings();  // Set up parameters for the config file.
-    plug_ins.RegisterCallbacks(); // Set up new instructions for the instruction set.
+    AVIDA_SIGNAL(RegisterTraits());    // Set up any traits in the phenotype.
+    AVIDA_SIGNAL(RegisterSettings());  // Set up parameters for the config file.
+    AVIDA_SIGNAL(RegisterCallbacks()); // Set up new instructions for the instruction set.
   }
   Avida(emp::vector<emp::String> args) : Avida() { settings.LoadArgs(args); }
   ~Avida() { 
@@ -227,7 +227,7 @@ public:
   void AddKeyword(ARG_Ts &&... args) { settings.AddKeyword(std::forward<ARG_Ts>(args)...); }
 
   void AddCallback(const emp::String & name, std::function<void(size_t)> callback) {
-    plug_ins.AddCallback(name, callback);
+    AVIDA_SIGNAL( AddCallback(name, callback) );
   }
 
   template <typename TRAIT_T>
@@ -241,10 +241,10 @@ public:
   // ====== Organism Management ======
 
   organism_t & Inject(organism_t & inject_org) {
-    inject_org.ResetHardware();            // Reset organism as placed into pop.
-    plug_ins.OnInjectReady(inject_org);    // Trigger for injections only
-    plug_ins.BeforePlacement(inject_org);  // Trigger to set up organisms for activation
-    plug_ins.OnPlacement(inject_org);      // Trigger to activate organism in populations
+    inject_org.ResetHardware();                 // Reset organism as placed into pop.
+    AVIDA_SIGNAL(OnInjectReady(inject_org));    // Trigger for injections only
+    AVIDA_SIGNAL(BeforePlacement(inject_org));  // Trigger to set up organisms for activation
+    AVIDA_SIGNAL(OnPlacement(inject_org));      // Trigger to activate organism in populations
     return inject_org;
   }
 
@@ -272,7 +272,7 @@ public:
 
   genome_t GetOffspringGenome(organism_t & parent) {
     emp_assert(IsOccupied(parent.GetBiotaID()), "parent is not active", parent.GetBiotaID());
-    plug_ins.BeforeRepro(parent);
+    AVIDA_SIGNAL(BeforeRepro(parent));
     return parent.GetOffspringGenome();
   }
 
@@ -283,15 +283,15 @@ public:
     emp_assert(IsOccupied(parent.GetBiotaID()), "parent is not active", parent.GetBiotaID());
     emp_assert(offspring_genome.size() > 0);
     organism_t & offspring = biota.ReserveOrganism(std::move(offspring_genome));
-    plug_ins.OnOffspringInit(offspring, parent);   // Trigger: set up offspring (e.g., mutations)
+    AVIDA_SIGNAL(OnOffspringInit(offspring, parent));   // Trigger: set up offspring (e.g., mutations)
     offspring.ResetHardware();
-    plug_ins.OnOffspringReady(offspring, parent);  // Trigger: offspring is all set up
+    AVIDA_SIGNAL(OnOffspringReady(offspring, parent));  // Trigger: offspring is all set up
     return offspring;
   }
 
   void PlaceOffspring(organism_t & offspring) {
-    plug_ins.BeforePlacement(offspring);           // Trigger: set up ANY organism for activation
-    plug_ins.OnPlacement(offspring);               // Trigger: activate organism in populations
+    AVIDA_SIGNAL(BeforePlacement(offspring));           // Trigger: set up ANY organism for activation
+    AVIDA_SIGNAL(OnPlacement(offspring));               // Trigger: activate organism in populations
   }
 
   /// Collect an offspring from a designated parent organism.
@@ -325,25 +325,23 @@ public:
   void DeleteOrg(size_t delete_id) {
     emp_assert(biota.IsActive(delete_id));
 
-    plug_ins.BeforeDeath(biota[delete_id]); // Notify plug-ins of impending death.
-    biota[delete_id].SignalDeath();         // Notify organism before deletion.
+    AVIDA_SIGNAL(BeforeDeath(biota[delete_id]));  // Notify plug-ins of impending death.
+    biota[delete_id].SignalDeath();               // Notify organism before deletion.
     biota.Remove(delete_id);
   }
 
   // ====== Run Management ======
 
+  template <typename... Ts>
+  void TriggerSignal(Ts &&... args) { plug_ins.InvokeSignal(std::forward<Ts>(args)...); }
+
   // Process a single update for Avida
   void DoUpdate() {
     emp_assert(GetNumOrgs() > 0, "Running DoUpdate() with no organisms.");
     ++update;
-    emp::Timer<"plug_ins.OnUpdateStart()"> timer1;
-    plug_ins.OnUpdateStart(update);  // Set up for a new update
-    timer1.Stop();
-    emp::Timer<"plug_ins.OnUpdate()"> timer2;
-    plug_ins.OnUpdate(update);       // Run organisms
-    timer2.Stop();
-    emp::Timer<"plug_ins.OnUpdateEnd()"> timer3;
-    plug_ins.OnUpdateEnd(update);    // Report stats / check stop condition
+    AVIDA_SIGNAL(OnUpdateStart(update));  // Set up for a new update
+    AVIDA_SIGNAL(OnUpdate(update));       // Run organisms
+    AVIDA_SIGNAL(OnUpdateEnd(update));    // Report stats / check stop condition
   }
 
   void ProcessOrg(size_t id, uint32_t num_cycles) {
@@ -367,9 +365,9 @@ public:
   void Initialize() {
     biota.Reserve(plug_ins.CountReservedOrgs() + 1);
     SetupDataDir();
-    plug_ins.BeforeStart(); // Trigger plug-ins to initialize.
+    AVIDA_SIGNAL(BeforeStart()); // Trigger plug-ins to initialize.
     settings.PrintStatus();
-    plug_ins.OnStart();     // Trigger injection of start organisms.
+    AVIDA_SIGNAL(OnStart());     // Trigger injection of start organisms.
   }
 
   void Run() {
@@ -383,7 +381,7 @@ public:
     if (run_state == RunState::EXITING) return; // Already exiting.
     run_state = RunState::EXITING;              // Change run_state in case check by plug-ins
     SaveState("final_save");
-    plug_ins.BeforeExit();                      // Notify plug-ins of impending exit
+    AVIDA_SIGNAL(BeforeExit());                 // Notify plug-ins of impending exit
     biota.Clear();                              // Clean up organisms
     trait_man.Clear();                          // Clean up traits
   }

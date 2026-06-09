@@ -43,6 +43,17 @@ private:
     return count;
   }
 
+  template <typename FUN_T, typename MODULE_T>
+  static void TryInvoke(FUN_T & fun, MODULE_T & module) {
+    if constexpr (requires { fun(module); }) fun(module);
+  }
+
+  template <typename FUN_T, typename MODULE_T>
+  static constexpr size_t TryCount(FUN_T & fun, MODULE_T & module) {
+    if constexpr (requires { fun(module); }) return 1;
+    else return 0;
+  }
+
 public:
   PlugInManager(AVIDA_T & avida) : plug_ins(PLUG_IN_Ts{avida}...) { }
 
@@ -77,14 +88,27 @@ public:
     std::apply([&pod](auto &... p){ (pod(p), ...); }, plug_ins);
   }
 
-  // Build out all of the individual signals.
+  // Trigger a specified signal on each module that can respond.
+  #define AVIDA_SIGNAL(...) \
+    TriggerSignal([&]<typename AVIDA_MODULE_T_>(AVIDA_MODULE_T_& module) \
+        requires requires { module.__VA_ARGS__; } \
+    { module.__VA_ARGS__; })
+    
+  template <typename FUN_T>
+  void InvokeSignal(FUN_T && fun) {
+    std::apply([&fun](auto &... module) {
+      (TryInvoke(fun, module), ...);
+    }, plug_ins);
+  }
 
-  // "Signal" generator macro.  Signals are sent out to ALL modules listening for them,
-  // which they do by implementing a function with the same signature as the signal.
-  #define AVIDA_SIGNAL_DEF(TRIGGER, ...)                                 \
-    TriggerSignal([__VA_ARGS__](auto & plug_in) {                        \
-      if constexpr (requires { plug_in.TRIGGER; }) { plug_in.TRIGGER; }  \
-    });
+  template <typename FUN_T>
+  size_t CountSignal(FUN_T && fun) {
+    return std::apply([&fun](auto &... module) -> size_t {
+      return (TryCount(fun, module) + ...);
+    }, plug_ins);
+  }
+
+  // Build out all of the individual signals.
 
   // "Handler" generator macro.  Handlers are similar to signals, but return std::expected.
   // As soon as the "expected" has a proper value, it is returned and no more handlers are called.
@@ -94,53 +118,6 @@ public:
       else return std::unexpected<emp::String>("No Handler");                   \
     })
 
-  // Generate a function to count how many plug-ins respond to a given signal.
-  #define AVIDA_ADD_SIGNAL_COUNT(TRIGGER, ...)                                         \
-    size_t Count_ ## TRIGGER() const {                                                 \
-      return CountResult([](auto & plug_in) -> size_t {                                \
-        using nc_t = std::remove_const_t<std::remove_reference_t<decltype(plug_in)>>;  \
-        return requires(nc_t & p) { p.TRIGGER(__VA_ARGS__); };                         \
-      });                                                                              \
-    }
-
-  // Create Count_AddCallback()
-  AVIDA_ADD_SIGNAL_COUNT(AddCallback, "name", [](size_t){}) // Generates Count_AddCallback()
-
-  // ======== SIGNALS ========
-
-  void AddCallback(const emp::String & name, std::function<void(size_t)> fun) {
-    emp_always_assert(Count_AddCallback() > 0, "AddCallback() triggered, but no plug-in modules listening");
-    AVIDA_SIGNAL_DEF(AddCallback(name, fun), name, fun);
-  }
-
-  void OnUpdateStart(size_t update) { AVIDA_SIGNAL_DEF(OnUpdateStart(update), update); }
-  void OnUpdate(size_t update)      { AVIDA_SIGNAL_DEF(OnUpdate(update), update); }
-  void OnUpdateEnd(size_t update)   { AVIDA_SIGNAL_DEF(OnUpdateEnd(update), update); }
-
-  void BeforeRepro(organism_t & parent) { AVIDA_SIGNAL_DEF(BeforeRepro(parent), &parent); }
-
-  void OnOffspringInit(organism_t & offspring, organism_t & parent) {
-    AVIDA_SIGNAL_DEF(OnOffspringInit(offspring, parent), &offspring, &parent);
-  }
-
-  void OnOffspringReady(organism_t & offspring, organism_t & parent) {
-    AVIDA_SIGNAL_DEF(OnOffspringReady(offspring, parent), &offspring, &parent);
-  }
-
-  void OnInjectReady(organism_t & org) { AVIDA_SIGNAL_DEF(OnInjectReady(org), &org); }
-  void BeforePlacement(organism_t & org) { AVIDA_SIGNAL_DEF(BeforePlacement(org), &org); }
-  void OnPlacement(organism_t & org) { AVIDA_SIGNAL_DEF(OnPlacement(org), &org); }
-  void BeforeDeath(organism_t & org) { AVIDA_SIGNAL_DEF(BeforeDeath(org), &org); }
-
-  void BeforeExit() { AVIDA_SIGNAL_DEF(BeforeExit(), ); }
-  void OnHelp() { AVIDA_SIGNAL_DEF(OnHelp(), ); }
-
-  // Start-up sequence
-  void RegisterTraits() { AVIDA_SIGNAL_DEF(RegisterTraits(), ); }
-  void RegisterSettings() { AVIDA_SIGNAL_DEF(RegisterSettings(), ); }
-  void RegisterCallbacks() { AVIDA_SIGNAL_DEF(RegisterCallbacks(), ); }
-  void BeforeStart() { AVIDA_SIGNAL_DEF(BeforeStart(), ); }
-  void OnStart() { AVIDA_SIGNAL_DEF(OnStart(), ); }
 
   // ======== HANDLERS ========
 
