@@ -331,17 +331,17 @@ public:
     }
   }
 
+  template <concepts::Organism ORG_T>
+  void OnPlacement(ORG_T & org) {
+    pareto_front.AddEntry(org.GetPhenotype().trait_values, avida.GetUpdate());
+  }
+
   void OnStart() {
     output.DoOutput();
   }
 
   void OnUpdateStart(size_t update) {
     pareto_front.UpdateGen(update, avida.GetRandom());
-  }
-
-  template <concepts::Organism ORG_T>
-  void OnPlacement(ORG_T & org) {
-    pareto_front.AddEntry(org.GetPhenotype().trait_values, avida.GetUpdate());
   }
 
   void OnUpdateEnd(size_t update) {
