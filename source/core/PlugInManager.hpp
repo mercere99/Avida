@@ -1,11 +1,13 @@
 #pragma once
 
+#include "emp/base/concepts.hpp"
+
 /*
  *  This file is part of the Avida Digital Evolution Research Platform, v5.0
  *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  * 
- *  Handler for all of the active plug-ins.
+ *  Creates and routes signals to all of the active module plug-ins.
  */
 
 
@@ -14,10 +16,6 @@ template <typename AVIDA_T, typename... PLUG_IN_Ts>
 class PlugInManager {
 private:
   static_assert(sizeof...(PLUG_IN_Ts) > 0, "At least one plug-in required to manage run.");
-
-  using organism_t = typename AVIDA_T::organism_t;
-  using genome_t   = typename AVIDA_T::genome_t;
-
   std::tuple<PLUG_IN_Ts...> plug_ins;
 
   // === Signals ===
@@ -27,25 +25,24 @@ private:
     std::apply([&signal_fun](auto &... p){ (signal_fun(p), ...); }, plug_ins);
   }
 
-  // Pass all plug-ins through handler_fun, returning the first non-null returned.
-  template <typename T>
-  std::expected<T, emp::String> TriggerHandler(auto handler_fun) {
-    std::expected<T, emp::String> result = std::unexpected<emp::String>("No handler");
-    std::apply([&](auto &... p){
-      ((result = handler_fun(p), result.has_value()) || ...);
-    }, plug_ins);
-    return result;
-  }
-
   size_t CountResult(auto check_fun) const {
     size_t count = 0;
     std::apply([&](auto &... p){ ((count += check_fun(p)), ...); }, plug_ins);
     return count;
   }
 
-  template <typename FUN_T, typename MODULE_T>
-  static void TryInvoke(FUN_T & fun, MODULE_T & module) {
-    if constexpr (requires { fun(module); }) fun(module);
+  template <typename RETURN_T=void, typename FUN_T, typename MODULE_T>
+  static RETURN_T TryInvoke(FUN_T & fun, MODULE_T & module) {
+    if constexpr (std::is_void_v<RETURN_T>) {
+      if constexpr (requires { fun(module); }) fun(module);
+    } else if constexpr (requires { fun(module); }) {
+      static_assert(requires { { fun(module) } -> std::convertible_to<RETURN_T>; },
+        "Signal handler is callable on this module but its return type is not "
+        "convertible to the expected RETURN_T.");
+      return static_cast<RETURN_T>(fun(module));
+    } else {
+      return RETURN_T{};
+    }
   }
 
   template <typename FUN_T, typename MODULE_T>
@@ -89,16 +86,77 @@ public:
   }
 
   // Trigger a specified signal on each module that can respond.
-  #define AVIDA_SIGNAL(...) \
-    TriggerSignal([&]<typename AVIDA_MODULE_T_>(AVIDA_MODULE_T_& module) \
-        requires requires { module.__VA_ARGS__; } \
+  #define AVIDA_SIGNAL(...)                                                    \
+    TriggerSignal<void>([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
+        requires requires { module.__VA_ARGS__; }                              \
     { module.__VA_ARGS__; })
+
+  #define AVIDA_HANDLE(RETURN_TYPE, ...)                                              \
+    TriggerSignal<RETURN_TYPE>([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
+        requires requires { module.__VA_ARGS__; }                                     \
+    { return module.__VA_ARGS__; })
+
+  // Run the provided function on every module that it is allowed to run on.
+  template <typename RETURN_T=void, typename FUN_T>
+  RETURN_T InvokeSignal(FUN_T && fun) {
+    // VOID return -> Just run all of the functions.
+    if constexpr (std::is_void_v<RETURN_T>) {
+      std::apply([&fun](auto &... module) {
+        (TryInvoke(fun, module), ...);
+      }, plug_ins);
+
+    }
     
-  template <typename FUN_T>
-  void InvokeSignal(FUN_T && fun) {
-    std::apply([&fun](auto &... module) {
-      (TryInvoke(fun, module), ...);
-    }, plug_ins);
+    // DIRECT MATCH for return type -> return value from FIRST responder.
+    else if constexpr ((requires(PLUG_IN_Ts & module) {
+      { std::declval<FUN_T>()(module) } -> std::convertible_to<RETURN_T>;
+    } || ...)) {
+      RETURN_T result{};
+      std::apply([&](auto &... module) {
+        ((TryCount(fun, module) && (result = TryInvoke<RETURN_T>(fun, module), true)) || ...);
+      }, plug_ins);
+      return result;
+    }
+    
+    // VECTOR MATCH -> collect one result per module that implements the signal and return all.
+    else if constexpr (emp::IsVectorContainer<RETURN_T> && (requires(PLUG_IN_Ts & module) {
+      { std::declval<FUN_T>()(module) } -> std::convertible_to<typename RETURN_T::value_type>;
+    } || ...)) {
+      RETURN_T result{};
+      using elem_t = typename RETURN_T::value_type;
+      std::apply([&](auto &... module) {
+        ([&] {
+          if constexpr (requires { { fun(module) } -> std::convertible_to<elem_t>; })
+            result.push_back(fun(module));
+        }(), ...);
+      }, plug_ins);
+      return result;
+    }
+    
+    // EXPECTED MATCH -> return first expected result or "unexpected" if none provided.
+    else if constexpr (requires { typename RETURN_T::value_type; typename RETURN_T::error_type; }
+        && (requires(PLUG_IN_Ts & module) {
+          { std::declval<FUN_T>()(module) } -> std::convertible_to<typename RETURN_T::value_type>;
+        } || ...)) {
+      RETURN_T result = std::unexpected(typename RETURN_T::error_type{});
+      std::apply([&](auto &... module) {
+        (([&]() -> bool {
+          if constexpr (requires { { fun(module) } ->
+              std::convertible_to<typename RETURN_T::value_type>; }) {
+            result = RETURN_T(fun(module));
+            return true;
+          }
+          return false;
+        }()) || ...);
+      }, plug_ins);
+      return result;
+    }
+    
+    // NO match; compile-time error!
+    else {
+      static_assert(false,
+        "InvokeSignal: RETURN_T is not compatible with any module's return type.");
+    }
   }
 
   template <typename FUN_T>
@@ -106,23 +164,6 @@ public:
     return std::apply([&fun](auto &... module) -> size_t {
       return (TryCount(fun, module) + ...);
     }, plug_ins);
-  }
-
-  // Build out all of the individual signals.
-
-  // "Handler" generator macro.  Handlers are similar to signals, but return std::expected.
-  // As soon as the "expected" has a proper value, it is returned and no more handlers are called.
-  #define AVIDA_HANDLER_DEF(RETURN_TYPE, TRIGGER, ...)                          \
-    TriggerHandler<RETURN_TYPE>([__VA_ARGS__](auto & plug_in) {                 \
-      if constexpr (requires { plug_in.TRIGGER; }) { return plug_in.TRIGGER; }  \
-      else return std::unexpected<emp::String>("No Handler");                   \
-    })
-
-
-  // ======== HANDLERS ========
-
-  std::expected<genome_t, emp::String> LoadGenome(const std::filesystem::path & filepath) {
-    return AVIDA_HANDLER_DEF(genome_t, LoadGenome(filepath), &filepath);
   }
 
   // ======== Other Data ========
