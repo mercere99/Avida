@@ -1,7 +1,5 @@
 #pragma once
 
-#include "emp/base/concepts.hpp"
-
 /*
  *  This file is part of the Avida Digital Evolution Research Platform, v5.0
  *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
@@ -9,6 +7,9 @@
  * 
  *  Creates and routes signals to all of the active module plug-ins.
  */
+
+#include "emp/base/vector.hpp"
+#include "emp/tools/String.hpp"
 
 // Template arguments: Finalized Avida type and Finalized plug-in module types.
 template <typename AVIDA_T, typename... PLUG_IN_Ts>
@@ -109,7 +110,7 @@ public:
 
   template <typename FUN_T>
   size_t CountSignal(FUN_T && fun) {
-    return std::apply([&fun](auto &... module) -> size_t {
+    return std::apply([&fun](auto &... module) {
       return (requires { fun(module); } + ...);
     }, plug_ins);
   }
