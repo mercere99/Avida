@@ -21,3 +21,6 @@ build/avida.log
 # DOSSIER
 build/DOSSIER
 build/DOSSIER.cfg
+
+# DATA
+seed_*
