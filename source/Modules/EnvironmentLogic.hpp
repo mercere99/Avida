@@ -35,9 +35,12 @@ private:
     NOT_A,       //   1   1   0   0    1
     B_OR_NOT_A,  //   1   1   0   1    2
     NAND,        //   1   1   1   0    1
-    TRUE,         //   1   1   1   1    0
+    TRUE,        //   1   1   1   1    0
     NUM_OPS
   };
+
+  emp::array<size_t, LogicOp::NUM_OPS> task_id;       // Unique Avida ID for each task performed
+  emp::array<size_t, LogicOp::NUM_OPS> update_counts; // Number of times task performed this update
 
   static constexpr const char * ToName(LogicOp op) {
     switch (op) {
@@ -83,7 +86,7 @@ private:
 
   static constexpr uint32_t fixed_count = 4;
   static constexpr uint32_t fixed_offset = 16;
-  static constexpr uint32_t fixed_mask  = emp::BitMask(fixed_count, fixed_offset);
+  static constexpr uint32_t fixed_mask  = emp::BitMask<uint32_t>(fixed_count, fixed_offset);
   static constexpr uint32_t random_mask = ~fixed_mask;
   static constexpr uint32_t fixed0 = static_cast<uint32_t>(0b0011) << fixed_offset;
   static constexpr uint32_t fixed1 = static_cast<uint32_t>(0b0101) << fixed_offset;
@@ -131,9 +134,18 @@ public:
   void RegisterTraits() {
     AVIDA_REGISTER_TRAIT(inputs, "Input values provided to this organism.");
     AVIDA_REGISTER_TRAIT(logic_counts, "Number of times each logic task was performed.");
+
+    // Register all of the tasks.
+    for (size_t i = 0; i < LogicOp::NUM_OPS; ++i) {
+      task_id[i] = avida.RegisterTask(ToName(static_cast<LogicOp>(i)));
+    }
   }
 
   // === Signal Listeners ===
+
+  void OnUpdateStart([[maybe_unused]] size_t update) {
+    update_counts.fill(0); // Reset all logic operation counts for the new update.
+  }
 
   // Before an organism is placed in the environment, make sure it has its inputs ready.
   template <concepts::Organism ORG_T>
@@ -143,16 +155,18 @@ public:
     org.AddInputs(org.Phenotype().inputs);
   }
 
-  // When an organism is about to reproduce, check its outputs.
+  // When an organism is about to reproduce, check its outputs to update state for offspring and next generation.
   template <concepts::Organism ORG_T>
   void BeforeRepro(ORG_T & parent) {
-    const emp::array<uint32_t, 2> & inputs = parent.Phenotype().inputs;
-    std::span<uint32_t> outputs = parent.GetOutputs<uint32_t>();
+    const emp::array<uint32_t, 2> & inputs = parent.GetPhenotype().inputs;
+    std::span<uint32_t> outputs = parent.template GetOutputs<uint32_t>();
     for (uint32_t output : outputs) {
       // Use the fixed bits to determine the candidate logic op.
       LogicOp test_op = static_cast<LogicOp>((output & fixed_mask) >> fixed_offset);
       if (output == PerformOp(test_op, inputs[0], inputs[1])) {
-        ++parent.Phenotype().logic_counts[test_op];
+        ++parent.GetPhenotype().logic_counts[test_op];  // Inrement org phenotype count.
+        ++update_counts[test_op];                       // Increment global task count this update.
+        avida.SignalTask(parent, task_id[test_op]);     // Allow other modules to know about task.
       }
     }
   }
