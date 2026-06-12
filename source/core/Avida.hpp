@@ -75,6 +75,7 @@ public:
 
 private:
   TraitManager<this_t> trait_man;
+  emp::RobinHoodMap<emp::String, size_t> task_ids;
   PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
 
   emp::SettingsManager settings; // Collection of all configurable settings
@@ -238,6 +239,13 @@ public:
     trait_man.template Register<TRAIT_T>(name, desc, filename, line, get_fun, cget_fun);
   }
 
+  size_t RegisterTask(const emp::String & name) {
+    emp_assert(!task_ids.contains(name), "Registering same task twice", name);
+    const size_t task_id = task_ids.size();
+    task_ids[name] = task_id;
+    return task_id;
+  }
+
   // ====== Organism Management ======
 
   organism_t & Inject(organism_t & inject_org) {
@@ -264,7 +272,7 @@ public:
   /// @brief Inject an organism using a genome loaded from a file.
   /// @param filepath - Path to the file with the genome information.
   organism_t & Inject(const fs::path & filepath) {
-    auto exp_genome = plug_ins.LoadGenome(filepath);
+    auto exp_genome = AVIDA_HANDLE(genome_t, LoadGenome(filepath));
     if (!exp_genome) emp::notify::Error("Failed to inject from file '", filepath.string(), "'.");
     return Inject(std::move(*exp_genome));
   }
@@ -335,6 +343,16 @@ public:
   template <typename... Ts>
   void TriggerSignal(Ts &&... args) { plug_ins.InvokeSignal(std::forward<Ts>(args)...); }
 
+  template <typename RETURN_T, typename... Ts>
+  auto TriggerHandler(Ts &&... args) {
+    return plug_ins.template InvokeHandler<RETURN_T>(std::forward<Ts>(args)...);
+  }
+
+  template <typename RETURN_T, typename... Ts>
+  auto TriggerCollector(Ts &&... args) {
+    return plug_ins.template InvokeCollector<RETURN_T>(std::forward<Ts>(args)...);
+  }
+
   // Process a single update for Avida
   void DoUpdate() {
     emp_assert(GetNumOrgs() > 0, "Running DoUpdate() with no organisms.");
@@ -363,7 +381,9 @@ public:
   }
 
   void Initialize() {
-    biota.Reserve(plug_ins.CountReservedOrgs() + 1);
+    auto reserve_counts = AVIDA_COLLECT(size_t, GetOrgReserveCount());
+    auto reserve_total = std::accumulate(reserve_counts.begin(), reserve_counts.end(), size_t{0});
+    biota.Reserve(reserve_total + 1);
     SetupDataDir();
     AVIDA_SIGNAL(BeforeStart()); // Trigger plug-ins to initialize.
     settings.PrintStatus();
