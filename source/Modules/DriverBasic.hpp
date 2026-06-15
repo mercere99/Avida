@@ -20,7 +20,7 @@
 template <typename AVIDA_T>
 class DriverBasic : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   size_t max_updates = 10000;                               // Update to end run
   std::filesystem::path ancestor_filename{"ancestor.org"};  // Ancestor genome filename
@@ -41,8 +41,8 @@ private:
 
 public:
   DriverBasic(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("DriverBasic", "Execution", "Execute organisms based on metabolic rate.")
-    , avida(avida) { }
+    : ModuleBase<AVIDA_T>(avida, "DriverBasic", "Execution",
+        "Execute organisms based on metabolic rate.") { }
   ~DriverBasic() { }
 
   void Serialize(emp::SerialPod & pod) {

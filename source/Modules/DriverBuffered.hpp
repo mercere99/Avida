@@ -19,7 +19,7 @@
 template <typename AVIDA_T>
 class DriverBuffered : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   size_t max_updates = 10000;                               // Update to end run
   std::filesystem::path ancestor_filename{"ancestor.org"};  // Ancestor genome filename
@@ -42,9 +42,8 @@ private:
 
 public:
   DriverBuffered(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("DriverBuffered", "Execution",
-        "Execute organisms in order based on metabolic rate (buffering callbacks).")
-    , avida(avida) { }
+    : ModuleBase<AVIDA_T>(avida, "DriverBuffered", "Execution",
+        "Execute organisms in order based on metabolic rate (buffering callbacks).") { }
   ~DriverBuffered() { }
 
   void Serialize(emp::SerialPod & pod) {

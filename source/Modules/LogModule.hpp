@@ -19,7 +19,7 @@
 template <typename AVIDA_T>
 class LogModule : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
   emp::Ptr<std::ostream> os_ptr = &std::cout;
   std::string filename{};  // File to print to; empty means standard out.
 
@@ -30,8 +30,8 @@ private:
   }
 public:
   LogModule(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("LogModule", "Analysis", "Record each time a signal is triggered")
-    , avida(avida) { }
+    : ModuleBase<AVIDA_T>(avida, "LogModule", "Analysis",
+        "Record each time a signal is triggered") { }
   ~LogModule() { if (filename.size()) os_ptr.Delete(); }
 
   void Serialize(emp::SerialPod & /* pod */) {

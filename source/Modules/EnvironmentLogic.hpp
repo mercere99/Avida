@@ -16,7 +16,7 @@
 template <typename AVIDA_T>
 class EnvironmentLogic : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   enum LogicOp {
     // Inputs:       00  01  10  11    Min NANDs
@@ -93,8 +93,8 @@ private:
 
 public:
   EnvironmentLogic(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("EnvironmentLogic", "Environment", "Reward performance of logic operations.")
-    , avida(avida) {}
+    : ModuleBase<AVIDA_T>(avida, "EnvironmentLogic", "Environment",
+        "Reward performance of logic operations.") {}
   ~EnvironmentLogic() {}
 
   void Serialize(emp::SerialPod & /* pod */) {

@@ -27,7 +27,7 @@ namespace fs = std::filesystem;
 template <typename AVIDA_T>
 class DriverLexicase : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   emp::DataOutput output;
   size_t output_frequency = 100;
@@ -50,8 +50,9 @@ private:
 
 public:
   DriverLexicase(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("DriverLexicase", "Execution", "Run an EA with Lexicase Selection.")
-    , avida(avida), output("Lexicase.csv") { }
+    : ModuleBase<AVIDA_T>(avida, "DriverLexicase", "Execution",
+        "Run an EA with Lexicase Selection.")
+    , output("Lexicase.csv") { }
   ~DriverLexicase() { }
 
   void Serialize(emp::SerialPod & /* pod */) {

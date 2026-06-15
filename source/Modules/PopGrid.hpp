@@ -21,7 +21,7 @@
 template <typename AVIDA_T>
 class PopGrid : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   size_t width = 100;
   size_t height = 100;
@@ -39,8 +39,7 @@ private:
 
 public:
   PopGrid(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("PopGrid", "PopManager", "Manage a grid-based population")
-    , avida(avida)
+    : ModuleBase<AVIDA_T>(avida, "PopGrid", "PopManager", "Manage a grid-based population")
   { }
   ~PopGrid() { }
 

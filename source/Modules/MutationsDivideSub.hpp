@@ -17,14 +17,15 @@
 template <typename AVIDA_T>
 class MutationsDivideSub : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   double substitution_prob{0.0075};
   double mut_scale{1.0 / emp::Log2(1.0 - substitution_prob)};
 
 public:
   MutationsDivideSub(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("MutationsDivideSub", "Mutation", "Handle substitution mutations on birth."), avida(avida) { }
+    : ModuleBase<AVIDA_T>(avida, "MutationsDivideSub", "Mutation",
+        "Handle substitution mutations on birth.") { }
   ~MutationsDivideSub() { }
 
   void Serialize(emp::SerialPod & /* pod */) {

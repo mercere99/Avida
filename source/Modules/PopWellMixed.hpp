@@ -18,7 +18,7 @@
 template <typename AVIDA_T>
 class PopWellMixed : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   uint32_t pop_cap = 10000;    // Population size limit (default: 10,000 orgs)
   // uint32_t pop_cap = 25000;    // Population size limit (default: 10,000 orgs)
@@ -34,8 +34,8 @@ private:
 
 public:
   PopWellMixed(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("PopWellMixed", "PopManager", "Manage a well-mixed population")
-    , avida(avida) { }
+    : ModuleBase<AVIDA_T>(avida, "PopWellMixed", "PopManager",
+        "Manage a well-mixed population") { }
   ~PopWellMixed() { }
 
   void Serialize(emp::SerialPod & /* pod */) {

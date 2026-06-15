@@ -48,7 +48,7 @@ public:
 template <typename AVIDA_T>
 class TrackGenotypes : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
   uint64_t total_genotypes = 0;  // Total number of genotypes ever in run.
 
   emp::RobinHoodMap<uint64_t, Genotype> id_map;  // Genotype ID -> Genotype data.
@@ -144,8 +144,7 @@ private:
 
 public:
   TrackGenotypes(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("TrackGenotypes", "Analysis", "Track identical genomes.")
-    , avida(avida) {}
+    : ModuleBase<AVIDA_T>(avida, "TrackGenotypes", "Analysis", "Track identical genomes.") {}
   ~TrackGenotypes() {}
 
   void Serialize(emp::SerialPod & pod) {

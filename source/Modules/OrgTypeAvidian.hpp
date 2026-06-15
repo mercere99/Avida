@@ -17,14 +17,14 @@
 template <typename AVIDA_T>
 class OrgTypeAvidian : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   AvidaVM::inst_set_t inst_set;
 
 public:
   OrgTypeAvidian(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("OrgTypeAvidian", "Representation", "Organism based on AvidaVM hardware.")
-    , avida(avida) {}
+    : ModuleBase<AVIDA_T>(avida, "OrgTypeAvidian", "Representation",
+        "Organism based on AvidaVM hardware.") {}
   ~OrgTypeAvidian() {}
 
   void Serialize(emp::SerialPod & /* pod */) {

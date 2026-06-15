@@ -263,7 +263,7 @@ public:
 template <typename AVIDA_T>
 class TrackPareto : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
   FrontManager<emp::vector<double>> pareto_front;
 
   emp::DataOutput output;
@@ -286,8 +286,9 @@ private:
 
 public:
   TrackPareto(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("TrackPareto", "Analysis", "Track the current (and cumulative) Pareto Front.")
-    , avida(avida), output("Pareto.csv") {}
+    : ModuleBase<AVIDA_T>(avida, "TrackPareto", "Analysis",
+        "Track the current (and cumulative) Pareto Front.")
+    , output("Pareto.csv") {}
   ~TrackPareto() {}
 
   void Serialize(emp::SerialPod & pod ) {

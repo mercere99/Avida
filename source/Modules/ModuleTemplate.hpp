@@ -15,14 +15,14 @@
 template <typename AVIDA_T>
 class ModuleTemplate : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   int example_setting = 42;
   int example_setting2 = 91;
 
 public:
   ModuleTemplate(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("ModuleName", "ModuleType", "Module description text"), avida(avida) { }
+    : ModuleBase<AVIDA_T>(avida, "ModuleName", "ModuleType", "Module description text") { }
   ~ModuleTemplate() { }
 
   void Serialize(emp::SerialPod & /* pod */) {

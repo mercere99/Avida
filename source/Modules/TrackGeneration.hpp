@@ -13,22 +13,8 @@
 
 #include "../core/Avida.hpp"
 
-template <typename AVIDA_T>
-class TrackGeneration : public ModuleBase<AVIDA_T> {
-private:
-  AVIDA_T & avida;
-
-public:
-  TrackGeneration(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("TrackGeneration", "Analysis", "Monitor lineage length.")
-    , avida(avida) {}
-  ~TrackGeneration() {}
-
-  void Serialize(emp::SerialPod & /* pod */) {
-    // Nothing to serialize
-  }
-
-  // === Phenotypic Traits ===
+AVIDA_DEFINE_MODULE(TrackGeneration, "Analysis", "Monitor lineage length.",
+  void Serialize(emp::SerialPod & /* pod */) { } // Nothing extra to serialize
 
   struct Phenotype {
     size_t generation = 0;
@@ -49,5 +35,4 @@ public:
   void OnInjectReady(ORG_T & inject_org) {
     inject_org.GetPhenotype().generation = 0;
   }
-
-};
+);

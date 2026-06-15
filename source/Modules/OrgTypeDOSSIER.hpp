@@ -25,7 +25,7 @@ template <typename AVIDA_T>
 class OrgTypeDOSSIER : public ModuleBase<AVIDA_T> {
 private:
   using this_t = OrgTypeDOSSIER<AVIDA_T>;
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   emp::DataOutput output;
   size_t output_frequency = 100;
@@ -194,9 +194,9 @@ private:
 
 public:
   OrgTypeDOSSIER(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("OrgTypeDOSSIER", "Representation",
+    : ModuleBase<AVIDA_T>(avida, "OrgTypeDOSSIER", "Representation",
       "Vector of doubles for DOSSIER diagnostics")
-    , avida(avida), output("DOSSIER.csv")
+    , output("DOSSIER.csv")
     { }
   ~OrgTypeDOSSIER() {}
 

@@ -24,7 +24,7 @@ namespace fs = std::filesystem;
 template <typename AVIDA_T>
 class DriverTournament : public ModuleBase<AVIDA_T> {
 private:
-  AVIDA_T & avida;
+  using ModuleBase<AVIDA_T>::avida;
 
   emp::DataOutput output;
   size_t output_frequency = 100;
@@ -43,8 +43,9 @@ private:
 
 public:
   DriverTournament(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>("DriverTournament", "Execution", "Run an EA with Tournament Selection.")
-    , avida(avida), output("Tournament.csv") { }
+    : ModuleBase<AVIDA_T>(avida, "DriverTournament", "Execution",
+        "Run an EA with Tournament Selection.")
+    , output("Tournament.csv") { }
   ~DriverTournament() { }
 
   void Serialize(emp::SerialPod & /* pod */) {
