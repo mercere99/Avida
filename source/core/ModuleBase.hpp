@@ -15,29 +15,30 @@
 template <typename AVIDA_T>
 class ModuleBase {
 protected:
+  AVIDA_T & avida;       // Reference to the main Avida controller for this module.
   emp::String name;      // Unique name for this module; typically the class name.
   emp::String type;      // Type category of this module.
   emp::String desc;      // Full description of this module.
 
 public:
-  ModuleBase(const emp::String & name, const emp::String & type, const emp::String & desc)
-    : name(name), type(type), desc(desc) { }
+  ModuleBase(AVIDA_T & avida, const emp::String & name,
+             const emp::String & type, const emp::String & desc)
+    : avida(avida), name(name), type(type), desc(desc) { }
 
   [[nodiscard]] emp::String GetName() const { return name; }
   [[nodiscard]] emp::String GetType() const { return type; }
   [[nodiscard]] emp::String GetDesc() const { return desc; }
 };
 
-#define AVIDA_DEFINE_MODULE(NAME, TYPE, DESC, ...) \
-template <typename AVIDA_T>                        \
-class NAME : public ModuleBase<AVIDA_T> {          \
-private:                                           \
-  AVIDA_T & avida;                                 \
-                                                   \
-public:                                            \
-  NAME(AVIDA_T & avida)                            \
-    : ModuleBase<AVIDA_T>(#NAME, TYPE, DESC)       \
-    , avida(avida) {}                              \
-  ~NAME() {}                                       \
-  __VA_ARGS__                                      \
+#define AVIDA_DEFINE_MODULE(NAME, TYPE, DESC, ...)     \
+template <typename AVIDA_T>                            \
+class NAME : public ModuleBase<AVIDA_T> {              \
+private:                                               \
+  using ModuleBase<AVIDA_T>::avida;                    \
+                                                       \
+public:                                                \
+  NAME(AVIDA_T & avida)                                \
+    : ModuleBase<AVIDA_T>(avida, #NAME, TYPE, DESC) {} \
+  ~NAME() {}                                           \
+  __VA_ARGS__                                          \
 }
