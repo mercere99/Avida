@@ -341,16 +341,16 @@ public:
   // ====== Run Management ======
 
   template <typename... Ts>
-  void TriggerSignal(Ts &&... args) { plug_ins.InvokeSignal(std::forward<Ts>(args)...); }
+  void TriggerSignal(Ts &&... args) { plug_ins.TriggerSignal(std::forward<Ts>(args)...); }
 
   template <typename RETURN_T, typename... Ts>
   auto TriggerHandler(Ts &&... args) {
-    return plug_ins.template InvokeHandler<RETURN_T>(std::forward<Ts>(args)...);
+    return plug_ins.template TriggerHandler<RETURN_T>(std::forward<Ts>(args)...);
   }
 
   template <typename RETURN_T, typename... Ts>
   auto TriggerCollector(Ts &&... args) {
-    return plug_ins.template InvokeCollector<RETURN_T>(std::forward<Ts>(args)...);
+    return plug_ins.template TriggerCollector<RETURN_T>(std::forward<Ts>(args)...);
   }
 
   // Process a single update for Avida
@@ -363,7 +363,7 @@ public:
   }
 
   void ProcessOrg(size_t id, uint32_t num_cycles) {
-    auto & hw = biota[id].GetHardware();
+    auto & hw = biota[id].Hardware();
     for (size_t i = 0; i < num_cycles; ++i) {
       hw.ProcessStep();
     }
