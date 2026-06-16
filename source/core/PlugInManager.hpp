@@ -48,12 +48,12 @@ public:
 
   // Get the names of all of the plug-ins
   emp::vector<emp::String> GetNames() {
-    return InvokeCollector<emp::String>([](auto & module){ return module.GetName(); });
+    return TriggerCollector<emp::String>([](auto & module){ return module.GetName(); });
   }
 
   // Get the types of all of the plug-ins
   emp::vector<emp::String> GetTypes() {
-    return InvokeCollector<emp::String>([](auto & module){ return module.GetType(); });
+    return TriggerCollector<emp::String>([](auto & module){ return module.GetType(); });
   }
 
   // Call Serialize on ALL plug-ins; function is required to avoid accidental failures to save.
@@ -62,24 +62,24 @@ public:
   }
 
   // Trigger a specified signal on each module that can respond.
-  #define AVIDA_SIGNAL(...)                                              \
-    TriggerSignal([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
-        requires requires { module.__VA_ARGS__; }                        \
+  #define AVIDA_SIGNAL(...)                                                    \
+    this->TriggerSignal([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
+        requires requires { module.__VA_ARGS__; }                              \
     { module.__VA_ARGS__; })
 
-  #define AVIDA_HANDLE(RETURN_TYPE, ...)                                               \
-    TriggerHandler<RETURN_TYPE>([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
-        requires requires { module.__VA_ARGS__; }                                      \
+  #define AVIDA_HANDLE(RETURN_TYPE, ...)                                                     \
+    this->TriggerHandler<RETURN_TYPE>([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
+        requires requires { module.__VA_ARGS__; }                                            \
     { return module.__VA_ARGS__; })
 
-  #define AVIDA_COLLECT(RETURN_TYPE, ...)                                                \
-    TriggerCollector<RETURN_TYPE>([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
-        requires requires { module.__VA_ARGS__; }                                        \
+  #define AVIDA_COLLECT(RETURN_TYPE, ...)                                                      \
+    this->TriggerCollector<RETURN_TYPE>([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
+        requires requires { module.__VA_ARGS__; }                                              \
     { return module.__VA_ARGS__; })
 
   // Run the provided function on every module that it is allowed to run on.
   template <typename FUN_T>
-  void InvokeSignal(FUN_T && fun) {
+  void TriggerSignal(FUN_T && fun) {
     std::apply([&fun](auto &... module) {
       (TryInvoke(fun, module), ...);
     }, plug_ins);
@@ -88,7 +88,7 @@ public:
   /// Run the provided function until a module returns the expected value.
   /// @return std::expected of the first value found or unexpected.
   template <typename RETURN_T, typename FUN_T>
-  auto InvokeHandler(FUN_T && fun) {
+  auto TriggerHandler(FUN_T && fun) {
     std::expected<RETURN_T, emp::String> result = std::unexpected("No handler found");
     std::apply([&](auto &... module) {
       (IfInvocable(fun, module, [&](auto & module){ result = fun(module); }) || ...);
@@ -99,7 +99,7 @@ public:
   /// Run the provided function on every module that it is allowed to run on.
   /// @return A vector of all of the collected return values.
   template <typename VALUE_T, typename FUN_T>
-  emp::vector<VALUE_T> InvokeCollector(FUN_T && fun) {
+  emp::vector<VALUE_T> TriggerCollector(FUN_T && fun) {
     emp::vector<VALUE_T> result{};
     std::apply([&](auto &... module) {
       (IfInvocable(fun, module, [&](auto & module){ result.push_back(fun(module)); }), ...);
