@@ -30,16 +30,12 @@ public:
   Organism(Organism && in) = default;
 
   // Build organism from a genome.
-  Organism(const genome_t & in_genome) : genome(in_genome) {
-    if constexpr (HasHardware()) phenotype.hardware.Reset(genome);
-  }
-  Organism(genome_t && in_genome) : genome(std::move(in_genome)) {
-    if constexpr (HasHardware()) phenotype.hardware.Reset(genome);
-  }
+  Organism(const genome_t & in_genome) : genome(in_genome) { ResetHardware(); }
+  Organism(genome_t && in_genome) : genome(std::move(in_genome)) { ResetHardware(); }
 
   Organism(emp::SerialPod & pod) {
     pod(biota_id, global_id, is_mutant, genome);
-    if constexpr (HasHardware()) phenotype.hardware.Reset(genome);
+    ResetHardware();
   }
 
   ~Organism() = default;
@@ -49,17 +45,14 @@ public:
   /// Move assignment
   Organism & operator=(Organism && in) = default;
 
-  void ResetHardware() { if constexpr (HasHardware()) phenotype.hardware.Reset(genome); }
+  void ResetHardware() { if constexpr (HasHardware()) Hardware().Reset(genome); }
 
   [[nodiscard]] genome_t & GetGenome() { return genome; }
   [[nodiscard]] const genome_t & GetGenome() const { return genome; }
   [[nodiscard]] emp::String GetGenomeSequence() const {
     // If we have hardware to translate the genome, use it; otherwise return raw genome.
-    if constexpr (HasHardware()) {
-      return phenotype.hardware.GetInstSet().ToSequence(genome);
-    } else {
-      return genome.AsString();
-    }
+    if constexpr (HasHardware()) return Hardware().GetInstSet().ToSequence(genome);
+    else return genome.AsString();
   }
 
   [[nodiscard]] phenotype_t & GetPhenotype() { return phenotype; }
@@ -68,8 +61,8 @@ public:
   [[nodiscard]] static constexpr bool HasHardware() {
     return requires { std::declval<phenotype_t>().hardware; };
   }
-  [[nodiscard]] auto & GetHardware() {
-    if constexpr (HasHardware()) return phenotype.hardware;
+  [[nodiscard]] auto & Hardware(this auto & self) {
+    if constexpr (HasHardware()) return self.phenotype.hardware;
     else {
       emp::notify::Error("Trying to access `hardware` on Organisms that does not have it.");
       return "Failure";
@@ -78,7 +71,7 @@ public:
 
   Organism & SetBiotaID(size_t id) {
     biota_id = id;
-    if constexpr (HasHardware()) phenotype.hardware.SetBiotaID(id);
+    if constexpr (HasHardware()) Hardware().SetBiotaID(id);
     return *this;
   }
 
@@ -94,7 +87,7 @@ public:
   Organism & Process(size_t cycles) {
     emp_assert(OK());
     if constexpr (HasHardware()) {
-      phenotype.hardware.Process(cycles);
+      Hardware().Process(cycles);
     } else {
       emp_assert(false, "Cannot Process organism without hardware.");
     }
@@ -104,7 +97,7 @@ public:
   [[nodiscard]] genome_t GetOffspringGenome() {
     emp_assert(OK());
     if constexpr (HasHardware()) {
-      return phenotype.hardware.GetOffspringGenome();
+      return Hardware().GetOffspringGenome();
     } else {
       return genome; // Return a COPY of the current genome.
     }
@@ -128,13 +121,13 @@ public:
   /// Check to make sure there aren't any problems with this organism object.
   bool OK() const {
     if constexpr (HasHardware()) {
-      if (phenotype.hardware.GetBiotaID() != biota_id) {
-        emp::notify::Error("Hardware biota_id = ", phenotype.hardware.GetBiotaID(),
+      if (Hardware().GetBiotaID() != biota_id) {
+        emp::notify::Error("Hardware biota_id = ", Hardware().GetBiotaID(),
                           " but organism biota_id = ", biota_id, ".");
         return false;
       }
 
-      if (!phenotype.hardware.OK()) {
+      if (!Hardware().OK()) {
         emp::notify::Error("Organism: Failed hardware OK() check.");
         return false;
       }
