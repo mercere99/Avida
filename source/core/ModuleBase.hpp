@@ -16,6 +16,7 @@ template <typename AVIDA_T>
 class ModuleBase {
 protected:
   AVIDA_T & avida;       // Reference to the main Avida controller for this module.
+
   emp::String name;      // Unique name for this module; typically the class name.
   emp::String type;      // Type category of this module.
   emp::String desc;      // Full description of this module.
@@ -25,11 +26,27 @@ public:
              const emp::String & type, const emp::String & desc)
     : avida(avida), name(name), type(type), desc(desc) { }
 
-  [[nodiscard]] emp::String GetName() const { return name; }
-  [[nodiscard]] emp::String GetType() const { return type; }
-  [[nodiscard]] emp::String GetDesc() const { return desc; }
+  [[nodiscard]] auto & Avida(this auto & self) { return self.avida; }
+
+  [[nodiscard]] const emp::String & GetName() const { return name; }
+  [[nodiscard]] const emp::String & GetType() const { return type; }
+  [[nodiscard]] const emp::String & GetDesc() const { return desc; }
+
+  template <typename... Ts>
+  void TriggerSignal(Ts &&... args) { avida.TriggerSignal(std::forward<Ts>(args)...); }
+
+  template <typename RETURN_T, typename... Ts>
+  auto TriggerHandler(Ts &&... args) {
+    return avida.template TriggerHandler<RETURN_T>(std::forward<Ts>(args)...);
+  }
+
+  template <typename RETURN_T, typename... Ts>
+  auto TriggerCollector(Ts &&... args) {
+    return avida.template TriggerCollector<RETURN_T>(std::forward<Ts>(args)...);
+  }
 };
 
+// Modules can have their boilerplate handled with this macro.
 #define AVIDA_DEFINE_MODULE(NAME, TYPE, DESC, ...)     \
 template <typename AVIDA_T>                            \
 class NAME : public ModuleBase<AVIDA_T> {              \
