@@ -4,6 +4,16 @@
  *  This file is part of the Avida Digital Evolution Research Platform, v5.0
  *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
+ * 
+ *  Basic Avida CPUs good for genetic programming.
+ * 
+ *  DEVELOPER NOTES:
+ *  - Experiment with memory size, stack depth, and number of stacks.
+ *    Currently, stack A is the main one used for computation; drop to 3 or 4 stacks w/ modding?
+ *  - Should inputs go to a stack or memory?  What should outputs come from?
+ *  - Should inputs be refreshed with an instruction?
+ *  - Const vals available are currently pretty arbitrary.
+ *  - Merge heads, stacks, and memory?  Stacks can be located in memory.  Heads can be stack tops.
  */
 
 #include <algorithm>
@@ -35,7 +45,7 @@ public:
   static constexpr size_t MAX_GENOME_SIZE = 2048; // Max genome length.
 
   // Configured types.
-  using data_t = int32_t;                             // Data type used by this VM
+  using data_t = int32_t;                         // Data type used by this VM
   using mem_t = emp::array<data_t, MEM_SIZE>;     // Memory is a fixed size
   using genome_t = Genome<uint8_t>;               // Genomes capped at 256 instructions
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM
@@ -57,6 +67,14 @@ public:
     HEAD_M_WRITE = 4, // E: Memory Write  (init: 0)
     HEAD_FLOW = 5,    // F: Flow Control  (init: 0)
   };
+
+  // STACK info:
+  // A: Math
+  // B: Math extra
+  // C: Input
+  // D: Output
+  // E: Storage
+  // F: Storage
 
   static constexpr data_t const_vals[]{ 1, 2, 4, 16, 256, -1 };
 
@@ -173,6 +191,18 @@ private:
     return false;
   }
 
+  // Push to a fixed stack.
+  template <Nop STACK_ID>
+  void StackPush(data_t value) {
+    stacks[static_cast<size_t>(STACK_ID)].Push(value);
+  }
+
+  // Pop from a fixed stack.
+  template <Nop STACK_ID>
+  data_t StackPop() {
+    return stacks[static_cast<size_t>(STACK_ID)].Pop();
+  }
+
   // Is the IP currently at a "Scope" instruction for the target scope?
   [[nodiscard]] bool AtScopeLimit(inst_id_t target_scope) const {
     static const inst_id_t inst_scope_id = GetInstSet().GetID("Scope");
@@ -206,7 +236,10 @@ public:
   [[nodiscard]] const inst_set_t & GetInstSet() const { emp_assert(inst_set_ptr); return *inst_set_ptr; }
   AvidaVM & SetInstSet(const inst_set_t & is) { inst_set_ptr = &is; return *this; }
 
+
+
   // === Instructions ===
+
   // All instruction implementations live in AvidaVM_Insts (defined after this class).
   friend struct AvidaVM_Insts;
 
@@ -244,6 +277,15 @@ public:
   void Reset(const genome_t & in_genome) {
     genome = in_genome;
     Reset();
+  }
+
+  void SetInput(data_t input) {
+    StackPush<Nop::C>(input);
+  }
+
+  // A faux instruction that manages output handling.
+  data_t GetOutput() {
+    return stacks[GetArg<Nop::D>()].Pop();
   }
 
   genome_t GetOffspringGenome() {
