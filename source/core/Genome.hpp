@@ -12,7 +12,7 @@
 #include <iterator>  // for std::input_iterator
 
 #include "emp/base/assert.hpp"
-#include "emp/base/vector.hpp"
+#include "emp/datastructs/Vector.hpp"
 #include "emp/math/Random.hpp"
 #include "emp/math/Range.hpp"
 
@@ -25,7 +25,7 @@ public:
 private:
   using this_t = Genome<VALUE_T>;
 
-  emp::vector<value_t> genome;
+  emp::Vector<value_t> genome;
 
   // Genome site value range is [0,max_value);
   value_t max_value = 0;
@@ -39,9 +39,9 @@ public:
   Genome(Genome &&) = default;
   Genome(value_t max_value, size_t length = 0, value_t default_value = value_t{})
     : genome(length, default_value), max_value(max_value) { }
-  Genome(value_t max_value, const emp::vector<value_t> & g)
+  Genome(value_t max_value, const emp::Vector<value_t> & g)
     : genome(g), max_value(max_value) { }
-  Genome(value_t max_value, emp::vector<value_t> && g)
+  Genome(value_t max_value, emp::Vector<value_t> && g)
     : genome(std::move(g)), max_value(max_value) { }
   template <typename It> requires std::input_iterator<It> &&
                                   std::convertible_to<std::iter_value_t<It>, value_t>
