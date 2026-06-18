@@ -174,31 +174,34 @@ public:
   template <concepts::Organism ORG_T>
   void OnOffspringInit(ORG_T & offspring, ORG_T & parent) {
     emp::Random & random = avida.GetRandom();
+    double & mut_prob = offspring.GetPhenotype().mut_prob;
 
-    offspring.GetPhenotype().mut_prob = parent.GetPhenotype().mut_prob;
+    mut_prob = parent.GetPhenotype().mut_prob;
     if (random.P(mut_rate_mut_prob)) {
       double mut_factor = random.GetNormal() * mut_rate_mut_size + 1.0;
-      offspring.GetPhenotype().mut_prob *= mut_factor;
+      mut_prob *= mut_factor;
       offspring.SetMutated();
     }
 
     // Possibly mutate this genome.
-    auto & genome = offspring.GetGenome();
-    const double mut_scale{1.0 / emp::Log2(1.0 - offspring.GetPhenotype().mut_prob)};
-    size_t mut_pos = static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale);
-    while (mut_pos < genome.size()) {
-      double shift = random.GetNormal() * mut_size;
-      genome[mut_pos] += shift;
+    if (mut_prob > 0.0) {
+      auto & genome = offspring.GetGenome();
+      const double mut_scale{1.0 / std::log2(1.0 - mut_prob)};
+      size_t mut_pos = static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale);
+      while (mut_pos < genome.size()) {
+        double shift = random.GetNormal() * mut_size;
+        genome[mut_pos] += shift;
 
-      // Rebound if over limit.
-      if (genome[mut_pos] < 0.0) genome[mut_pos] *= -1;
-      else if (genome[mut_pos] > max_value) {
-        genome[mut_pos] = 2.0 * max_value - genome[mut_pos];
+        // Rebound if over limit.
+        if (genome[mut_pos] < 0.0) genome[mut_pos] *= -1;
+        else if (genome[mut_pos] > max_value) {
+          genome[mut_pos] = 2.0 * max_value - genome[mut_pos];
+        }
+        offspring.SetMutated();
+
+        // Find next mutation, if any.
+        mut_pos += static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale) + 1;
       }
-      offspring.SetMutated();
-
-      // Find next mutation, if any.
-      mut_pos += static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale) + 1;
     }
 
     if (offspring.IsMutated()) Evaluate(offspring);
