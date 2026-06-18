@@ -5,7 +5,7 @@
  *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
- *  Track the current generation of each organism in the population.
+ *  Organisms that use the DOSSIER fitness landscapes.
  */
 
 #include <cstddef>   // for size_t
