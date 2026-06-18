@@ -51,7 +51,7 @@ private:
   using ModuleBase<AVIDA_T>::avida;
   uint64_t total_genotypes = 0;  // Total number of genotypes ever in run.
 
-  emp::RobinHoodMap<uint64_t, Genotype> id_map;  // Genotype ID -> Genotype data.
+  emp::RobinHoodMap<uint64_t, Genotype, true> id_map;  // Genotype ID -> Genotype data.
 
   static constexpr size_t TAG_ASSIGN_RANK = 10;  // Gain a tag slot when abundant rank.
   static constexpr size_t NUM_TAG_SLOTS = 12;    // Number of distinct tags available.
