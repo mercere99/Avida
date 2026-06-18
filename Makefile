@@ -17,7 +17,7 @@
 TARGET := Avida
 
 # Additional executables to build from source/<name>.cpp (each also gets a <name>-debug target)
-ALTERNATES := DOSSIER
+ALTERNATES := DOSSIER ROMEO
 
 # Identify all directory locations
 EMP_DIR      = ../Empirical
