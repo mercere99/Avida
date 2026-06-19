@@ -9,11 +9,13 @@
 #include "Modules/DriverBasic.hpp"
 #include "Modules/DriverBuffered.hpp"
 #include "Modules/DriverConstant.hpp"
+#include "Modules/EnvironmentLogic.hpp"
 #include "Modules/LogModule.hpp"
 #include "Modules/MutationsDivideSub.hpp"
 #include "Modules/OrgTypeAvidian.hpp"
 #include "Modules/PopGrid.hpp"
 #include "Modules/PopWellMixed.hpp"
+#include "Modules/ReactionsManager.hpp"
 #include "Modules/TrackGeneration.hpp"
 #include "Modules/TrackGenotypes.hpp"
 
@@ -30,7 +32,8 @@ DriverBuffered<T>;
 
 int main(int argc, char * argv[])
 {
-  using avida_t = Avida<OrgTypeAvidian, pop_t, driver_t, MutationsDivideSub, TrackGeneration, TrackGenotypes>;
+  using avida_t = Avida<OrgTypeAvidian, pop_t, driver_t, MutationsDivideSub, TrackGeneration, TrackGenotypes, EnvironmentLogic, ReactionsManager>;
+  // using avida_t = Avida<OrgTypeAvidian, pop_t, driver_t, MutationsDivideSub, TrackGeneration, TrackGenotypes>;
 
   avida_t avida(emp::ArgsToStrings(argc, argv));
   avida.OK();
