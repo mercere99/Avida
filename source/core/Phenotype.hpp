@@ -23,7 +23,7 @@
   );
 
 #define AVIDA_REQUIRE_TRAIT(TYPE, NAME)                              \
-static_assert(                                                       \
+  static_assert(                                                     \
     requires(const typename AVIDA_T::phenotype_t & p) {              \
         { p.NAME } -> std::convertible_to<TYPE>;                     \
     },                                                               \
@@ -132,6 +132,8 @@ private:
 
 public:
   ~TraitManager() { Clear(); }
+
+  [[nodiscard]] bool Has(const emp::String & name) const { return trait_map.contains(name); }
 
   // Generic lookup — use for AsDouble/AsString/AsSpan (virtual, safe for any type).
   const trait_base_t & Get(const emp::String & name) const {
