@@ -119,8 +119,8 @@ public:
     case LogicOp::B_OR_NOT_A:  return valB | ~valA;
     case LogicOp::NAND:        return ~(valA & valB);
     case LogicOp::TRUE:        return static_cast<uint32_t>(-1);
+    default: emp::notify::Error("Unknown LogicOp: ", op);
     }
-    emp::notify::Error("Unknown LogicOp: ", op);
     return 0;
   }
 
@@ -150,24 +150,21 @@ public:
   // Before an organism is placed in the environment, make sure it has its inputs ready.
   template <concepts::Organism ORG_T>
   void BeforePlacement(ORG_T & org) {
-    org.Phenotype().inputs[0] = (avida.GetRandom().GetUInt32() & random_mask) | fixed0;
-    org.Phenotype().inputs[1] = (avida.GetRandom().GetUInt32() & random_mask) | fixed1;
-    org.AddInputs(org.Phenotype().inputs);
+    org.GetPhenotype().inputs[0] = (avida.GetRandom().GetUInt32() & random_mask) | fixed0;
+    org.GetPhenotype().inputs[1] = (avida.GetRandom().GetUInt32() & random_mask) | fixed1;
+    org.Hardware().SetInput(org.GetPhenotype().inputs);
   }
 
-  // When an organism is about to reproduce, check its outputs to update state for offspring and next generation.
   template <concepts::Organism ORG_T>
-  void BeforeRepro(ORG_T & parent) {
-    const emp::array<uint32_t, 2> & inputs = parent.GetPhenotype().inputs;
-    std::span<uint32_t> outputs = parent.template GetOutputs<uint32_t>();
-    for (uint32_t output : outputs) {
-      // Use the fixed bits to determine the candidate logic op.
-      LogicOp test_op = static_cast<LogicOp>((output & fixed_mask) >> fixed_offset);
-      if (output == PerformOp(test_op, inputs[0], inputs[1])) {
-        ++parent.GetPhenotype().logic_counts[test_op];  // Inrement org phenotype count.
-        ++update_counts[test_op];                       // Increment global task count this update.
-        avida.SignalTask(parent, task_id[test_op]);     // Allow other modules to know about task.
-      }
+  void OnOutputValue(ORG_T & org, uint32_t output) {
+    const emp::array<uint32_t, 2> & inputs = org.GetPhenotype().inputs;
+
+    // Use the fixed bits to determine the candidate logic op.
+    LogicOp test_op = static_cast<LogicOp>((output & fixed_mask) >> fixed_offset);
+    if (output == PerformOp(test_op, inputs[0], inputs[1])) {
+      ++org.GetPhenotype().logic_counts[test_op];  // Inrement org phenotype count.
+      ++update_counts[test_op];                    // Increment global task count this update.
+      avida.SignalTask(org, task_id[test_op]);     // Allow other modules to know about task.
     }
   }
 
