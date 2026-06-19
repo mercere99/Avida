@@ -76,6 +76,7 @@ public:
 private:
   TraitManager<this_t> trait_man;
   emp::RobinHoodMap<emp::String, size_t> task_ids;
+  emp::vector<emp::String> task_names;  // Task name by ID (index == task ID).
   PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
 
   emp::SettingsManager settings; // Collection of all configurable settings
@@ -159,6 +160,8 @@ public:
     return trait_man.Get(name);
   }
 
+  [[nodiscard]] bool HasTrait(const emp::String & name) const { return trait_man.Has(name); }
+
   // Typed trait lookup: returns a Trait<TRAIT_T> reference with direct organism-level accessors,
   // bypassing virtual dispatch. Use this in performance-sensitive loops.
   template <typename TRAIT_T>
@@ -241,9 +244,37 @@ public:
 
   size_t RegisterTask(const emp::String & name) {
     emp_assert(!task_ids.contains(name), "Registering same task twice", name);
-    const size_t task_id = task_ids.size();
+    const size_t task_id = task_names.size();
     task_ids[name] = task_id;
+    task_names.push_back(name);
     return task_id;
+  }
+
+  // === Task Lookups ===
+
+  [[nodiscard]] size_t GetNumTasks() const { return task_names.size(); }
+  [[nodiscard]] bool HasTask(const emp::String & name) const { return task_ids.contains(name); }
+
+  // Look up the unique ID for an already-registered task by name.
+  [[nodiscard]] size_t GetTaskID(const emp::String & name) const {
+    emp_assert(task_ids.contains(name), "Requesting an unknown task name", name);
+    return task_ids.FindValue(name, 0);
+  }
+
+  // Look up the name of a task by its ID.
+  [[nodiscard]] const emp::String & GetTaskName(size_t task_id) const {
+    emp_assert(task_id < task_names.size(), "Requesting an invalid task ID", task_id);
+    return task_names[task_id];
+  }
+
+  // Broadcast that an organism just performed a task so other modules can respond.
+  void SignalTask(organism_t & org, size_t task_id) {
+    AVIDA_SIGNAL(OnTaskComplete(org, task_id));
+  }
+
+  // Broadcast a value an organism sent to output so other modules can respond.
+  void SignalOutput(organism_t & org, uint32_t output) {
+    AVIDA_SIGNAL(OnOutputValue(org, output));
   }
 
   // ====== Organism Management ======
