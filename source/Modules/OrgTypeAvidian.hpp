@@ -49,6 +49,13 @@ public:
 
   void RegisterCallbacks() {
     AvidaVM::BuildInstSet(inst_set);  // Build the standard AvidaVM instruction set.
+    // Extract the (hardware-specific) output here, then let Avida broadcast it.
+    // AVIDA_SIGNAL is kept in the Avida class: GCC 15 mis-evaluates its requires-clause
+    // when expanded inside a stored callback lambda, silently dropping all responders.
+    AddCallback("Output", [this](size_t biota_id){
+      auto & org = avida.GetOrg(biota_id);
+      avida.SignalOutput(org, org.Hardware().GetOutput());
+    });
   }
 
   static constexpr size_t MAX_CALLBACKS = 32;  // Max number of callback instructions allowed.
