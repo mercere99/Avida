@@ -279,8 +279,21 @@ public:
     Reset();
   }
 
-  void SetInput(data_t input) {
-    StackPush<Nop::C>(input);
+  // Add a single input value.
+  template <typename T>
+  void AddInput(T input) {
+    if constexpr (std::convertible_to<T, data_t>) {
+      StackPush<Nop::C>(input);
+    } else if constexpr (emp::IsContainer<T>) {
+      for (const auto & x : input) AddInput(x);
+    } else {
+      static_assert(false, "Do not know how to add input.");
+    }
+  }
+
+  // Setup all inputs at once.
+  void SetInput(auto... inputs) {
+    (AddInput(inputs) , ...);
   }
 
   // A faux instruction that manages output handling.
