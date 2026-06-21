@@ -145,6 +145,21 @@ public:
     if (update >= max_updates) avida.Exit();
   }
 
+  // Recycled organism slots retain the previous occupant's phenotype, so reset our metabolic
+  // traits to their defaults at birth.  ReactionsManager applies any task bonus afterward, in the
+  // later OnOffspringReady phase.
+  template <concepts::Organism ORG_T>
+  void OnInjectReady(ORG_T & org) {
+    org.GetPhenotype().metabolic_base = 1.0;
+    org.GetPhenotype().metabolic_mult = 1.0;
+  }
+
+  template <concepts::Organism ORG_T>
+  void OnOffspringInit(ORG_T & offspring, ORG_T & /*parent*/) {
+    offspring.GetPhenotype().metabolic_base = 1.0;
+    offspring.GetPhenotype().metabolic_mult = 1.0;
+  }
+
   template <concepts::Organism ORG_T>
   void OnPlacement(ORG_T & org) {
     // Lock in metabolic rate as organism speed.
