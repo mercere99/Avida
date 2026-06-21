@@ -13,14 +13,18 @@
  *  Avida "merit" model: an organism is born with the merit its parent earned over the
  *  parent's lifetime, so a reward offsets to the next generation rather than retroactively
  *  changing a scheduling decision that drivers lock in at placement.
+ *
+ *  This module also tracks, per organism, how many times it (and its parent) performed each
+ *  task.  The data file reports, per task, how many current organisms had a parent perform it
+ *  at least once -- a proxy for how many organisms are likely capable of that task.
  */
 
 #include <cstddef>    // for size_t
-#include <iostream>   // for std::cout
 
 #include "emp/base/notify.hpp"
 #include "emp/base/Ptr.hpp"
 #include "emp/base/vector.hpp"
+#include "emp/data/DataOutput.hpp"
 #include "emp/meta/TypeID.hpp"
 #include "emp/tools/String.hpp"
 
@@ -57,8 +61,9 @@ private:
   emp::vector<Reaction> reactions;                  // All reactions, in declaration order.
   emp::vector<Target> targets;                      // Distinct target traits across reactions.
   emp::vector<emp::vector<size_t>> task_reactions;  // task ID -> indices into `reactions`.
-  emp::vector<size_t> update_counts;                // Times each reaction triggered this update.
-  size_t output_freq = 0;                           // Updates between reports (0 == off).
+  emp::vector<size_t> parent_performer_counts;      // Per task: # orgs whose parent performed it.
+  emp::DataOutput output;                           // Per-task capability-proxy data file.
+  size_t output_frequency = 100;                    // Updates between data outputs (0 == off).
 
   static Op ToOp(emp::String name) {
     name.SetLower();
@@ -77,32 +82,49 @@ private:
     return targets.size() - 1;
   }
 
+  // Tally, per task, how many active organisms have a parent that performed it at least once.
+  void ComputeParentPerformerCounts() {
+    for (size_t & c : parent_performer_counts) c = 0;
+    avida.GetBiota().ForEachOrg([this](auto & org) {
+      const auto & pc = org.GetPhenotype().parent_task_counts;
+      for (size_t t = 0; t < pc.size(); ++t) {
+        if (pc[t]) ++parent_performer_counts[t];
+      }
+    });
+  }
+
 public:
   ReactionsManager(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>(avida, "ReactionsManager", "Reactions",
-        "Reward tasks by modifying organism traits (classic-Avida merit model).") {}
+        "Reward tasks by modifying organism traits (classic-Avida merit model).")
+    , output("reactions.csv") {}
   ~ReactionsManager() {}
 
-  void Serialize(emp::SerialPod & pod) {
-    // `reactions`/`targets`/`task_reactions` are rebuilt from config keywords plus BeforeStart;
-    // only the transient per-update tally is genuine runtime state to save.
-    pod(update_counts);
+  void Serialize(emp::SerialPod & /* pod */) {
+    // `reactions`/`targets`/`task_reactions` are rebuilt from config keywords plus BeforeStart.
+    // Per-organism task counts are registered traits (serialized with each organism), and the
+    // output tally is recomputed before each write -- so there is nothing extra to save here.
   }
 
   // === Phenotypic Traits ===
 
-  // Per-organism bonus earned this lifetime, banked for the organism's OFFSPRING.
-  // earned_add / earned_mult are indexed by target-trait ID (see `targets`).
+  // Per-organism state.  earned_add / earned_mult bank the bonus this organism earns for its
+  // OFFSPRING (indexed by target-trait ID).  task_counts records how many times THIS organism
+  // performed each task this lifetime; parent_task_counts is its parent's final tally, copied
+  // at birth (both indexed by task ID).
   struct Phenotype {
-    emp::vector<double> earned_add;      // Additive bonus per target trait (identity 0).
-    emp::vector<double> earned_mult;     // Multiplicative bonus per target trait (identity 1).
-    emp::vector<size_t> reaction_counts; // Times each reaction has triggered this lifetime.
+    emp::vector<double> earned_add;         // Additive bonus per target trait (identity 0).
+    emp::vector<double> earned_mult;        // Multiplicative bonus per target trait (identity 1).
+    emp::vector<size_t> task_counts;        // Times THIS organism performed each task.
+    emp::vector<size_t> parent_task_counts; // Times this organism's PARENT performed each task.
   };
 
   void RegisterTraits() {
     AVIDA_REGISTER_TRAIT(earned_add,  "Additive task bonus banked for offspring (per target trait).");
     AVIDA_REGISTER_TRAIT(earned_mult, "Multiplicative task bonus banked for offspring (per target trait).");
-    AVIDA_REGISTER_TRAIT(reaction_counts, "Times each reaction has triggered this lifetime.");
+    AVIDA_REGISTER_TRAIT(task_counts, "Times this organism performed each task (per task ID).");
+    AVIDA_REGISTER_TRAIT(parent_task_counts,
+      "Times this organism's parent performed each task (per task ID).");
   }
 
   void RegisterSettings() {
@@ -110,8 +132,12 @@ public:
       [this](emp::vector<emp::String> args){ AddReaction(args); },
       "Define a reaction: Reaction <task> <trait> <add|mult> <value> [max_triggers]",
       '\0', /*max_args=*/5);
-    avida.AddSetting("reactions.output_freq", output_freq,
-      "Updates between reaction-count reports (0 = off).");
+    avida.AddSetting("reactions.data_filename",
+      [this](){ return output.GetFilename(); },
+      [this](emp::String in){ output.SetFilename(in); },
+      "File for per-task capability data (placed in the default data directory).");
+    avida.AddSetting("reactions.output_frequency", output_frequency,
+      "Updates between data outputs (0 = off).");
   }
 
   // Parse one `Reaction` config line into an (as-yet unresolved) reaction record.
@@ -137,7 +163,7 @@ public:
   // module has registered its tasks and traits.
   void BeforeStart() {
     task_reactions.resize(avida.GetNumTasks());
-    update_counts.resize(reactions.size(), 0);
+    parent_performer_counts.resize(avida.GetNumTasks(), 0);
 
     for (size_t i = 0; i < reactions.size(); ++i) {
       Reaction & r = reactions[i];
@@ -167,37 +193,52 @@ public:
     for (Target & t : targets) {
       t.trait = &avida.template GetTypedTrait<double>(t.name);
     }
+
+    // Set up the data file: an Update column plus, per reaction, the number of current organisms
+    // whose parent performed that reaction's task at least once (a capability proxy).
+    if (output.IsActive()) {
+      output.SetFilepath(avida.GetDataDir());
+      output.AddColumn("Update", [this](){ return avida.GetUpdate(); });
+      for (const Reaction & r : reactions) {
+        const size_t task_id = r.task_id;
+        output.AddColumn(r.task_name, [this, task_id](){ return parent_performer_counts[task_id]; });
+      }
+    }
   }
 
-  void OnUpdateStart([[maybe_unused]] size_t update) {
-    for (size_t & c : update_counts) c = 0;
+  // Write the header and an initial sample before any organisms run.
+  void OnStart() {
+    if (output.IsActive()) { ComputeParentPerformerCounts(); output.DoOutput(); }
   }
 
-  // Bank each triggered reaction's bonus on the organism; it reaches its offspring at birth.
+  // Count this task for the organism and bank any rewards (which reach its offspring at birth).
   template <concepts::Organism ORG_T>
   void OnTaskComplete(ORG_T & org, size_t task_id) {
     emp_assert(task_id < task_reactions.size(), task_id, task_reactions.size());
-    auto & counts = org.GetPhenotype().reaction_counts;
-    auto & add    = org.GetPhenotype().earned_add;
-    auto & mult   = org.GetPhenotype().earned_mult;
+    auto & task_counts = org.GetPhenotype().task_counts;
+    auto & add         = org.GetPhenotype().earned_add;
+    auto & mult        = org.GetPhenotype().earned_mult;
+
+    const size_t n = ++task_counts[task_id];  // Nth time THIS organism performed this task.
 
     for (size_t r_idx : task_reactions[task_id]) {
       const Reaction & r = reactions[r_idx];
-      if (r.max_triggers && counts[r_idx] >= r.max_triggers) continue; // Hit the lifetime cap.
+      if (r.max_triggers && n > r.max_triggers) continue;  // Past this reaction's lifetime cap.
       switch (r.op) {
       case Op::ADD:  add[r.target_id]  += r.value; break;
       case Op::MULT: mult[r.target_id] *= r.value; break;
       }
-      ++counts[r_idx];
-      ++update_counts[r_idx];
     }
   }
 
-  // Offspring are born with the merit their PARENT earned (one-generation offset).
-  // A fresh offspring phenotype holds each target trait at its default, so applying the
-  // additive then multiplicative bonus yields (default + earned_add) * earned_mult.
+  // Offspring are born with the merit their PARENT earned (one-generation offset), and inherit
+  // a record of the parent's task performance.  We run in OnOffspringReady -- AFTER every
+  // OnOffspringInit handler -- so each target trait's owning module (e.g. the driver for
+  // metabolic_*) has already reset it to its default for this birth.  Applying the additive then
+  // multiplicative bonus then yields (default + earned_add) * earned_mult, independent of the
+  // order modules are listed in.
   template <concepts::Organism ORG_T>
-  void OnOffspringInit(ORG_T & offspring, ORG_T & parent) {
+  void OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
     const auto & p_add  = parent.GetPhenotype().earned_add;
     const auto & p_mult = parent.GetPhenotype().earned_mult;
     for (size_t t = 0; t < targets.size(); ++t) {
@@ -205,22 +246,29 @@ public:
       trait += p_add[t];
       trait *= p_mult[t];
     }
+    offspring.GetPhenotype().parent_task_counts = parent.GetPhenotype().task_counts;
   }
 
-  // Give every organism a clean slate of banked bonuses and reaction counts at activation.
+  // Injected organisms have no parent, so they start with an empty parental task history.
+  template <concepts::Organism ORG_T>
+  void OnInjectReady(ORG_T & org) {
+    org.GetPhenotype().parent_task_counts.assign(avida.GetNumTasks(), 0);
+  }
+
+  // Give every organism a clean slate of banked bonuses and its own task counts at activation.
+  // parent_task_counts is set at birth (OnOffspringInit) or injection (OnInjectReady), so it
+  // is intentionally left intact here.
   template <concepts::Organism ORG_T>
   void BeforePlacement(ORG_T & org) {
     org.GetPhenotype().earned_add.assign(targets.size(), 0.0);
     org.GetPhenotype().earned_mult.assign(targets.size(), 1.0);
-    org.GetPhenotype().reaction_counts.assign(reactions.size(), 0);
+    org.GetPhenotype().task_counts.assign(avida.GetNumTasks(), 0);
   }
 
   void OnUpdateEnd(size_t update) {
-    if (output_freq == 0 || update % output_freq != 0) return;
-    std::cout << "UD:" << update << "  Reactions:";
-    for (size_t i = 0; i < reactions.size(); ++i) {
-      std::cout << ' ' << reactions[i].task_name << '=' << update_counts[i];
+    if (output_frequency && update % output_frequency == 0 && output.IsActive()) {
+      ComputeParentPerformerCounts();
+      output.DoOutput();
     }
-    std::cout << std::endl;
   }
 };
