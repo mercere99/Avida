@@ -85,7 +85,9 @@ private:
   emp::Random random{0};         // Central random number generator
   biota_t biota{};               // Collection of all current organisms
 
-  enum class RunState { INITIALIZING, PAUSED, RUNNING, EXITING, ERROR };
+  // EXITING = stop has been requested; finish the current update, then tear down.
+  // COMPLETE = end-of-run teardown has happened (organisms cleared); nothing left to run.
+  enum class RunState { INITIALIZING, PAUSED, RUNNING, EXITING, COMPLETE, ERROR };
   RunState run_state = RunState::INITIALIZING;
 
 public:
@@ -132,8 +134,8 @@ public:
     AVIDA_SIGNAL(RegisterCallbacks()); // Set up new instructions for the instruction set.
   }
   Avida(emp::vector<emp::String> args) : Avida() { settings.LoadArgs(args); }
-  ~Avida() { 
-    Exit();
+  ~Avida() {
+    Shutdown();
   }
 
   // === Basic Accessors ===
@@ -422,17 +424,28 @@ public:
   }
 
   void Run() {
-    if (run_state == RunState::EXITING) return;
-    if (run_state == RunState::INITIALIZING) Initialize();
-    run_state = RunState::RUNNING;
-    while (run_state == RunState::RUNNING) DoUpdate();
+    emp_assert(run_state != RunState::COMPLETE, "Run() should not be called on finished run.");
+    if (run_state < RunState::EXITING) {
+      if (run_state == RunState::INITIALIZING) Initialize();
+      run_state = RunState::RUNNING;
+      while (run_state == RunState::RUNNING) DoUpdate();
+    }
+    if (run_state == RunState::EXITING) Shutdown();
   }
 
+  // Request that the run stop.  Teardown is deferred to Shutdown() (called once the current
+  // update finishes) so the final update's signal handlers still see a populated biota.
   void Exit() {
-    if (run_state == RunState::EXITING) return; // Already exiting.
-    run_state = RunState::EXITING;              // Change run_state in case check by plug-ins
+    if (run_state == RunState::EXITING || run_state == RunState::COMPLETE) return;
+    run_state = RunState::EXITING;
+  }
+
+  // End-of-run teardown.  Idempotent: the body runs at most once.
+  void Shutdown() {
+    if (run_state == RunState::COMPLETE) return;
+    run_state = RunState::COMPLETE;
     SaveState("final_save");
-    AVIDA_SIGNAL(BeforeExit());                 // Notify plug-ins of impending exit
+    AVIDA_SIGNAL(BeforeExit());                 // Notify plug-ins of impending exit (biota intact)
     biota.Clear();                              // Clean up organisms
     trait_man.Clear();                          // Clean up traits
   }
