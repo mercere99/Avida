@@ -24,7 +24,7 @@
 #include "../core/Avida.hpp"
 
 template <typename AVIDA_T>
-class FileOutput : public ModuleBase<AVIDA_T> {
+class OutputManager : public ModuleBase<AVIDA_T> {
 private:
   using ModuleBase<AVIDA_T>::avida;
 
@@ -43,10 +43,10 @@ private:
   }
 
 public:
-  FileOutput(AVIDA_T & avida)
-    : ModuleBase<AVIDA_T>(avida, "FileOutput", "IO",
+  OutputManager(AVIDA_T & avida)
+    : ModuleBase<AVIDA_T>(avida, "OutputManager", "IO",
         "Collect announced output columns into CSV data files.") {}
-  ~FileOutput() { }
+  ~OutputManager() { }
 
   void Serialize(emp::SerialPod & /* pod */) {
     // Columns are reset each run; nothing here needs saving.
