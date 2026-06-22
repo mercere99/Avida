@@ -12,9 +12,6 @@
  *
  *  Other interfaces (e.g. a web view) can listen for the same OnOutputColumn signal and render
  *  the columns differently; producers stay unaware of which sinks are present.
- *
- *  Files and their columns are kept in announcement order (parallel vectors, not a map) so the
- *  output layout is deterministic and controlled by the order modules add their columns.
  */
 
 #include <cstddef>   // for size_t
@@ -31,45 +28,28 @@ class FileOutput : public ModuleBase<AVIDA_T> {
 private:
   using ModuleBase<AVIDA_T>::avida;
 
-  struct FileData {
-    emp::DataOutput output;
-    size_t last_update = emp::MAX_SIZE_T;  // Last update whose row was written (avoid duplicates).
-  };
-
-  // Parallel vectors keyed by position so files stay in first-announced order.  FileData is
-  // heap-allocated because emp::DataOutput owns a stream and is not safely moved on vector growth.
-  emp::vector<emp::String> file_names;
-  emp::vector<emp::Ptr<FileData>> file_data;
+  std::unordered_map<emp::String, emp::DataOutput> file_map;
   size_t output_frequency = 100;  // Updates between rows (applies to all files for now).
 
   // Find the file with this name, creating it (with a leading "Update" column) if new.
-  FileData & GetFile(const emp::String & file) {
-    for (size_t i = 0; i < file_names.size(); ++i) {
-      if (file_names[i] == file) return *file_data[i];
-    }
-    emp::Ptr<FileData> fd = emp::NewPtr<FileData>();
-    fd->output.SetFilename(file);
-    fd->output.SetFilepath(avida.GetDataDir());
-    fd->output.AddColumn("Update", [this](){ return avida.GetUpdate(); });
-    file_names.push_back(file);
-    file_data.push_back(fd);
-    return *fd;
-  }
+  emp::DataOutput & GetFile(const emp::String & filename) {
+    if (file_map.contains(filename)) return file_map[filename];
 
-  void WriteRow(FileData & fd) {
-    fd.output.DoOutput();
-    fd.last_update = avida.GetUpdate();
+    emp::DataOutput & new_file = file_map[filename];
+    new_file.SetFilename(filename);
+    new_file.SetFilepath(avida.GetDataDir());
+    new_file.AddColumn("Update", [this](){ return avida.GetUpdate(); });
+    return new_file;
   }
 
 public:
   FileOutput(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>(avida, "FileOutput", "IO",
         "Collect announced output columns into CSV data files.") {}
-  ~FileOutput() { for (emp::Ptr<FileData> fd : file_data) fd.Delete(); }
+  ~FileOutput() { }
 
   void Serialize(emp::SerialPod & /* pod */) {
-    // Columns are re-announced each run (BeforeStart) and files reopened on first write; nothing
-    // here needs saving.
+    // Columns are reset each run; nothing here needs saving.
   }
 
   void RegisterSettings() {
@@ -80,25 +60,19 @@ public:
   // === Signal Listeners ===
 
   // A module announced a column for `file`; route its text form into that file's CSV.
-  void OnOutputColumn(const emp::String & file, const OutputColumn & col) {
-    GetFile(file).output.AddColumn(col.name, col.as_text);
+  void OnOutputColumn(const emp::String & filename, const OutputColumn & col) {
+    GetFile(filename).AddColumn(col.name, col.as_text);
   }
 
   // Write headers and the initial (update 0) row.
   void OnStart() {
-    for (emp::Ptr<FileData> fd : file_data) WriteRow(*fd);
+    if (output_frequency == 0) return;
+    for (auto & [_, output] : file_map) output.DoOutput();
   }
 
   void OnUpdateEnd(size_t update) {
     if (output_frequency == 0 || update % output_frequency != 0) return;
-    for (emp::Ptr<FileData> fd : file_data) WriteRow(*fd);
+    for (auto & [_, output] : file_map) output.DoOutput();
   }
 
-  // Guarantee the final update is captured even if it did not land on a frequency boundary.
-  // Runs during Shutdown(), before the biota is cleared, so trait-scan columns are still valid.
-  void BeforeExit() {
-    for (emp::Ptr<FileData> fd : file_data) {
-      if (fd->last_update != avida.GetUpdate()) WriteRow(*fd);
-    }
-  }
 };
