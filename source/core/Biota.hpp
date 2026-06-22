@@ -163,6 +163,15 @@ public:
     return total / GetNumOrgs();
   }
 
+  template <std::invocable<const organism_t &> FUN_T>
+  [[nodiscard]] double CalcSum(const FUN_T & fun) const {
+    double total = 0.0;
+    for (size_t index : active_bits) {
+      total += fun(orgs[index]);
+    }
+    return total;
+  }
+
   void Serialize(emp::SerialPod & pod) {
     pod(orgs, active_bits, num_orgs, total_orgs);
   }
