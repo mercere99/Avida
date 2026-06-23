@@ -1,0 +1,122 @@
+#pragma once
+
+/*
+ *  This file is part of the Avida Digital Evolution Research Platform, v5.0
+ *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
+ *  Released under the MIT Public Licence.  See LICENSE.md for details.
+ *
+ *  Track the "metabolic rate" of each organism, to know how many CPU cycles they should receive.
+ * 
+ *  Other modules may modify the metabolic rate by either adding to the metabolic_base or
+ *  multiplying the metabolic_mult.  The final rate are these values multiplied together
+ *  and then multiplied by the genome length (to make organisms size neutral.)
+ */
+
+#include <cstddef>    // for size_t
+#include <iostream>
+
+#include "../core/Avida.hpp"
+
+template <typename AVIDA_T>
+class TrackMetabolism : public ModuleBase<AVIDA_T> {
+private:
+  using ModuleBase<AVIDA_T>::avida;
+
+public:
+  TrackMetabolism(AVIDA_T & avida)
+    : ModuleBase<AVIDA_T>(avida, "TrackMetabolism", "Analysis",
+        "Monitor the rate of CPU cycles that each organism should receive.") { }
+  ~TrackMetabolism() { }
+
+  void Serialize(emp::SerialPod & pod) { /* Nothing to save */  }
+
+  // === Phenotypic Traits ===
+
+  struct Phenotype {
+    double metabolic_base = 1.0;
+    double metabolic_mult = 1.0;
+    double parent_bonus = 0.0;      // How much metabolic bonus did parent org earn?
+    uint32_t gestation_cost = 0;    // How many CPU cycles to produce an offspring?
+    uint32_t parent_gestation = 0;  // How much cost for parent to produce this offspring?
+
+    double MetabolicBonus() { return metabolic_base * metabolic_mult; }
+    double MetabolicRate(size_t org_size) {
+      const double cur_bonus = MetabolicBonus();
+      return std::max(cur_bonus, parent_bonus) * org_size;
+    }
+  };
+
+  void RegisterTraits() {
+    AVIDA_REGISTER_TRAIT(metabolic_base,   "Relative base speed of the virtual CPU for this organism.");
+    AVIDA_REGISTER_TRAIT(metabolic_mult,   "Bonus speed multiple from tasks.");
+    AVIDA_REGISTER_TRAIT(parent_bonus,     "Bonus received while producing this offspring.");
+    AVIDA_REGISTER_TRAIT(gestation_cost,   "How many CPU cycles to produce an offspring?");
+    AVIDA_REGISTER_TRAIT(parent_gestation, "CPU cycles parent used to produce this offspring?");
+  }
+
+  void RegisterSettings() {
+  }
+
+  void RegisterCallbacks() {
+  }
+
+  // === Signal Listeners ===
+
+  // Reset all phenotype traits on inject.
+  template <concepts::Organism ORG_T>
+  void OnInjectReady(ORG_T & org) {
+    auto & phenotype = org.GetPhenotype();
+    phenotype.metabolic_base   = 1.0;
+    phenotype.metabolic_mult   = 1.0;
+    phenotype.parent_bonus     = 0.0; // No parent info on inject.
+    phenotype.gestation_cost   = 0;
+    phenotype.parent_gestation = 0;   // No parent info on inject.
+  }
+
+  // Inherit OR reset all phenotype traits no offspring init.
+  template <concepts::Organism ORG_T>
+  void OnOffspringInit(ORG_T & offspring, ORG_T & parent) {
+    auto & phenotype = offspring.GetPhenotype();
+    phenotype.metabolic_base = 1.0;
+    phenotype.metabolic_mult = 1.0;
+    phenotype.parent_bonus = parent.GetPhenotype().MetabolicBonus();
+    phenotype.gestation_cost = 0;
+    phenotype.parent_gestation = parent.GetPhenotype().gestation_cost;
+  }
+};
+
+/**
+ * DEVELOPER NOTES: What should this file look like in future AvidaScript mode?
+ *  Track the "metabolic rate" of each organism, to know how many CPU cycles they should receive.
+ * 
+ *  Other modules may modify the metabolic rate by either adding to the metabolic_base or
+ *  multiplying the metabolic_mult.  The final rate are these values multiplied together
+ *  and then multiplied by the genome length (to make organisms size neutral.)
+
+Module TrackMetabolism {
+  desc: "Monitor the rate of CPU cycles that each organism should receive."
+  type: Analysis
+
+  trait metabolic_base : double(1.0) {
+    desc: "Relative base speed of the virtual CPU for this organism."
+  }
+  trait metabolic_mult : double(1.0) {
+    desc: "Bonus speed multiple from tasks."
+  }
+
+  trait parent_bonus : double(0.0) {
+    desc:      "Bonus earned by parent while producing this offspring."
+    offspring: metabolic_base * metabolic_mult // Inherit product of old base and mult
+  }
+
+  trait gestation_cost : uint32_t(0) {
+    desc: "How many CPU cycles to produce an offspring?"
+  }
+
+  trait parent_gestation : uint32_t(0) {
+    desc:      "CPU cycles parent used to produce this offspring?"
+    offspring: gestation_cost
+  }
+}
+
+ */
