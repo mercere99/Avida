@@ -10,6 +10,7 @@
 
 #include <filesystem>  // std::filesystem::path
 #include <fstream>     // std::ifstream, std::ofstream
+#include <type_traits> // std::is_arithmetic_v, std::invoke_result_t
 
 #include "emp/base/Ptr.hpp"
 #include "emp/base/vector.hpp"
@@ -192,6 +193,13 @@ public:
     });
   }
 
+  [[nodiscard]] double CalcTraitSum(const emp::String & name) const {
+    const auto & trait = GetTrait(name);
+    return biota.CalcSum([&trait](const organism_t & org){
+      return trait.AsDouble(org);
+    });
+  }
+
   [[nodiscard]] auto & FindOrg_MinTrait(const emp::String & name) const {
     emp_assert(biota.GetNumOrgs() > 0);
     const auto & trait = GetTrait(name);
@@ -209,6 +217,40 @@ public:
     });
     return biota[id];
   }
+
+  // ====== Output Management ======
+
+  // Announce an output column to every output-interface module (file, web, console, ...).
+  // The receiver can decide how they want to interpret the return value from fun.
+  // (E.g., creating CSV outputs, graphs, etc.)
+  template <typename FUN_T>
+  void AddOutput(const emp::String & filename, const emp::String & output_name, FUN_T fun) {
+    AVIDA_SIGNAL(OnDeclareOutput(filename, output_name, fun));
+  }
+
+  // Collect trait information from the active population.
+  // Use "mean" value by default.  Trait name can be followed with a specifier:
+  //   trait:mean
+  //   trait:max
+  //   trait:min
+  //   trait:sum
+  void AddOutputTrait(const emp::String & filename,
+                      const emp::String & output_name,
+                      emp::String trait_info) {
+    emp::String trait = trait_info.Pop(':');
+    if (trait_info.empty() || trait_info == "mean") {
+      AddOutput(filename, output_name, [this, trait](){ return CalcTraitAve(trait); });
+    } else if (trait_info == "min") {
+      AddOutput(filename, output_name, [this, trait](){ return CalcTraitMin(trait); });
+    } else if (trait_info == "max") {
+      AddOutput(filename, output_name, [this, trait](){ return CalcTraitMax(trait); });
+    } else if (trait_info == "sum") {
+      AddOutput(filename, output_name, [this, trait](){ return CalcTraitSum(trait); });
+    } else {
+      emp::notify::Error("Unknown stat '", trait_info, "' for trait '", trait, "'.");
+    }
+  }
+
 
   // Get a plug-in by realized type.
   template <typename PLUG_IN_T>
