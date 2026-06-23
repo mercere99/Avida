@@ -5,16 +5,14 @@
  *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
- *  Output-interface module: collect columns announced via Avida::AddOutputColumn /
- *  AddTraitColumn (the OnOutputColumn signal) into CSV data files.  Each distinct file name
- *  becomes one CSV with an automatic leading "Update" column.  Rows are written at the start of
- *  a run, every `fileout.frequency` updates, and once more on the final update.
- *
- *  Other interfaces (e.g. a web view) can listen for the same OnOutputColumn signal and render
- *  the columns differently; producers stay unaware of which sinks are present.
+ *  Output-interface module:
+ *  Collect functions announced via the RegisterOutput signal into CSV data files.
+ *  Each distinct filename becomes one CSV with an automatic leading "Update" column.
+ *  Rows are written every `fileout.frequency` updates.
  */
 
-#include <cstddef>   // for size_t
+#include <cstddef>        // for size_t
+#include <unordered_map>
 
 #include "emp/base/Ptr.hpp"
 #include "emp/base/vector.hpp"
@@ -60,8 +58,12 @@ public:
   // === Signal Listeners ===
 
   // A module announced a column for `file`; route its text form into that file's CSV.
-  void OnOutputColumn(const emp::String & filename, const OutputColumn & col) {
-    GetFile(filename).AddColumn(col.name, col.as_text);
+  void OnDeclareOutput(const emp::String & filename, const emp::String & output_name, auto fun) {
+    // using result_t = std::remove_cvref_t<std::invoke_result_t<FUN_T>>;
+    // if constexpr (std::is_arithmetic_v<result_t>) {
+    //   auto num_fun = [fun](){ return static_cast<double>(fun()); };
+    // }
+    GetFile(filename).AddColumn(output_name, [fun](){ return emp::MakeString(fun()); });
   }
 
   // Write headers and the initial (update 0) row.
