@@ -57,18 +57,27 @@ public:
   struct Phenotype {
     double metabolic_base = 1.0;
     double metabolic_mult = 1.0;
+    double parent_bonus = 0.0;      // How much metabolic bonus did parent org earn?
+    uint32_t gestation_cost = 0;    // How many CPU cycles to produce an offspring?
+    uint32_t parent_gestation = 0;  // How much cost for parent to produce this offspring?
     double MetabolicBonus() { return metabolic_base * metabolic_mult; }
   };
 
+  // Calculate how fast this organism should run.  It should be the rate its parent
+  // earned during replication unless it has already earned a higher rate.
+  // Always multiple by current genome length.
   template <concepts::Organism ORG_T>
   static double CalcMetabolicRate(ORG_T & org) {
-    return org.GetPhenotype().MetabolicBonus() * org.GetGenome().size();
+    const double cur_rate = org.GetPhenotype().MetabolicBonus();
+    return std::max<double>(cur_rate, org.GetPhenotype().parent_bonus) * org.GetGenome().size();
   }
 
   void RegisterTraits() {
-    // AVIDA_REQUIRE_TRAIT(size_t, generation);
-    AVIDA_REGISTER_TRAIT(metabolic_base, "Relative base speed of the virtual CPU for this organism.");
-    AVIDA_REGISTER_TRAIT(metabolic_mult, "Bonus speed multiple from tasks.");
+    AVIDA_REGISTER_TRAIT(metabolic_base,   "Relative base speed of the virtual CPU for this organism.");
+    AVIDA_REGISTER_TRAIT(metabolic_mult,   "Bonus speed multiple from tasks.");
+    AVIDA_REGISTER_TRAIT(parent_bonus,     "Bonus received while producing this offspring.");
+    AVIDA_REGISTER_TRAIT(gestation_cost,   "How many CPU cycles to produce an offspring?");
+    AVIDA_REGISTER_TRAIT(parent_gestation, "CPU cycles parent used to produce this offspring?");
   }
 
   void RegisterSettings() {
@@ -133,14 +142,22 @@ public:
   // later OnOffspringReady phase.
   template <concepts::Organism ORG_T>
   void OnInjectReady(ORG_T & org) {
-    org.GetPhenotype().metabolic_base = 1.0;
-    org.GetPhenotype().metabolic_mult = 1.0;
+    auto & phenotype = org.GetPhenotype();
+    phenotype.metabolic_base   = 1.0;
+    phenotype.metabolic_mult   = 1.0;
+    phenotype.parent_bonus     = 0.0; // No parent info on inject.
+    phenotype.gestation_cost   = 0;
+    phenotype.parent_gestation = 0;   // No parent info on inject.
   }
 
   template <concepts::Organism ORG_T>
-  void OnOffspringInit(ORG_T & offspring, ORG_T & /*parent*/) {
-    offspring.GetPhenotype().metabolic_base = 1.0;
-    offspring.GetPhenotype().metabolic_mult = 1.0;
+  void OnOffspringInit(ORG_T & offspring, ORG_T & parent) {
+    auto & phenotype = offspring.GetPhenotype();
+    phenotype.metabolic_base = 1.0;
+    phenotype.metabolic_mult = 1.0;
+    phenotype.parent_bonus = parent.GetPhenotype().MetabolicBonus();
+    phenotype.gestation_cost = 0;
+    phenotype.parent_gestation = parent.GetPhenotype().gestation_cost;
   }
 
   template <concepts::Organism ORG_T>
