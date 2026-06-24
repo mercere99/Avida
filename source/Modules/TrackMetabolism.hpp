@@ -28,7 +28,7 @@ public:
         "Monitor the rate of CPU cycles that each organism should receive.") { }
   ~TrackMetabolism() { }
 
-  void Serialize(emp::SerialPod & pod) { /* Nothing to save */  }
+  void Serialize(emp::SerialPod &) { /* Nothing to save */  }
 
   // === Phenotypic Traits ===
 
@@ -39,10 +39,11 @@ public:
     uint32_t gestation_cost = 0;    // How many CPU cycles to produce an offspring?
     uint32_t parent_gestation = 0;  // How much cost for parent to produce this offspring?
 
-    double MetabolicBonus() { return metabolic_base * metabolic_mult; }
-    double MetabolicRate(size_t org_size) {
-      const double cur_bonus = MetabolicBonus();
-      return std::max(cur_bonus, parent_bonus) * org_size;
+    double MetabolicBonus() const { return metabolic_base * metabolic_mult; }
+    double MetabolicRate(size_t org_size) const {
+      // Run at our own earned bonus, or HALF of what we inherited -- whichever is larger.  The
+      // inherited floor halves each generation, so it decays unless the organism re-earns it.
+      return std::max(MetabolicBonus(), parent_bonus / 2.0) * org_size;
     }
   };
 
@@ -62,6 +63,25 @@ public:
 
   // === Signal Listeners ===
 
+  void BeforeStart() {
+    auto metabolic_fun = [](const concepts::Organism auto & org) {
+      return org.GetPhenotype().MetabolicRate(org.GetGenome().size());
+    };
+
+    avida.AddOutputTrait("metabolism.csv", "Minimum Bonus", "parent_bonus:min");
+    avida.AddOutputTrait("metabolism.csv", "Average Bonus", "parent_bonus:mean");
+    avida.AddOutputTrait("metabolism.csv", "Maximum Bonus", "parent_bonus:max");
+    avida.AddOutput("metabolism.csv", "Minimum Metabolic Rate",
+      [&](){ return avida.GetBiota().CalcMinimum(metabolic_fun); });
+    avida.AddOutput("metabolism.csv", "Average Metabolic Rate",
+      [&](){ return avida.GetBiota().CalcAverage(metabolic_fun); });
+    avida.AddOutput("metabolism.csv", "Maximum Metabolic Rate",
+      [&](){ return avida.GetBiota().CalcMaximum(metabolic_fun); });
+    avida.AddOutputTrait("metabolism.csv", "Minimum Gestation Cost", "parent_gestation:min");
+    avida.AddOutputTrait("metabolism.csv", "Average Gestation Cost", "parent_gestation:mean");
+    avida.AddOutputTrait("metabolism.csv", "Maximum Gestation Cost", "parent_gestation:max");
+  }
+
   // Reset all phenotype traits on inject.
   template <concepts::Organism ORG_T>
   void OnInjectReady(ORG_T & org) {
@@ -73,15 +93,28 @@ public:
     phenotype.parent_gestation = 0;   // No parent info on inject.
   }
 
-  // Inherit OR reset all phenotype traits no offspring init.
+  // A divide is symmetric fission into two fresh daughters: the new offspring (set up here) and
+  // the dividing cell itself (reset in OnOffspringReady).  The offspring starts with the bonus its
+  // parent earned this gestation as its starting floor (halved -- see MetabolicRate).
   template <concepts::Organism ORG_T>
   void OnOffspringInit(ORG_T & offspring, ORG_T & parent) {
     auto & phenotype = offspring.GetPhenotype();
     phenotype.metabolic_base = 1.0;
     phenotype.metabolic_mult = 1.0;
-    phenotype.parent_bonus = parent.GetPhenotype().MetabolicBonus();
+    phenotype.parent_bonus = parent.GetPhenotype().MetabolicBonus();  // Bonus the parent earned.
     phenotype.gestation_cost = 0;
     phenotype.parent_gestation = parent.GetPhenotype().gestation_cost;
+  }
+
+  // The other half of the fission: once the offspring has taken its copy of the earned bonus, the
+  // parent also restarts as a fresh daughter -- it banks what it earned into parent_bonus and
+  // resets its own rate, so it must re-earn its bonus from the same halved floor as the offspring.
+  template <concepts::Organism ORG_T>
+  void OnOffspringReady(ORG_T & /* offspring */, ORG_T & parent) {
+    auto & p = parent.GetPhenotype();
+    p.parent_bonus   = p.MetabolicBonus();  // Bank what it earned this gestation (the shared floor).
+    p.metabolic_base = 1.0;
+    p.metabolic_mult = 1.0;
   }
 };
 
@@ -100,6 +133,7 @@ Module TrackMetabolism {
   trait metabolic_base : double(1.0) {
     desc: "Relative base speed of the virtual CPU for this organism."
   }
+
   trait metabolic_mult : double(1.0) {
     desc: "Bonus speed multiple from tasks."
   }
@@ -116,6 +150,11 @@ Module TrackMetabolism {
   trait parent_gestation : uint32_t(0) {
     desc:      "CPU cycles parent used to produce this offspring?"
     offspring: gestation_cost
+  }
+
+  function MetabolicRate(org: Organism) : double {
+    const cur_bonus:double = metabolic_base * metabolic_mult
+    return max(parent_bonus, cur_bonus) * org.genome.size;
   }
 }
 
