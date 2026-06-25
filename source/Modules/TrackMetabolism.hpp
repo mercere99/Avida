@@ -10,6 +10,8 @@
  *  Other modules may modify the metabolic rate by either adding to the metabolic_base or
  *  multiplying the metabolic_mult.  The final rate are these values multiplied together
  *  and then multiplied by the genome length (to make organisms size neutral.)
+ * 
+ *  Requires: Some form of hardware.
  */
 
 #include <cstddef>    // for size_t
@@ -36,8 +38,7 @@ public:
     double metabolic_base = 1.0;
     double metabolic_mult = 1.0;
     double parent_bonus = 0.0;      // How much metabolic bonus did parent org earn?
-    uint32_t gestation_cost = 0;    // How many CPU cycles to produce an offspring?
-    uint32_t parent_gestation = 0;  // How much cost for parent to produce this offspring?
+    uint32_t gestation_cost = 0;    // How many CPU did it take for this or to be made?
 
     double MetabolicBonus() const { return metabolic_base * metabolic_mult; }
     double MetabolicRate(size_t org_size) const {
@@ -52,7 +53,6 @@ public:
     AVIDA_REGISTER_TRAIT(metabolic_mult,   "Bonus speed multiple from tasks.");
     AVIDA_REGISTER_TRAIT(parent_bonus,     "Bonus received while producing this offspring.");
     AVIDA_REGISTER_TRAIT(gestation_cost,   "How many CPU cycles to produce an offspring?");
-    AVIDA_REGISTER_TRAIT(parent_gestation, "CPU cycles parent used to produce this offspring?");
   }
 
   void RegisterSettings() {
@@ -67,6 +67,11 @@ public:
     auto metabolic_fun = [](const concepts::Organism auto & org) {
       return org.GetPhenotype().MetabolicRate(org.GetGenome().size());
     };
+    auto fitness_fun = [](const concepts::Organism auto & org) {
+      const double mrate = org.GetPhenotype().MetabolicRate(org.GetGenome().size());
+      const uint32_t gest = org.GetPhenotype().gestation_cost;
+      return mrate / gest;
+    };
 
     avida.AddOutputTrait("metabolism.csv", "Minimum Bonus", "parent_bonus:min");
     avida.AddOutputTrait("metabolism.csv", "Average Bonus", "parent_bonus:mean");
@@ -77,9 +82,15 @@ public:
       [&](){ return avida.GetBiota().CalcAverage(metabolic_fun); });
     avida.AddOutput("metabolism.csv", "Maximum Metabolic Rate",
       [&](){ return avida.GetBiota().CalcMaximum(metabolic_fun); });
-    avida.AddOutputTrait("metabolism.csv", "Minimum Gestation Cost", "parent_gestation:min");
-    avida.AddOutputTrait("metabolism.csv", "Average Gestation Cost", "parent_gestation:mean");
-    avida.AddOutputTrait("metabolism.csv", "Maximum Gestation Cost", "parent_gestation:max");
+    avida.AddOutputTrait("metabolism.csv", "Minimum Gestation Cost", "gestation_cost:min");
+    avida.AddOutputTrait("metabolism.csv", "Average Gestation Cost", "gestation_cost:mean");
+    avida.AddOutputTrait("metabolism.csv", "Maximum Gestation Cost", "gestation_cost:max");
+    avida.AddOutput("metabolism.csv", "Minimum Fitness",
+      [&](){ return avida.GetBiota().CalcMinimum(fitness_fun); });
+    avida.AddOutput("metabolism.csv", "Average Fitness",
+      [&](){ return avida.GetBiota().CalcAverage(fitness_fun); });
+    avida.AddOutput("metabolism.csv", "Maximum Fitness",
+      [&](){ return avida.GetBiota().CalcMaximum(fitness_fun); });
   }
 
   // Reset all phenotype traits on inject.
@@ -90,7 +101,6 @@ public:
     phenotype.metabolic_mult   = 1.0;
     phenotype.parent_bonus     = 0.0; // No parent info on inject.
     phenotype.gestation_cost   = 0;
-    phenotype.parent_gestation = 0;   // No parent info on inject.
   }
 
   // A divide is symmetric fission into two fresh daughters: the new offspring (set up here) and
@@ -98,12 +108,15 @@ public:
   // parent earned this gestation as its starting floor (halved -- see MetabolicRate).
   template <concepts::Organism ORG_T>
   void OnOffspringInit(ORG_T & offspring, ORG_T & parent) {
+    auto & p_phenotype = parent.GetPhenotype();
+    p_phenotype.gestation_cost = parent.Hardware().GetExeCount();
+    parent.Hardware().ResetBirth();
+
     auto & phenotype = offspring.GetPhenotype();
     phenotype.metabolic_base = 1.0;
     phenotype.metabolic_mult = 1.0;
-    phenotype.parent_bonus = parent.GetPhenotype().MetabolicBonus();  // Bonus the parent earned.
-    phenotype.gestation_cost = 0;
-    phenotype.parent_gestation = parent.GetPhenotype().gestation_cost;
+    phenotype.parent_bonus = p_phenotype.MetabolicBonus();  // Bonus the parent earned.
+    phenotype.gestation_cost = p_phenotype.gestation_cost;
   }
 
   // The other half of the fission: once the offspring has taken its copy of the earned bonus, the
@@ -145,10 +158,6 @@ Module TrackMetabolism {
 
   trait gestation_cost : uint32_t(0) {
     desc: "How many CPU cycles to produce an offspring?"
-  }
-
-  trait parent_gestation : uint32_t(0) {
-    desc:      "CPU cycles parent used to produce this offspring?"
     offspring: gestation_cost
   }
 
