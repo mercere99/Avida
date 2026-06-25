@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstddef>     // for size_t
 #include <functional>  // for std::function
+#include <limits>      // for std::numeric_limits
 #include <tuple>
 #include <utility>
 
@@ -46,6 +47,7 @@ public:
 
   // Configured types.
   using data_t = int32_t;                         // Data type used by this VM
+  using udata_t = std::make_unsigned_t<data_t>;   // uint32_t
   using mem_t = emp::array<data_t, MEM_SIZE>;     // Memory is a fixed size
   using genome_t = Genome<uint8_t>;               // Genomes capped at 256 instructions
   using inst_set_t = InstSet<AvidaVM, MAX_INSTS>; // Instruction set type for AvidaVM
@@ -86,10 +88,12 @@ private:
   mem_t memory{};               // Storage of values being manipulated by this organism.
   emp::Ptr<const inst_set_t> inst_set_ptr = nullptr;  // Map of instruction names to functionality.
 
-  emp::array<size_t, NUM_NOPS> heads;
-  emp::array<Stack, NUM_NOPS> stacks;
-  size_t error_count = 0;
-  size_t biota_id;              // ID of organism from the biota.
+  emp::array<size_t, NUM_NOPS> heads{};
+  emp::array<Stack, NUM_NOPS> stacks{};
+  size_t exe_count = 0;              // How many instructions have been executed?
+  size_t copy_count = 0;             // How many instructions copied into the genome this gestation?
+  size_t error_count = 0;            // How many instructions tried something illegal?
+  size_t biota_id = emp::MAX_SIZE_T; // ID of organism from the biota.
 
   // =========== Helper Functions ============
 
@@ -111,6 +115,7 @@ private:
     }
     if (pos < genome.size()) genome.Insert(pos, id);
     else genome.Push(id); // At or past end, just push on back (most common)
+    ++copy_count;         // Count instructions actually copied this gestation (gates divide).
   }
 
   /// Write to the memory
@@ -225,10 +230,13 @@ public:
     : genome(genome), inst_set_ptr(&inst_set) { Reset(); }
 
   void Serialize(emp::SerialPod & pod) {
-    pod(genome, memory, heads, stacks, error_count, biota_id);
+    pod(genome, memory, heads, stacks, exe_count, copy_count, error_count, biota_id);
   }
 
   // === Accessors ===
+
+  [[nodiscard]] size_t GetExeCount() const { return exe_count; }
+  [[nodiscard]] size_t GetErrorCount() const { return error_count; }
   
   [[nodiscard]] size_t GetBiotaID() const { return biota_id; }
   AvidaVM & SetBiotaID(size_t in) { biota_id = in; return *this; }
@@ -248,6 +256,7 @@ public:
     const inst_id_t exec_id = ReadIP();
     AdvanceIP();
     GetInstSet().Execute(*this, exec_id);
+    ++exe_count;
   }
 
   void Trace(size_t cpu_cycles=200, std::ostream & os=std::cout) {
@@ -270,6 +279,15 @@ public:
     // Reset the stacks.
     for (auto & stack : stacks) stack.Reset();
 
+    exe_count = 0;    // Reset execution count.
+    copy_count = 0;   // Reset count of instructions copied this gestation.
+    error_count = 0;  // Reset all errors.
+  }
+
+  // Partially reset hardware after birth.
+  void ResetBirth() {
+    exe_count = 0;    // Reset execution count.
+    copy_count = 0;   // Reset count of instructions copied this gestation.
     error_count = 0;  // Reset all errors.
   }
 
@@ -316,8 +334,18 @@ public:
       return genome_t{};
     }
 
+    // Require that the offspring was actually copied this gestation -- an organism cannot hand out
+    // more instructions than it has copied.  This blocks "free" divides that just re-extract an
+    // existing region of the genome without copying (which would make gestation cost ~1).
+    const size_t offspring_size = head2 - head1;
+    if (copy_count < offspring_size) {
+      ++error_count;
+      return genome_t{};  // Keep copy_count: the organism can copy more and retry.
+    }
+
     // Extract the offspring from the genome.
-    genome_t offspring = genome.Extract(head1, head2 - head1);
+    genome_t offspring = genome.Extract(head1, offspring_size);
+    copy_count = 0;  // A new gestation begins for this cell.
 
     // Reset the heads.
     head2 = head1;  // Move head2 to the beginning of the extracted position (likely org end)
@@ -364,17 +392,19 @@ public:
       if (i) out += ',';
       out.Append(static_cast<int>(memory[i]));
     }
+
     out.Append("\nHeads: IP:", IP(),
-      " GenRead:", heads[1],
-      " GenWrite:", heads[2],
-      " MemRead:", heads[3],
-      " MemWrite:", heads[4],
-      " Flow:", heads[5]);
+      " GenRead:", heads[HEAD_G_READ],
+      " GenWrite:", heads[HEAD_G_WRITE],
+      " MemRead:", heads[HEAD_M_READ],
+      " MemWrite:", heads[HEAD_M_WRITE],
+      " Flow:", heads[HEAD_FLOW]);
     out += "\nStacks: ";
     for (size_t i = 0; i < stacks.size(); ++i ) {
       if (i) out += "; ";
       out.Append(static_cast<char>('A' + i), ':', stacks[i].ToString());
     }
+    out.Append("\nexe_count = ", exe_count);
     out.Append("\nerror_count = ", error_count);
     out.Append("\nNEXT >>>>>>>>>>>> ", NextInstName(), " [", NextInstSymbol(), "]");
     return out;
@@ -382,6 +412,7 @@ public:
 
 
   bool OK() const {
+    // @CAO Add tests here...
     return true;
   }
 };
@@ -415,27 +446,30 @@ struct AvidaVM_Insts {
   // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X<<Y
   static void Shift(vm_t & vm) {
     const auto [X_id, Y_id, output_id] = vm.GetArgs<vm_t::Nop::A, vm_t::Nop::FIRST_ARG, vm_t::Nop::FIRST_ARG>();
-    const size_t X = vm.stacks[X_id].Pop();
-    const size_t Y = vm.stacks[Y_id].Pop();
+    const auto X = static_cast<vm_t::udata_t>(vm.stacks[X_id].Pop());
+    const auto Y = static_cast<vm_t::udata_t>(vm.stacks[Y_id].Pop());
     vm.stacks[output_id].Push(X << (Y % vm_t::DATA_BITS));
   }
 
   // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X + Y
   static void Add(vm_t & vm) {
     const auto [X_id, Y_id, output_id] = vm.GetArgs<vm_t::Nop::A, vm_t::Nop::FIRST_ARG, vm_t::Nop::FIRST_ARG>();
-    vm.stacks[output_id].Push(vm.stacks[X_id].Pop() + vm.stacks[Y_id].Pop());
+    const auto result = emp::WrapAdd(vm.stacks[X_id].Pop(), vm.stacks[Y_id].Pop());
+    vm.stacks[output_id].Push(result);
   }
 
   // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X - Y
   static void Sub(vm_t & vm) {
     const auto [X_id, Y_id, output_id] = vm.GetArgs<vm_t::Nop::A, vm_t::Nop::FIRST_ARG, vm_t::Nop::FIRST_ARG>();
-    vm.stacks[output_id].Push(vm.stacks[X_id].Pop() - vm.stacks[Y_id].Pop());
+    const auto result = emp::WrapSub(vm.stacks[X_id].Pop(), vm.stacks[Y_id].Pop());
+    vm.stacks[output_id].Push(result);
   }
 
   // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X * Y
   static void Mult(vm_t & vm) {
     const auto [X_id, Y_id, output_id] = vm.GetArgs<vm_t::Nop::A, vm_t::Nop::FIRST_ARG, vm_t::Nop::FIRST_ARG>();
-    vm.stacks[output_id].Push(vm.stacks[X_id].Pop() * vm.stacks[Y_id].Pop());
+    const auto result = emp::WrapMult(vm.stacks[X_id].Pop(), vm.stacks[Y_id].Pop());
+    vm.stacks[output_id].Push(result);
   }
 
   // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X / Y  (error on Y==0)
@@ -443,7 +477,7 @@ struct AvidaVM_Insts {
     const auto [X_id, Y_id, output_id] = vm.GetArgs<vm_t::Nop::A, vm_t::Nop::FIRST_ARG, vm_t::Nop::FIRST_ARG>();
     const vm_t::data_t X = vm.stacks[X_id].Pop();
     const vm_t::data_t Y = vm.stacks[Y_id].Pop();
-    if (Y == 0) ++vm.error_count;
+    if (Y == 0 || (X == std::numeric_limits<vm_t::data_t>::min() && Y == -1)) ++vm.error_count;
     else vm.stacks[output_id].Push(X / Y);
   }
 
@@ -459,7 +493,8 @@ struct AvidaVM_Insts {
   // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; Push[Arg1] : X ** Y
   static void Exp(vm_t & vm) {
     const auto [X_id, Y_id, output_id] = vm.GetArgs<vm_t::Nop::A, vm_t::Nop::FIRST_ARG, vm_t::Nop::FIRST_ARG>();
-    vm.stacks[output_id].Push(emp::Pow(vm.stacks[X_id].Pop(), vm.stacks[Y_id].Pop()));
+    const auto result = emp::Pow(vm.stacks[X_id].Pop(), vm.stacks[Y_id].Pop());
+    vm.stacks[output_id].Push(result);
   }
 
   // Inst: X = Pop[Nop-A] ; Y = Pop[Arg1] ; push back, swapping if X < Y.
@@ -592,7 +627,7 @@ struct AvidaVM_Insts {
   // Inst: Pop Stack [Nop-A] and move Head[Nop-F] to that position.
   static void SetHead(vm_t & vm) {
     const auto [stack_id, head_id] = vm.GetArgs<vm_t::Nop::A, vm_t::Nop::F>();
-    vm.heads[head_id] = static_cast<size_t>(vm.stacks[stack_id].Pop());
+    vm.heads[head_id] = static_cast<vm_t::data_t>(vm.stacks[stack_id].Pop());
   }
 
   // Inst: Jump Head[Nop-A] to Head[Nop-F]
