@@ -5,18 +5,17 @@
  *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
- *  Reward organisms for completing tasks (in any environment) by modifying their traits.
+ *  Reward organisms for completing tasks (in any environment) by modifying a trait.
  *
- *  Each configured reaction banks a bonus (additive or multiplicative) onto the organism
- *  that performs the task.  Bonuses are NOT applied to the performing organism directly;
- *  instead they are transferred to its offspring at birth.  This reproduces the classic
- *  Avida "merit" model: an organism is born with the merit its parent earned over the
- *  parent's lifetime, so a reward offsets to the next generation rather than retroactively
- *  changing a scheduling decision that drivers lock in at placement.
+ *  Each configured reaction applies a bonus (additive or multiplicative) to a trait on the
+ *  organism that performs the task -- typically its metabolic_mult, so doing tasks raises the
+ *  organism's own metabolic rate.  When the organism divides, that earned bonus passes to its
+ *  offspring as a starting floor (handled by TrackMetabolism's fission), and must be re-earned
+ *  the next gestation.
  *
- *  This module also tracks, per organism, how many times it (and its parent) performed each
- *  task.  The data file reports, per task, how many current organisms had a parent perform it
- *  at least once -- a proxy for how many organisms are likely capable of that task.
+ *  This module also tracks, per organism, how many times it performed each task this gestation,
+ *  and what its parent performed.  The data file reports, per task, how many current organisms
+ *  had a parent perform it -- a proxy for how many are likely capable of that task.
  */
 
 #include <cstddef>    // for size_t
@@ -66,9 +65,9 @@ private:
   // Count active organisms whose parent performed `task_id` at least once (a capability proxy).
   size_t CountParentPerformers(size_t task_id) {
     size_t count = 0;
-    avida.GetBiota().ForEachOrg([&](auto & org) {
-      const auto & pc = org.GetPhenotype().parent_task_counts;
-      if (task_id < pc.size() && pc[task_id]) ++count;
+    avida.GetBiota().ForEachOrg([&](auto & org) {      
+      const auto & p_tasks = org.GetPhenotype().parent_task_counts;
+      if (task_id < p_tasks.size() && p_tasks[task_id]) ++count;
     });
     return count;
   }
@@ -87,18 +86,18 @@ public:
 
   // === Phenotypic Traits ===
 
-  // Per-organism state.  earned_add / earned_mult bank the bonus this organism earns for its
-  // OFFSPRING (indexed by target-trait ID).  task_counts records how many times THIS organism
-  // performed each task this lifetime; parent_task_counts is its parent's final tally, copied
-  // at birth (both indexed by task ID).
+  // Per-organism state, indexed by task ID.  task_counts is how many times this organism has
+  // performed each task THIS gestation; it caps reaction rewards and is reset on divide, so a
+  // bonus must be re-earned each gestation.  parent_task_counts is the parent's task_counts for
+  // the gestation that produced this organism, copied at birth.
   struct Phenotype {
-    emp::vector<size_t> task_counts;        // Times THIS organism performed each task.
-    emp::vector<size_t> parent_task_counts; // Times this organism's PARENT performed each task.
+    emp::vector<size_t> task_counts;        // Times performed each task THIS gestation.
+    emp::vector<size_t> parent_task_counts; // Parent's task_counts for the gestation that made us.
   };
 
   void RegisterTraits() {
-    AVIDA_REGISTER_TRAIT(task_counts, "Times organism performed each task.");
-    AVIDA_REGISTER_TRAIT(parent_task_counts, "Times organism's parent performed each task.");
+    AVIDA_REGISTER_TRAIT(task_counts, "Times organism performed each task this gestation.");
+    AVIDA_REGISTER_TRAIT(parent_task_counts, "Times organism's parent performed each task (its gestation).");
   }
 
   void RegisterSettings() {
@@ -159,18 +158,20 @@ public:
     }
   }
 
-  // Count this task for the organism and bank any rewards (which reach its offspring at birth).
+  // Count this task and apply each associated reaction's bonus to the organism's own rate trait.
+  // That earned bonus passes to the organism's offspring as a starting floor when it divides
+  // (handled by TrackMetabolism's fission), and is re-earned the next gestation.
   template <concepts::Organism ORG_T>
   void OnTaskComplete(ORG_T & org, size_t task_id) {
     emp_assert(task_id < task_reactions.size(), task_id, task_reactions.size());
 
     auto & task_counts = org.GetPhenotype().task_counts;
-    const size_t n = ++task_counts[task_id];  // Nth time THIS organism performed this task.
+    const size_t n = ++task_counts[task_id];  // Nth time performed this gestation.
 
     // Trigger all reactions associated with this task.
     for (size_t r_idx : task_reactions[task_id]) {
       const Reaction & react = reactions[r_idx];
-      if (react.max_triggers && n > react.max_triggers) continue;  // Past reaction's lifetime cap.
+      if (react.max_triggers && n > react.max_triggers) continue;  // Past this gestation's cap.
       switch (react.op) {
       case Op::ADD:  react.trait_ptr->GetAccessFun()(org) += react.value; break;
       case Op::MULT: react.trait_ptr->GetAccessFun()(org) *= react.value; break;
@@ -178,9 +179,13 @@ public:
     }
   }
 
+  // The offspring inherits the parent's task counts for the gestation that produced it; the parent
+  // then begins a fresh gestation and must re-earn its task bonuses (mirroring the rate reset in
+  // TrackMetabolism's OnOffspringReady).
   template <concepts::Organism ORG_T>
   void OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
     offspring.GetPhenotype().parent_task_counts = parent.GetPhenotype().task_counts;
+    parent.GetPhenotype().task_counts.assign(avida.GetNumTasks(), 0);
   }
 
   // Injected organisms have no parent, so they start with an empty parental task history.
@@ -189,9 +194,8 @@ public:
     org.GetPhenotype().parent_task_counts.assign(avida.GetNumTasks(), 0);
   }
 
-  // Give every organism a clean slate of banked bonuses and its own task counts at activation.
-  // parent_task_counts is set at birth (OnOffspringInit) or injection (OnInjectReady), so it
-  // is intentionally left intact here.
+  // Start every organism's first gestation with zero task counts.  parent_task_counts was set at
+  // birth (OnOffspringReady) or injection (OnInjectReady), so it is intentionally left intact here.
   template <concepts::Organism ORG_T>
   void BeforePlacement(ORG_T & org) {
     org.GetPhenotype().task_counts.assign(avida.GetNumTasks(), 0);
