@@ -51,6 +51,8 @@ public:
   struct avida_stub_t {
     struct stub_genome_t {};
     using genome_t = stub_genome_t;
+    struct stub_organism_t {};
+    using organism_t = stub_organism_t;
   };
   template <typename T> using to_global_types = typename T::GlobalTypes;
   using stub_pack_t = emp::TypePack<PLUG_IN_Ts<avida_stub_t>...>;
@@ -125,7 +127,9 @@ public:
       [this](emp::vector<emp::String> kw_args) {
         emp::String filename = kw_args.size() ? kw_args[0] : "Avida.cfg";
         std::println("Generating config file '{}'...", filename);
-        settings.Save(filename);
+        std::ofstream ofs{filename};
+        settings.Save(ofs);
+        AVIDA_SIGNAL(OnConfigWrite(ofs));  // Set up any traits in the phenotype.
         Exit();
       }, "Generate a config file with the provided name (default: Avida.cfg) and stop", 'g', /*max_args=*/ 1);
 
@@ -218,6 +222,17 @@ public:
     return biota[id];
   }
 
+  // Find an organism by a description, such as "fitness:max" or ":first" or ":1038"
+  [[nodiscard]] auto & FindOrg(this auto & self, emp::String desc) {
+    emp::String trait_name = desc.Pop(':');
+    if (trait_name == "") {
+      if (desc == "first") return self.GetFirstOrg(); // ":first"
+      else emp::notify::Error("Uknown FindOrg command ':", desc, "'");
+    }
+    else if (desc == "max") return self.FindOrg_MaxTrait(trait_name);
+    else if (desc == "min") return self.FindOrg_MinTrait(trait_name);
+  }
+
   // ====== Output Management ======
 
   // Announce an output column to every output-interface module (file, web, console, ...).
@@ -230,15 +245,16 @@ public:
 
   // Collect trait information from the active population.
   // Use "mean" value by default.  Trait name can be followed with a specifier:
-  //   trait:mean
-  //   trait:max
-  //   trait:min
-  //   trait:sum
+  //   trait:min   -- Calculate this trait for all organisms and return lowest.
+  //   trait:mean  -- Calculate this trait for all organisms and return average.
+  //   trait:max   -- Calculate this trait for all organisms and return highest.
+  //   trait:sum   -- Calculate this trait for all organisms and return total.
+  //   trait:first -- Calculate this trait for only the first organism and it.
   void AddOutputTrait(const emp::String & filename,
                       const emp::String & output_name,
                       emp::String trait_info) {
     emp::String trait = trait_info.Pop(':');
-    if (trait_info.empty() || trait_info == "mean") {
+    if (trait_info.empty() || trait_info == "mean" || trait_info == "ave") {
       AddOutput(filename, output_name, [this, trait](){ return CalcTraitAve(trait); });
     } else if (trait_info == "min") {
       AddOutput(filename, output_name, [this, trait](){ return CalcTraitMin(trait); });
@@ -246,6 +262,10 @@ public:
       AddOutput(filename, output_name, [this, trait](){ return CalcTraitMax(trait); });
     } else if (trait_info == "sum") {
       AddOutput(filename, output_name, [this, trait](){ return CalcTraitSum(trait); });
+    } else if (trait_info == "first") {
+      AddOutput(filename, output_name, [this, trait](){
+        return GetTrait(trait).AsString( GetFirstOrg() );
+      });
     } else {
       emp::notify::Error("Unknown stat '", trait_info, "' for trait '", trait, "'.");
     }
@@ -377,13 +397,19 @@ public:
     AVIDA_SIGNAL(OnPlacement(offspring));               // Trigger: activate organism in populations
   }
 
-  /// Collect an offspring from a designated parent organism.
+  /// Test if an offspring genome is okay to turn into a new organism.
+  bool TestOffspringGenome(const organism_t & parent, const genome_t & genome) const {
+    return genome.size() > 0 && AVIDA_TEST(TestOffspringGenome(parent, genome));
+  }
+
+  /// Collect and place an offspring from a designated parent organism.
   void DivideOrg(size_t parent_id) {
     organism_t & parent = biota[parent_id];
     genome_t offspring_genome = GetOffspringGenome(parent);
-    if (offspring_genome.size() == 0) return;               // Stop early if no genome was provided.
-    organism_t & offspring = BuildOffspring(parent, std::move(offspring_genome));
-    PlaceOffspring(offspring);
+    if (TestOffspringGenome(parent, offspring_genome)) {
+      organism_t & offspring = BuildOffspring(parent, std::move(offspring_genome));
+      PlaceOffspring(offspring);
+    }
   }
 
   using PendingOffspring = ::PendingOffspring<genome_t>;
@@ -426,6 +452,16 @@ public:
   template <typename RETURN_T, typename... Ts>
   auto TriggerCollector(Ts &&... args) {
     return plug_ins.template TriggerCollector<RETURN_T>(std::forward<Ts>(args)...);
+  }
+
+  template <typename... Ts>
+  bool TriggerTests(Ts &&... args) {
+    return plug_ins.template TriggerTests(std::forward<Ts>(args)...);
+  }
+
+  template <typename... Ts>
+  bool TriggerTests(Ts &&... args) const {
+    return plug_ins.template TriggerTests(std::forward<Ts>(args)...);
   }
 
   // Process a single update for Avida
@@ -478,8 +514,7 @@ public:
   // Request that the run stop.  Teardown is deferred to Shutdown() (called once the current
   // update finishes) so the final update's signal handlers still see a populated biota.
   void Exit() {
-    if (run_state == RunState::EXITING || run_state == RunState::COMPLETE) return;
-    run_state = RunState::EXITING;
+    if (run_state != RunState::COMPLETE) run_state = RunState::EXITING;
   }
 
   // End-of-run teardown.  Idempotent: the body runs at most once.
