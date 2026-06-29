@@ -61,23 +61,31 @@ public:
     std::apply([&pod](auto &... p){ (pod(p), ...); }, plug_ins);
   }
 
-  // Trigger a specified signal on each module that can respond.
+  /// Trigger a specified signal on each module that can respond.
   #define AVIDA_SIGNAL(...)                                                    \
     this->TriggerSignal([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
         requires requires { module.__VA_ARGS__; }                              \
     { module.__VA_ARGS__; })
 
+  /// Run member function on modules until one produces the expected return value.
   #define AVIDA_HANDLE(RETURN_TYPE, ...)                                                     \
     this->TriggerHandler<RETURN_TYPE>([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
         requires requires { module.__VA_ARGS__; }                                            \
     { return module.__VA_ARGS__; })
 
+  /// Run the provided function on every module that it is allowed to run on.
   #define AVIDA_COLLECT(RETURN_TYPE, ...)                                                      \
     this->TriggerCollector<RETURN_TYPE>([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)  \
         requires requires { module.__VA_ARGS__; }                                              \
     { return module.__VA_ARGS__; })
 
-  // Run the provided function on every module that it is allowed to run on.
+  /// Run the provided function on all modules; return false if _any_ produce false (&& together)
+  #define AVIDA_TEST(...)                                                    \
+  this->TriggerTests([&]<typename AVIDA_MODULE_T>(AVIDA_MODULE_T & module)   \
+        requires requires { { module.__VA_ARGS__ } -> std::same_as<bool>; }  \
+    { return module.__VA_ARGS__; })
+
+  /// Run the provided function on every module that it is allowed to run on.
   template <typename FUN_T>
   void TriggerSignal(FUN_T && fun) {
     std::apply([&fun](auto &... module) {
@@ -85,7 +93,7 @@ public:
     }, plug_ins);
   }
     
-  /// Run the provided function until a module returns the expected value.
+  /// Run member function on modules until one produces the expected return value.
   /// @return std::expected of the first value found or unexpected.
   template <typename RETURN_T, typename FUN_T>
   auto TriggerHandler(FUN_T && fun) {
@@ -105,6 +113,17 @@ public:
       (IfInvocable(fun, module, [&](auto & module){ result.push_back(fun(module)); }), ...);
     }, plug_ins);
 
+    return result;
+  }
+
+  /// Run member function on modules until one produces the expected return value.
+  /// @return std::expected of the first value found or unexpected.
+  template <typename FUN_T>
+  bool TriggerTests(this auto & self, FUN_T && fun) {
+    bool result = true;
+    std::apply([&](auto &... module) {
+      (IfInvocable(fun, module, [&](auto & module){ result &= fun(module); }), ...);
+    }, self.plug_ins);
     return result;
   }
 
