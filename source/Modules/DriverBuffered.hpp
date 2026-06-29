@@ -31,6 +31,7 @@ private:
   int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
   emp::vector<PendingOffspring<typename AVIDA_T::genome_t>> pending_offspring;
+  bool divide_pending = false;  // Set once the organism being processed has produced an offspring.
 
   void PrintStats(size_t ud) {
     std::cout << "UD:" << ud
@@ -38,6 +39,20 @@ private:
               << "  Generation: " << avida.CalcTraitAve("generation")
               << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
               << std::endl;
+  }
+
+  // Recompute every active organism's scheduling speed from its CURRENT metabolic rate, so a
+  // bonus earned mid-life (e.g. by completing a task) immediately affects its share of CPU
+  // cycles.  This gives direct, within-life selection on task performance instead of an effect
+  // that only reaches the next generation via parent_bonus.
+  void RecalcSpeeds() {
+    total_speed = 0.0;
+    for (double & s : speed_map) s = 0.0;  // Clear stale entries (e.g. now-empty slots).
+    avida.GetBiota().ForEachOrg([this](auto & org) {
+      const double rate = org.GetPhenotype().MetabolicRate(org.GetGenome().size());
+      speed_map[org.GetBiotaID()] = rate;
+      total_speed += rate;
+    });
   }
 
 public:
@@ -54,32 +69,6 @@ public:
 
   // === Phenotypic Traits ===
 
-  struct Phenotype {
-    double metabolic_base = 1.0;
-    double metabolic_mult = 1.0;
-    double parent_bonus = 0.0;      // How much metabolic bonus did parent org earn?
-    uint32_t gestation_cost = 0;    // How many CPU cycles to produce an offspring?
-    uint32_t parent_gestation = 0;  // How much cost for parent to produce this offspring?
-    double MetabolicBonus() { return metabolic_base * metabolic_mult; }
-  };
-
-  // Calculate how fast this organism should run.  It should be the rate its parent
-  // earned during replication unless it has already earned a higher rate.
-  // Always multiple by current genome length.
-  template <concepts::Organism ORG_T>
-  static double CalcMetabolicRate(ORG_T & org) {
-    const double cur_rate = org.GetPhenotype().MetabolicBonus();
-    return std::max<double>(cur_rate, org.GetPhenotype().parent_bonus) * org.GetGenome().size();
-  }
-
-  void RegisterTraits() {
-    AVIDA_REGISTER_TRAIT(metabolic_base,   "Relative base speed of the virtual CPU for this organism.");
-    AVIDA_REGISTER_TRAIT(metabolic_mult,   "Bonus speed multiple from tasks.");
-    AVIDA_REGISTER_TRAIT(parent_bonus,     "Bonus received while producing this offspring.");
-    AVIDA_REGISTER_TRAIT(gestation_cost,   "How many CPU cycles to produce an offspring?");
-    AVIDA_REGISTER_TRAIT(parent_gestation, "CPU cycles parent used to produce this offspring?");
-  }
-
   void RegisterSettings() {
     avida.AddSetting("base.max_updates", max_updates, "Maximum number of updates to run", 'U');
     avida.AddSetting("base.ancestor_filename",
@@ -91,9 +80,13 @@ public:
   void RegisterCallbacks() {
     // Buffer division requests; births are processed in bulk at end of each update.
     // Genome must be extracted immediately (AvidaVM heads are reset after this call).
-    avida.AddCallback("DivideCell", [this](size_t biota_id){
-      auto genome = avida.GetOffspringGenome(avida.GetOrg(biota_id));
-      if (genome.size() > 0) pending_offspring.emplace_back(biota_id, std::move(genome));
+    avida.AddCallback("DivideCell", [this](size_t biota_id) {
+      auto & parent = avida.GetOrg(biota_id);
+      auto genome = avida.GetOffspringGenome(parent);
+      if (avida.TestOffspringGenome(parent, genome)) {
+        pending_offspring.emplace_back(biota_id, std::move(genome));
+        divide_pending = true;  // One birth per organism per update: end its turn (see OnUpdate).
+      }
     });
   }
 
@@ -106,6 +99,9 @@ public:
   }
 
   void OnUpdate(size_t update) {
+    // Refresh speeds from current metabolic rates so a bonus earned mid-life takes effect now.
+    RecalcSpeeds();
+
     // Execute all organisms for this update.
     const int32_t total_cycles = avida.GetNumOrgs() * ave_cycles_per_org;
 
@@ -117,8 +113,14 @@ public:
       double p = speed_map[org_id] / total_speed;
       const size_t cur_cycles = std::max<size_t>(1, p*total_cycles+0.5);
       // avida.GetRandom().GetBinomial(total_cycles, p);
-      avida.ProcessOrg(org_id, cur_cycles);
-      ud_cycles += cur_cycles;
+
+      // Run the organism, but stop as soon as it produces an offspring -- a single gestation
+      // per update -- so one gestation's stats map cleanly to one buffered offspring.
+      divide_pending = false;
+      auto & hw = avida.GetOrg(org_id).Hardware();
+      size_t cycle = 0;
+      for (; cycle < cur_cycles && !divide_pending; ++cycle) hw.ProcessStep();
+      ud_cycles += cycle;
     }
     cycles_executed += ud_cycles;
 
@@ -137,34 +139,11 @@ public:
     if (update >= max_updates) avida.Exit();
   }
 
-  // Recycled organism slots retain the previous occupant's phenotype, so reset our metabolic
-  // traits to their defaults at birth.  ReactionsManager applies any task bonus afterward, in the
-  // later OnOffspringReady phase.
-  template <concepts::Organism ORG_T>
-  void OnInjectReady(ORG_T & org) {
-    auto & phenotype = org.GetPhenotype();
-    phenotype.metabolic_base   = 1.0;
-    phenotype.metabolic_mult   = 1.0;
-    phenotype.parent_bonus     = 0.0; // No parent info on inject.
-    phenotype.gestation_cost   = 0;
-    phenotype.parent_gestation = 0;   // No parent info on inject.
-  }
-
-  template <concepts::Organism ORG_T>
-  void OnOffspringInit(ORG_T & offspring, ORG_T & parent) {
-    auto & phenotype = offspring.GetPhenotype();
-    phenotype.metabolic_base = 1.0;
-    phenotype.metabolic_mult = 1.0;
-    phenotype.parent_bonus = parent.GetPhenotype().MetabolicBonus();
-    phenotype.gestation_cost = 0;
-    phenotype.parent_gestation = parent.GetPhenotype().gestation_cost;
-  }
-
   template <concepts::Organism ORG_T>
   void OnPlacement(ORG_T & org) {
     // Lock in metabolic rate as organism speed.
     const size_t org_id = org.GetBiotaID();
-    const double rate = CalcMetabolicRate(org);
+    const double rate = org.GetPhenotype().MetabolicRate(org.GetGenome().size());
 
     if (org_id >= speed_map.size()) speed_map.resize(org_id+1, 0.0);
     else total_speed -= speed_map[org_id];
