@@ -168,4 +168,21 @@ public:
     }
   }
 
+  void OnConfigWrite(std::ostream & os) {
+    std::print(os,
+      "Reaction ECHO_A      metabolic_mult mult 2.0 1\n"
+      "Reaction ECHO_B      metabolic_mult mult 2.0 1\n"
+      "Reaction NOT_A       metabolic_mult mult 2.0 1\n"
+      "Reaction NOT_B       metabolic_mult mult 2.0 1\n"
+      "Reaction NAND        metabolic_mult mult 2.0 1\n"
+      "Reaction AND         metabolic_mult mult 2.0 1\n"
+      "Reaction A_OR_NOT_B  metabolic_mult mult 2.0 1\n"
+      "Reaction B_OR_NOT_A  metabolic_mult mult 2.0 1\n"
+      "Reaction OR          metabolic_mult mult 2.0 1\n"
+      "Reaction A_AND_NOT_B metabolic_mult mult 2.0 1\n"
+      "Reaction B_AND_NOT_A metabolic_mult mult 2.0 1\n"
+      "Reaction NOR         metabolic_mult mult 2.0 1\n"
+      "Reaction XOR         metabolic_mult mult 2.0 1\n"
+      "Reaction EQU         metabolic_mult mult 2.0 1\n");
+  }
 };
