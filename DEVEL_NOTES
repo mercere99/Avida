@@ -1,39 +1,52 @@
  NEXT MODULES:
- - Add module EnvironmentLogic9 (it should register tasks and trigger OnTask as needed)
- - Add module PrintGrid that prints grid every X updates (with dependency on PopGrid)
+ - PrintGrid that prints grid every X updates (with dependency on PopGrid)
+ - SaveGenome / TraceGenome
 
- - Add module OutputManager for printing to screen or files
- - Add module Reactions that listens for OnTask to provide rewards?
- - Add module LimitedResources that listens for OnTask
- - Add module PopulationDemes
- - Add module PhylogenyTracker
+ - LimitedResources that listens for OnTask
+ - PopulationDemes
+ - PhylogenyTracker
 
- - Add module GridFacing (with dependency on PopGrid)
- - Add module EventManager for dynamic events (population bottlenecks, environment changes, etc.)
- - Add GENERIC module that takes a set of other modules and allows you to decide at run time which one is used.
+ - GridFacing (with dependency on PopGrid)
+ - EventManager for dynamic events (population bottlenecks, environment changes, etc.)
+   Modules should be able to add new event names with functions to call when they trigger.
+ - GENERIC module that allows for run-time config of active modules.
+   Takes a set of other modules and allows you to decide at run time which one to redirect to.
  
 CORE FEATURES / REFACTORING
- - Updated plug-in handling to work on lambdas passed in.  Use in `requires` then call on relevant modules.
-   - SignalAll (signal every plug-in that can work with this lambda)
-   - SignalOnly (signal first module that can take this lambda and return result; error if multiple can.)
-   - SignalOne (signal only first module that can take this lambda and return result)
- - Split LexicaseDriver into GenerationDriver (that calls "Select") and SelectLexicase
  - Serialization
- - Tools to ensure bounds on config inputs.
+ - Split LexicaseDriver/TournamentDriver into GenerationDriver (that calls "Select") and SelectLexicase
+ - Tools to ensure bounds on config inputs (esp. for Web interface)
  - When calling a signal function, allow for fewer args.  For example, OnUpdate() instead of OnUpdate(size_t update)
  - Improve command-line handling:
    - Control if configs are printed by scope or not (e.g., "grid { width=10; height=10 }" vs. "grid.width=10; grid.height=10;")
    - Allow a more dynamic system of single-char flags to avoid collisions across modules.
    - Create a list of help options based on modules with OnHelp() defined.
- - Clean up output file handling.  All output files should be managed in Avida object; modules simply add outputs to them.
  - Setup pre-defined order for module types to be run? (sort when building PlugInManager)
    - OrgModule=0, DriverModule=1, PopulationModule=2, MutationModule=3, AnalysisModule=4, IOModule=5, etc. 
    - Should be overridable.  Perhaps have a priority associated with each module determined by enumerated type BUT have extras
  - Make a master list of module TYPES with rules on how each type should be managed (e.g., one pop manager, any number of analysis modules)
  - Test out alternative VM
  - Add hardware variant that can redirect to any listed hardware.
+ - Per-Phenotype-member birth behavior (REVISIT).  Biota::ReserveOrganism recycles dead organism
+   slots WITHOUT resetting the phenotype (so hardware and other heavy structures are reused, not
+   rebuilt).  That means a reused slot keeps the previous occupant's trait values, so each module
+   must re-initialize the Phenotype members it owns on birth (OnInjectReady / OnOffspringInit /
+   OnOffspringReady / BeforePlacement).  Current state of this convention:
+     - ReactionsManager resets earned_*/task_counts and sets parent_task_counts on birth.
+     - The metabolic drivers reset metabolic_base/metabolic_mult on birth (added so reactions
+       evolve correctly -- a reused slot was leaking a dead organism's merit).
+     - OrgTypeAvidian re-points the inst_set; hardware itself is reused and re-Reset() from genome.
+ - Pull hardware OUT of Phenotype and treat it like genome_t (one defining module,
+   NullHardware default).  Then Phenotype is purely lightweight data and a blunt whole-phenotype
+   reset on reuse becomes cheap and safe, removing the "did every module remember to reset its
+   members?" 
 
 LONG TERM:
+ - When a module declares a Phenotype member it should declare its on-birth policy.
+   - Should it make a "backup" of the parent value?
+   - Should the parent value reset to the default?
+   - Should it initialize its starting value to default? To parent value?  Use a bespoke function?
+   - Needs C++26 static reflection to do cleanly.
  - Simple language that compiles to Avida modules.
 
 MODULE TYPES:
@@ -65,6 +78,34 @@ MODULE TYPES:
    - PhylogenyTracker
  - Events
    - Extinction
+
+
+:scan_function{trait} or :scan_function{trait1 + trait2/trait3}  -> value
+  Run specified function on ALL orgs to trait to produce value.
+  Example: :max{fitness} or :mean{metabolic_rate / gestation_cost}
+
+@find_function{trait}
+  Find organism with function and based on trait.
+  Example: @max{fitness}
+
+|{filter expression}
+  Produce an organism set with only those organism that produce a positive trait expression
+  Example:
+    var dom_org = @mode{genotype_id}
+    var dom_set = |{fitness >= $dom_org.fitness}
+
+Precede either of the above with an organism set to run on only those.
+
+$variable          -> Current value of a variable
+
+org.trait          -> trait value for the given organism
+
+
+trait:scan_function     -> Run specified function on ALL orgs to trait to produce value.
+  Example: fitness:max or generation:mean
+
+variables can be double, strings, organisms, or organism sets
+
 
 
 
