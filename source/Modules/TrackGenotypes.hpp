@@ -191,6 +191,23 @@ public:
 
   // === Signal Listeners ===
 
+  void BeforeStart() {
+    avida.AddOutput("genotypes.csv", "Genotype Count", [this](){ return id_map.size(); });
+    avida.AddOutput("genotypes.csv", "Total Genotypes", [this](){ return total_genotypes; });
+    avida.AddOutput("genotypes.csv", "Dominant Genotype", [this](){ 
+      return (rank_ids[0] == 0) ? 0 : GetRankedGenotype(0).GetID();
+    });
+    avida.AddOutput("genotypes.csv", "Dominant Abundance", [this](){ 
+      return (rank_ids[0] == 0) ? 0 : GetRankedGenotype(0).GetCurCount();
+    });
+    avida.AddOutput("genotypes.csv", "Dominant Cumulative Total", [this](){ 
+      return (rank_ids[0] == 0) ? 0 : GetRankedGenotype(0).GetTotalCount();
+    });
+
+    // Terminal output...
+    avida.AddOutput(">", "Genotypes", [this](){ return id_map.size(); });
+  }
+
   // When an offspring is born with a mutation, give it a new genotype;
   // otherwise give it the same genotype as its parent.
   template <concepts::Organism ORG_T>
@@ -211,14 +228,7 @@ public:
     Genotype & genotype = id_map.Get(id);
     genotype.Death();
     DecreaseRank(genotype);                             // Adjust rank if needed.
-    if (genotype.GetCurCount() == 0) id_map.erase(id); // Remove extinct genotypes.
-  }
-
-  void OnUpdateEnd(size_t update) {
-    if (update % 100 == 0) {
-      std::println("{}: Cur Genotypes: {}; Total Genotypes: {}; Max Abundance: {}",
-        update, id_map.size(), total_genotypes, GetMaxAbundance());
-    }
+    if (genotype.GetCurCount() == 0) id_map.erase(id);  // Remove extinct genotypes.
   }
 
 };

@@ -25,6 +25,11 @@ AVIDA_DEFINE_MODULE(TrackOffspringCount, "Analysis", "Monitor number of offsprin
   }
 
   // === Signal Listeners ===
+  void BeforeStart() {
+    avida.AddOutputTrait("stats.csv", "Average Births", "offspring_count:mean");
+    avida.AddOutputTrait("stats.csv", "Max Births", "offspring_count:max");
+  }
+
   template <concepts::Organism ORG_T>
   void OnOffspringReady(ORG_T & /*offspring*/, ORG_T & parent) {
     ++parent.GetPhenotype().offspring_count;

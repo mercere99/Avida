@@ -496,7 +496,14 @@ public:
     auto reserve_total = std::accumulate(reserve_counts.begin(), reserve_counts.end(), size_t{0});
     biota.Reserve(reserve_total + 1);
     SetupDataDir();
+    AddOutput("stats.csv", "Organism Count", [this](){ return GetNumOrgs(); });
+    AddOutput("stats.csv", "Organism Total", [this](){ return GetTotalOrgs(); });
+    AddOutput("stats.csv", "Average Genome Length", [this](){
+      return biota.CalcAverage([](const organism_t & org){ return org.GetGenome().size(); });
+    });
+    AddOutput(">", "PopSize", [this](){ return GetNumOrgs(); });
     AVIDA_SIGNAL(BeforeStart()); // Trigger plug-ins to initialize.
+    AddOutput(">", "\n    First Genome", [this](){ return std::format("[{}]", GetFirstOrg().GetGenomeSequence()); });
     settings.PrintStatus();
     AVIDA_SIGNAL(OnStart());     // Trigger injection of start organisms.
   }

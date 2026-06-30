@@ -26,6 +26,11 @@ AVIDA_DEFINE_MODULE(TrackGeneration, "Analysis", "Monitor lineage length.",
 
   // === Signal Listeners ===
 
+  void BeforeStart() {
+    avida.AddOutputTrait("stats.csv", "Average Generation", "generation:mean");
+    avida.AddOutput(">", "Generation", [this](){ return std::format("{:.2f}", avida.CalcTraitAve("generation")); });
+  }
+
   template <concepts::Organism ORG_T>
   void OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
     offspring.GetPhenotype().generation = parent.GetPhenotype().generation + 1;

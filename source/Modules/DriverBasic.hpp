@@ -31,14 +31,6 @@ private:
   emp::UnorderedIndexMap speed_map;                 // Relative speed of each virtual machine.
   int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
-  void PrintStats(size_t ud) {
-    std::cout << "UD:" << ud
-              << "  PopSize:" << avida.GetNumOrgs()
-              << "  Generation: " << avida.CalcTraitAve("generation")
-              << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
-              << std::endl;
-  }
-
 public:
   DriverBasic(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>(avida, "DriverBasic", "Execution",
@@ -53,7 +45,7 @@ public:
   // === Phenotypic Traits ===
 
   void RegisterSettings() {
-    avida.AddSetting("base.max_updates", max_updates, "Maximum number of updates to run", 'm');
+    avida.AddSetting("base.max_updates", max_updates, "Maximum number of updates to run", 'U');
     avida.AddSetting("base.ave_cycles_per_org", ave_cycles_per_org, "Average number pf CPU cycles each update");
     avida.AddSetting("base.CPU_chunk_size", CPU_chunk_size, "Number of CPU cycles to execute in each chunk");
     avida.AddSetting("base.ancestor_filename",
@@ -72,7 +64,6 @@ public:
   void OnStart() {
     std::println("Random seed = {}", avida.GetRandom().GetSeed());
     avida.Inject(avida.GetSettings().GetConfigDir() / ancestor_filename);
-    PrintStats(0);  // Report initial state before any organisms run.
   }
 
   void OnUpdate(size_t /*update*/) {
@@ -86,7 +77,6 @@ public:
   }
 
   void OnUpdateEnd(size_t update) {
-    if (update % 100 == 0) PrintStats(update);
     if (update >= max_updates) avida.Exit();
   }
 
