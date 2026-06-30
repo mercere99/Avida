@@ -178,30 +178,33 @@ public:
 
     mut_prob = parent.GetPhenotype().mut_prob;
     if (random.P(mut_rate_mut_prob)) {
-      double mut_factor = random.GetNormal() * mut_rate_mut_size + 1.0;
+      // double mut_factor = random.GetNormal() * mut_rate_mut_size + 1.0;
+      double mut_factor = std::pow(1.0 + mut_rate_mut_size, random.GetNormal());
       mut_prob *= mut_factor;
+      if (mut_prob > 1.0) mut_prob = 1.0; // Do not allow mutation probabilities > 1.0.
       offspring.SetMutated();
     }
 
-    // Possibly mutate this genome.
-    if (mut_prob > 0.0) {
-      auto & genome = offspring.GetGenome();
-      const double mut_scale{1.0 / std::log2(1.0 - mut_prob)};
-      size_t mut_pos = static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale);
-      while (mut_pos < genome.size()) {
-        double shift = random.GetNormal() * mut_size;
-        genome[mut_pos] += shift;
+    // If we are not mutating the genome, stop here.
+    if (mut_prob == 0.0) return;
 
-        // Rebound if over limit.
-        if (genome[mut_pos] < 0.0) genome[mut_pos] *= -1;
-        else if (genome[mut_pos] > max_value) {
-          genome[mut_pos] = 2.0 * max_value - genome[mut_pos];
-        }
-        offspring.SetMutated();
+    auto & genome = offspring.GetGenome();
+    const double mut_scale{1.0 / std::log2(1.0 - mut_prob)};
+    size_t mut_pos = static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale);
+    while (mut_pos < genome.size()) {
+      double shift = random.GetNormal() * mut_size;
+      genome[mut_pos] += shift;
 
-        // Find next mutation, if any.
-        mut_pos += static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale) + 1;
+      // Rebound if over limit.
+      if (genome[mut_pos] < 0.0) genome[mut_pos] *= -1;
+      else if (genome[mut_pos] > max_value) {
+        genome[mut_pos] = 2.0 * max_value - genome[mut_pos];
       }
+      offspring.SetMutated();
+
+      // Find next mutation, if any.
+      const size_t pos_skipped = static_cast<size_t>(std::log2(random.GetDoubleNonZero()) * mut_scale);
+      mut_pos += pos_skipped + 1;
     }
 
     if (offspring.IsMutated()) Evaluate(offspring);
