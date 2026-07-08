@@ -62,7 +62,7 @@ public:
   this_t & operator=(const this_t &) = default;
   this_t & operator=(this_t &&) = default;
 
-  [[nodiscard]] bool operator<=>(const this_t &) const = default;
+  [[nodiscard]] auto operator<=>(const this_t &) const = default;
 
   [[nodiscard]] value_t operator[](size_t pos) const { return genome[pos]; }
   [[nodiscard]] value_t & operator[](size_t pos) { return genome[pos]; }
