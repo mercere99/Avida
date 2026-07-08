@@ -66,6 +66,12 @@ private:
     org.GetPhenotype().fitness = 1.0 / org.GetPhenotype().total_error;
   }
 
+  void EvaluateAll() {
+    avida.GetBiota().ForEachOrg([this](concepts::Organism auto & org){
+      Evaluate(org);
+    });
+  }
+
 
 public:
   OrgTypeROMEO(AVIDA_T & avida)
@@ -92,7 +98,7 @@ public:
 
   void RegisterTraits() {
     AVIDA_REGISTER_TRAIT(error_values, "Squared distance of each genome position from target");
-    AVIDA_REGISTER_TRAIT(mut_prob, "Org-specific mutation probability.");
+    AVIDA_REGISTER_TRAIT(mut_prob, "Org-specific per-site mutation probability.");
     AVIDA_REGISTER_TRAIT(total_error, "Sum of all trait values.");
     AVIDA_REGISTER_TRAIT(fitness, "Inverse of total_error.");
   }
@@ -162,6 +168,7 @@ public:
 
     // Inject starting organisms...
     avida.Inject(empty_genome, starting_count);
+    EvaluateAll();
     output.DoOutput();
   }
 
@@ -215,11 +222,16 @@ public:
 
   void OnUpdateStart([[maybe_unused]] size_t update) {
     change_sum += target_change_per_update;
+    if (change_sum < 1.0) return;
+
     while (change_sum >= 1.0) {
       size_t pos = avida.GetRandom().GetValue(target_genome.size());
       target_genome[pos] = avida.GetRandom().GetValue(max_value);
       --change_sum;
     }
+
+    // Re-evaluate organisms now that the environment has changed.
+    EvaluateAll();
   }
 
   void OnUpdateEnd(size_t update) {
