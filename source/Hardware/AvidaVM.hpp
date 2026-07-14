@@ -88,6 +88,12 @@ private:
   mem_t memory{};               // Storage of values being manipulated by this organism.
   emp::Ptr<const inst_set_t> inst_set_ptr = nullptr;  // Map of instruction names to functionality.
 
+  // Alternate instruction set used while tracing/analyzing this organism in isolation.  It shares
+  // the live set's instruction IDs (so the same genome decodes identically) but rebinds
+  // population-mutating callbacks (e.g. DivideCell) to neutral variants, so analysis never
+  // perturbs the live population.  Null when no analysis set has been supplied.
+  emp::Ptr<const inst_set_t> analysis_inst_set_ptr = nullptr;
+
   emp::array<size_t, NUM_NOPS> heads{};
   emp::array<Stack, NUM_NOPS> stacks{};
   size_t exe_count = 0;              // How many instructions have been executed?
@@ -244,6 +250,9 @@ public:
   [[nodiscard]] const inst_set_t & GetInstSet() const { emp_assert(inst_set_ptr); return *inst_set_ptr; }
   AvidaVM & SetInstSet(const inst_set_t & is) { inst_set_ptr = &is; return *this; }
 
+  // Supply the alternate instruction set used by Trace()/analysis (see analysis_inst_set_ptr).
+  AvidaVM & SetAnalysisInstSet(const inst_set_t & is) { analysis_inst_set_ptr = &is; return *this; }
+
 
 
   // === Instructions ===
@@ -260,10 +269,16 @@ public:
   }
 
   void Trace(size_t cpu_cycles=200, std::ostream & os=std::cout) {
+    // Run under the analysis instruction set (if one was supplied) so population-mutating
+    // callbacks are neutralized -- tracing must never perturb the live population.  The swap is
+    // confined to Trace(), so the evolutionary hot path (ProcessStep) is unaffected.
+    emp::Ptr<const inst_set_t> saved_inst_set = inst_set_ptr;
+    if (analysis_inst_set_ptr) inst_set_ptr = analysis_inst_set_ptr;
     for (size_t i = 0; i <= cpu_cycles; ++i) {
       if (i) ProcessStep();
       std::println(os, "STEP {}: {}", i, StatusString());
     }
+    inst_set_ptr = saved_inst_set;
   }
 
   // Initialize the state of the virtual CPU
