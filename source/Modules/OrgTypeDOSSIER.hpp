@@ -100,11 +100,11 @@ private:
     return Landscape::ERROR;
   }
 
-  emp::vector<double> & TraitValues(concepts::Organism auto & org) {
+  emp::Vector<double> & TraitValues(concepts::Organism auto & org) {
     return org.GetPhenotype().trait_values;
   }
 
-  const emp::vector<double> & TraitValues(const concepts::ConstOrganism auto & org) {
+  const emp::Vector<double> & TraitValues(const concepts::Organism auto & org) {
     return org.GetPhenotype().trait_values;
   }
 
@@ -119,7 +119,7 @@ private:
   void EvalStructured(ORG_T & org) {
     emp::Timer<"EvalStructured"> timer;
     const auto & genome = org.GetGenome();
-    emp::vector<double> & trait_values = TraitValues(org);
+    emp::Vector<double> & trait_values = TraitValues(org);
     trait_values.resize(genome.size());
 
     auto cut = std::is_sorted_until(genome.begin(), genome.end(), std::greater_equal<double>{});
@@ -132,7 +132,7 @@ private:
   void EvalMultipath(ORG_T & org) {
     emp::Timer<"EvalMultipath"> timer;
     const auto & genome = org.GetGenome();
-    emp::vector<double> & trait_values = TraitValues(org);
+    emp::Vector<double> & trait_values = TraitValues(org);
     trait_values.assign(genome.size(), 0.0);
     const size_t peak = genome.FindMaxID();
     trait_values[peak] = genome[peak];
@@ -142,7 +142,7 @@ private:
   void EvalStructuredMultipath(ORG_T & org) {
     emp::Timer<"EvalStructuredMultipath"> timer;
     const auto & genome = org.GetGenome();
-    emp::vector<double> & trait_values = TraitValues(org);
+    emp::Vector<double> & trait_values = TraitValues(org);
     trait_values.resize(genome.size());
 
     const size_t peak = genome.FindMaxID();
@@ -188,7 +188,7 @@ private:
     default: emp::notify::Error("Invalid Landscape");
     }
 
-    emp::vector<double> & trait_values = TraitValues(org);
+    emp::Vector<double> & trait_values = TraitValues(org);
     org.GetPhenotype().fitness = std::accumulate(trait_values.begin(), trait_values.end(), 0.0);
   }
 
@@ -209,7 +209,7 @@ public:
   // === Phenotypic Traits ===
 
   struct Phenotype {
-    emp::vector<double> trait_values{};
+    emp::Vector<double> trait_values{};
     double fitness = 0;
   };
 
