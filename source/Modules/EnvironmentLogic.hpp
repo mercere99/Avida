@@ -168,6 +168,19 @@ public:
     }
   }
 
+  // Analysis-mode counterpart of OnOutputValue: detect which task the output represents and record
+  // it on the organism being characterized, but deliberately omit the population-level effects --
+  // no global update_counts bump and no SignalTask reward -- so analysis neither perturbs the run
+  // nor feeds back into selection.
+  template <concepts::Organism ORG_T>
+  void OnAnalyzeOutput(ORG_T & org, uint32_t output) {
+    const emp::array<uint32_t, 2> & inputs = org.GetPhenotype().inputs;
+    LogicOp test_op = static_cast<LogicOp>((output & fixed_mask) >> fixed_offset);
+    if (output == PerformOp(test_op, inputs[0], inputs[1])) {
+      ++org.GetPhenotype().logic_counts[test_op];  // Record the task on the analyzed organism.
+    }
+  }
+
   void OnConfigWrite(std::ostream & os) {
     std::print(os,
       "Reaction ECHO_A      metabolic_mult mult 2.0 1\n"
