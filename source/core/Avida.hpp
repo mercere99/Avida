@@ -341,6 +341,13 @@ public:
     AVIDA_SIGNAL(OnOutputValue(org, output));
   }
 
+  // Broadcast an output value produced while tracing/analyzing an organism in isolation.  Unlike
+  // SignalOutput, this must NOT feed back into the live population: responders should characterize
+  // the organism (e.g. detect which task fired) without applying rewards or updating run-wide stats.
+  void SignalAnalyzeOutput(organism_t & org, uint32_t output) {
+    AVIDA_SIGNAL(OnAnalyzeOutput(org, output));
+  }
+
   // ====== Organism Management ======
 
   organism_t & Inject(organism_t & inject_org) {
@@ -478,6 +485,10 @@ public:
     for (size_t i = 0; i < num_cycles; ++i) {
       hw.ProcessStep();
     }
+  }
+
+  void TraceOrg(size_t id, uint32_t num_cycles, std::ostream & os = std::cout) {
+    biota[id].Hardware().Trace(num_cycles, os);
   }
 
   void SetupDataDir() {
