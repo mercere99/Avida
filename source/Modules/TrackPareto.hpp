@@ -26,7 +26,7 @@
 
 #include "../core/Avida.hpp"
 
-template <typename SCORES_T=emp::vector<double>>
+template <typename SCORES_T=emp::Vector<double>>
 class ParetoFront {
 private:
   struct FrontEntry {
@@ -181,7 +181,7 @@ public:
   }
 };
 
-template <typename SCORES_T=emp::vector<double>>
+template <typename SCORES_T=emp::Vector<double>>
 class FrontManager {
 private: 
   ParetoFront<SCORES_T> cur_front;   // Exact Pareto front of the current population
@@ -264,7 +264,7 @@ template <typename AVIDA_T>
 class TrackPareto : public ModuleBase<AVIDA_T> {
 private:
   using ModuleBase<AVIDA_T>::avida;
-  FrontManager<emp::vector<double>> pareto_front;
+  FrontManager<emp::Vector<double>> pareto_front;
 
   emp::DataOutput output;
   size_t output_frequency = 100;
