@@ -41,7 +41,7 @@ private:
   void PrintStats(size_t ud) {
     std::cout << "UD:" << ud
               << "  PopSize:" << avida.GetNumOrgs()
-              << "  Generation: " << avida.GetAveTrait("generation")
+              << "  Generation: " << avida.CalcTraitAve("generation")
               << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
               << std::endl;
   }
@@ -59,23 +59,8 @@ public:
   }
 
   // === Phenotypic Traits ===
-
-  struct Phenotype {
-    double metabolic_base = 1.0;
-    double metabolic_mult = 1.0;
-    double MetabolicBonus() { return metabolic_base * metabolic_mult; }
-  };
-
-  template <concepts::Organism ORG_T>
-  static double CalcMetabolicRate(ORG_T & org) {
-    return org.GetPhenotype().MetabolicBonus() * org.GetGenome().size();
-  }
-
-  void RegisterTraits() {
-    // AVIDA_REQUIRE_TRAIT(size_t, generation);
-    AVIDA_REGISTER_TRAIT(metabolic_base, "Relative base speed of the virtual CPU for this organism.");
-    AVIDA_REGISTER_TRAIT(metabolic_mult, "Bonus speed multiple from tasks.");
-  }
+  // Metabolic rate (metabolic_base/mult, parent_bonus, gestation_cost, and MetabolicRate) is
+  // owned by the TrackMetabolism module; this driver only reads MetabolicRate for scheduling.
 
   void RegisterSettings() {
     avida.AddSetting("base.max_updates", max_updates, "Maximum number of updates to run", 'U');
@@ -90,8 +75,9 @@ public:
     // Genome must be extracted immediately (AvidaVM heads are reset after this call).
     // Mutex guards pending_offspring against concurrent appends during parallel execution.
     avida.AddCallback("DivideCell", [this](size_t biota_id){
-      auto genome = avida.GetOffspringGenome(avida.GetOrg(biota_id));
-      if (genome.size() > 0) {
+      auto & parent = avida.GetOrg(biota_id);
+      auto genome = avida.GetOffspringGenome(parent);
+      if (avida.TestOffspringGenome(parent, genome)) {
         std::lock_guard lock(*offspring_mutex);
         pending_offspring.emplace_back(biota_id, std::move(genome));
       }
@@ -145,26 +131,11 @@ public:
     if (update >= max_updates) avida.Exit();
   }
 
-  // Recycled organism slots retain the previous occupant's phenotype, so reset our metabolic
-  // traits to their defaults at birth.  ReactionsManager applies any task bonus afterward, in the
-  // later OnOffspringReady phase.
-  template <concepts::Organism ORG_T>
-  void OnInjectReady(ORG_T & org) {
-    org.GetPhenotype().metabolic_base = 1.0;
-    org.GetPhenotype().metabolic_mult = 1.0;
-  }
-
-  template <concepts::Organism ORG_T>
-  void OnOffspringInit(ORG_T & offspring, ORG_T & /*parent*/) {
-    offspring.GetPhenotype().metabolic_base = 1.0;
-    offspring.GetPhenotype().metabolic_mult = 1.0;
-  }
-
   template <concepts::Organism ORG_T>
   void OnPlacement(ORG_T & org) {
     // Lock in metabolic rate as organism speed.
     const size_t org_id = org.GetBiotaID();
-    const double rate = CalcMetabolicRate(org);
+    const double rate = org.GetPhenotype().MetabolicRate(org.GetGenome().size());
 
     if (org_id >= speed_map.size()) speed_map.resize(org_id+1, 0.0);
     else total_speed -= speed_map[org_id];
