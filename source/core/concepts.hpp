@@ -94,19 +94,37 @@ namespace concepts {
       HARDWARE_T hardware,
       const HARDWARE_T const_hardware,
       std::size_t value,
-      HARDWARE_T::inst_set_t & inst_set
+      typename HARDWARE_T::inst_set_t & inst_set,
+      const typename HARDWARE_T::genome_t & genome
     ) {
     typename HARDWARE_T::genome_t;
+    typename HARDWARE_T::inst_set_t;
 
-    // Core execution
+    // Core execution (ProcessStep runs a single instruction; Trace steps and logs).
     { hardware.ProcessStep() } -> std::same_as<void>;
+    { hardware.Trace(value) };
 
-    // Reproduction
-    { hardware.DivideGenome() } -> std::same_as<typename HARDWARE_T::genome_t>;
+    // Lifecycle: (re)load a genome to run, and partially reset after a birth.
+    { hardware.Reset(genome) } -> std::same_as<void>;
+    { hardware.ResetBirth() } -> std::same_as<void>;
 
-    // Organism linkage
+    // Reproduction: extract the genome of the next offspring.
+    { hardware.GetOffspringGenome() } -> std::same_as<typename HARDWARE_T::genome_t>;
+
+    // Instruction-set linkage.
+    { const_hardware.GetInstSet() } -> std::convertible_to<const typename HARDWARE_T::inst_set_t &>;
+    { hardware.SetInstSet(inst_set) } -> std::same_as<HARDWARE_T &>;
+
+    // Environment I/O: supply inputs and retrieve an output value.
+    { hardware.SetInput(value) };
+    { hardware.GetOutput() } -> std::convertible_to<uint32_t>;
+
+    // Organism linkage.
     { hardware.SetBiotaID(value) } -> std::same_as<HARDWARE_T &>;
     { const_hardware.GetBiotaID() } -> std::convertible_to<size_t>;
+
+    // Metabolism stats (instructions executed this gestation).
+    { const_hardware.GetExeCount() } -> std::convertible_to<size_t>;
 
     // Health check
     { const_hardware.OK() } -> std::convertible_to<bool>;
