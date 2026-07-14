@@ -84,16 +84,6 @@ public:
     is_mutant = false;
   }
 
-  Organism & Process(size_t cycles) {
-    emp_assert(OK());
-    if constexpr (HasHardware()) {
-      Hardware().Process(cycles);
-    } else {
-      emp_assert(false, "Cannot Process organism without hardware.");
-    }
-    return *this;
-  }
-
   [[nodiscard]] genome_t GetOffspringGenome() {
     emp_assert(OK());
     if constexpr (HasHardware()) {
