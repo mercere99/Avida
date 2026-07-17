@@ -36,7 +36,7 @@ private:
   size_t pop_size = 1000;                    // Number of organisms to place in next gen
   double epsilon = 0.0;                      // Distance from max to not be eliminated
   double downsample_frac = 1.0;              // Fraction of test cases to each generation
-  double info_epsilon = 0.0;                 // Max dist for scores to count as "same" info tests
+  double info_epsilon = 0.0;                 // Max dist for scores to count as "same" for informed downsampling
   emp::String mode = "base";                 // Modes: "base", "informed", "cohort"
   emp::String scores_name = "trait_values";  // Traits to use for lexicase scores
   emp::String fitness_name = "fitness";      // Trait to output for "combined" fitness
