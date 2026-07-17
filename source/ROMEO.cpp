@@ -8,13 +8,14 @@
 
 #include "Modules/DriverLexicase.hpp"
 #include "Modules/DriverTournament.hpp"
+#include "Modules/DriverLexicase.hpp"
 #include "Modules/OrgTypeROMEO.hpp"
 #include "Modules/TrackOffspringCount.hpp"
 
 // Which DRIVER to use?
 template <typename T> using driver_t =
-// DriverLexicase<T>;
-DriverTournament<T>;
+DriverLexicase<T>;
+// DriverTournament<T>;
 
 int main(int argc, char * argv[])
 {
