@@ -49,20 +49,36 @@ private:
   double change_sum = 0.0;
 
 
-  emp::Vector<double> & TraitValues(concepts::Organism auto & org) {
+  emp::Vector<double> & ErrorValues(concepts::Organism auto & org) {
     return org.GetPhenotype().error_values;
   }
 
-  const emp::Vector<double> & TraitValues(const concepts::ConstOrganism auto & org) {
+  const emp::Vector<double> & ErrorValues(const concepts::ConstOrganism auto & org) {
     return org.GetPhenotype().error_values;
+  }
+
+  emp::Vector<double> & FitnessValues(concepts::Organism auto & org) {
+    return org.GetPhenotype().fitness_values;
+  }
+
+  const emp::Vector<double> & FitnessValues(const concepts::ConstOrganism auto & org) {
+    return org.GetPhenotype().fitness_values;
   }
 
   template <concepts::Organism ORG_T>
   void Evaluate(ORG_T & org) {
-    auto & traits = TraitValues(org);
-    traits = org.GetGenome().Values() - target_genome;
-    traits = traits * traits;
-    org.GetPhenotype().total_error = traits.CalcSum();
+    auto & error_values = ErrorValues(org);
+    auto & fitness_values = FitnessValues(org);
+    error_values = org.GetGenome().Values() - target_genome;
+
+    // fitness_values = 1.0 / error_values;
+    fitness_values.resize(error_values.size());
+    for (size_t i = 0; i < error_values.size(); ++i) {
+      fitness_values[i] = 1.0 / error_values[i];
+    }
+
+    error_values = error_values * error_values;
+    org.GetPhenotype().total_error = error_values.CalcSum();
     org.GetPhenotype().fitness = 1.0 / org.GetPhenotype().total_error;
   }
 
@@ -87,6 +103,7 @@ public:
 
   struct Phenotype {
     emp::Vector<double> error_values{};
+    emp::Vector<double> fitness_values{};  // 1/error_value
     double mut_prob = 0.0;
     double total_error = 0.0;
     double fitness = 0.0;
@@ -98,6 +115,7 @@ public:
 
   void RegisterTraits() {
     AVIDA_REGISTER_TRAIT(error_values, "Squared distance of each genome position from target");
+    AVIDA_REGISTER_TRAIT(fitness_values, "Inverse of square error of each genome position from target");
     AVIDA_REGISTER_TRAIT(mut_prob, "Org-specific per-site mutation probability.");
     AVIDA_REGISTER_TRAIT(total_error, "Sum of all trait values.");
     AVIDA_REGISTER_TRAIT(fitness, "Inverse of total_error.");
@@ -152,7 +170,7 @@ public:
         return avida.FindOrg_MaxTrait("fitness").GetGenomeSequence();
       });
       output.AddColumn("Fittest Organism Phenotype",  [this](){
-        return avida.FindOrg_MaxTrait("fitness").GetPhenotype().error_values;
+        return avida.FindOrg_MaxTrait("fitness").GetPhenotype().fitness_values;
       });
     }
   }
@@ -251,7 +269,7 @@ public:
     out_stream << "fitness,genotype,phenotype\n";
     avida.GetBiota().ForEachOrg([&](const auto & org) {
       std::println(out_stream, "{},{},{}",
-        org.GetPhenotype().fitness, org.GetGenomeSequence(), emp::MakeString(TraitValues(org)));
+        org.GetPhenotype().fitness, org.GetGenomeSequence(), emp::MakeString(ErrorValues(org)));
     });
   }
 
