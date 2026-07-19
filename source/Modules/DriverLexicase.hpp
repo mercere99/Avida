@@ -18,6 +18,7 @@
 #include <span>
 
 #include "emp/base/vector.hpp"
+#include "emp/datastructs/Vector.hpp"
 #include "emp/data/DataOutput.hpp"
 #include "emp/math/random_utils.hpp"
 #include "emp/tools/String.hpp"
@@ -30,6 +31,11 @@ template <typename AVIDA_T>
 class DriverLexicase : public ModuleBase<AVIDA_T> {
 private:
   using ModuleBase<AVIDA_T>::avida;
+
+  // Per-organism score vector used for lexicase test cases.  This must match the type the org-type
+  // module registers the scores trait as (ROMEO/DOSSIER use emp::Vector<double>); a mismatch trips
+  // a trait type-ID assert in TraitManager::GetTyped.
+  using score_vec_t = emp::Vector<double>;
 
   emp::DataOutput output;
   size_t output_frequency = 100;
@@ -45,6 +51,7 @@ private:
   bool profile = false;                      // Print lexicase timing and counter diagnostics?
   size_t profile_frequency = 1;              // Updates between profile outputs.
   bool cache_first_pass = true;               // Reuse full-population filtering by first test?
+  bool dedup_phenotypes = false;              // Collapse identical score vectors during selection?
 
   using clock_t = std::chrono::steady_clock;
 
@@ -65,6 +72,8 @@ private:
     size_t first_pass_cache_hits = 0;
     size_t first_pass_cache_misses = 0;
     size_t first_pass_score_reads_saved = 0;
+    size_t best_on_hits = 0;    // Test steps resolved by bit-AND against the global-best mask.
+    size_t best_on_scans = 0;   // Test steps that fell back to a manual max scan.
 
     void Reset() { *this = {}; }
   };
@@ -89,6 +98,7 @@ private:
       "selection={:.3f} delete={:.3f}] "
       "rounds={} steps={} ave_steps={:.3f} score_reads={} "
       "first_pass_cache[hits={} misses={} reads_saved={}] "
+      "best_on[hits={} scans={}] "
       "ave_final_survivors={:.3f} max_final_survivors={}",
       update,
       profile_stats.parent_count,
@@ -106,6 +116,8 @@ private:
       profile_stats.first_pass_cache_hits,
       profile_stats.first_pass_cache_misses,
       profile_stats.first_pass_score_reads_saved,
+      profile_stats.best_on_hits,
+      profile_stats.best_on_scans,
       ave_survivors,
       profile_stats.max_survivors
     );
@@ -156,6 +168,10 @@ public:
     avida.AddSetting("lexicase.profile_frequency", profile_frequency, "Updates between lexicase profile outputs");
     avida.AddSetting("lexicase.cache_first_pass", cache_first_pass,
       "Cache each test's first-pass survivors within a generation");
+    avida.AddSetting("lexicase.dedup_phenotypes", dedup_phenotypes,
+      "Collapse organisms sharing an identical score vector during selection (picks a random "
+      "member of the winning group). Speeds up runs with many clones. Applied only when "
+      "epsilon==0 and mode is not 'cohort'.");
   }
 
   size_t GetOrgReserveCount() const { return pop_size * 2; }
@@ -163,6 +179,13 @@ public:
   // === Signal Listeners ===
 
   void BeforeStart() {
+    // The phenotype-dedup optimization is only wired up for strict, non-cohort lexicase so far.
+    // Warn (rather than silently ignore) so a mis-set config doesn't look like it took effect.
+    if (dedup_phenotypes && (epsilon != 0.0 || mode == "cohort")) {
+      emp::notify::Warning("lexicase.dedup_phenotypes currently applies only when epsilon==0 and "
+        "mode is not 'cohort'; it will be disabled for this configuration.");
+    }
+
     // If we have a filename, set up the date file columns.
     if (output.GetFilename().size()) {
       output.SetFilepath(avida.GetDataDir());
@@ -207,6 +230,85 @@ public:
     bool valid = false;
   };
 
+  // Groups the current parents into classes of bit-identical score vectors so lexicase winnows one
+  // representative per class instead of every clone.  Members of a class always survive/die
+  // together (identical scores), so this is a pure optimization -- as long as the final pick draws
+  // a random *member* of the winning class (not just the representative), since class members can
+  // differ in heritable state outside the score vector (e.g. ROMEO's per-organism mutation rate).
+  // Class members are contiguous in sorted_ids; class c spans [class_begin[c], class_end[c]).
+  struct PhenotypeClasses {
+    emp::vector<size_t> sorted_ids;   // Parent org IDs, grouped by identical score vector.
+    emp::vector<size_t> class_begin;  // Start index into sorted_ids for each class.
+    emp::vector<size_t> class_end;    // End index (exclusive) into sorted_ids for each class.
+    emp::BitVector representatives;    // One representative org ID (first member) per class.
+    emp::vector<size_t> rep_class;     // Representative org ID -> class index (only reps are valid).
+  };
+
+  PhenotypeClasses pheno_classes;  // Reused across generations to avoid per-update reallocation.
+
+  // For each test case, the set of organisms tied at the GLOBAL best score on that test (strict
+  // lexicase only).  Reused across generations.  In a selection round, the survivors of a test are
+  // the current candidates at that test's max; if any candidate holds the global best, that is just
+  // candidate_bits & best_on_masks[test] -- a bit-AND instead of a full score scan.  Correct only
+  // for epsilon==0: with epsilon>0 survival depends on the max among candidates, not the global max.
+  emp::vector<emp::BitVector> best_on_masks;
+
+  // Fill best_on_masks: for each of num_tests test cases, mark every org in org_set whose score
+  // equals the maximum score on that test across org_set.  (Exact equality is right here -- the max
+  // is itself one of the scores, so ties compare equal.)
+  void BuildBestOnMasks(
+    const emp::BitVector & org_set,
+    size_t num_tests,
+    const emp::vector<const score_vec_t *> & score_cache)
+  {
+    best_on_masks.resize(num_tests);
+    for (size_t test = 0; test < num_tests; ++test) {
+      emp::BitVector & mask = best_on_masks[test];
+      mask.Resize(score_cache.size());
+      mask.Clear();
+
+      double best_score = 0.0;
+      bool first = true;
+      for (size_t org_id : org_set) {
+        const double cur = (*score_cache[org_id])[test];
+        if (first || cur > best_score) { best_score = cur; first = false; }
+      }
+      for (size_t org_id : org_set) {
+        if ((*score_cache[org_id])[test] == best_score) mask.Set(org_id);
+      }
+    }
+  }
+
+  // Partition the parents into classes of identical score vectors, filling pheno_classes.
+  void BuildPhenotypeClasses(
+    const emp::BitVector & parent_bits,
+    const emp::vector<const score_vec_t *> & score_cache)
+  {
+    auto & ids = pheno_classes.sorted_ids;
+    ids.clear();
+    for (size_t id : parent_bits) ids.push_back(id);
+
+    // Sort by score vector so identical vectors land adjacent (lexicographic on score_vec_t).
+    std::sort(ids.begin(), ids.end(),
+      [&](size_t a, size_t b){ return *score_cache[a] < *score_cache[b]; });
+
+    pheno_classes.class_begin.clear();
+    pheno_classes.class_end.clear();
+    pheno_classes.representatives.Resize(score_cache.size());
+    pheno_classes.representatives.Clear();
+    pheno_classes.rep_class.resize(score_cache.size());
+
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (i == 0 || *score_cache[ids[i]] != *score_cache[ids[i-1]]) {  // Start of a new class.
+        pheno_classes.class_begin.push_back(i);
+        pheno_classes.class_end.push_back(i);
+        pheno_classes.representatives.Set(ids[i]);
+        pheno_classes.rep_class[ids[i]] = pheno_classes.class_begin.size() - 1;
+      }
+      pheno_classes.class_end.back() = i + 1;  // Extend the current class to include this org.
+    }
+  }
+
   /// Select a parent via lexicase selection from the candidates and test cases provided.
   /// @param parent_bits    Bit vector containing all candidate org IDs.
   /// @param parent_count   Number of one bits in parent_bits.
@@ -216,13 +318,37 @@ public:
   [[nodiscard]] size_t SelectParent(
     const emp::BitVector & parent_bits,
     size_t parent_count,
-    const emp::vector<const emp::vector<double> *> & score_cache,
+    const emp::vector<const score_vec_t *> & score_cache,
     std::span<size_t> test_case_ids,
-    emp::vector<FirstPassCacheEntry> & first_pass_cache)
+    emp::vector<FirstPassCacheEntry> & first_pass_cache,
+    const PhenotypeClasses * classes = nullptr,
+    const emp::vector<emp::BitVector> * best_on = nullptr)
   {
     emp_assert(parent_count > 0);
     emp_assert(test_case_ids.size() > 0);
     emp::Random & random = avida.GetRandom();
+
+    // Pick a winner from a set of surviving lexicase candidates.  Without dedup that is a random
+    // survivor; with dedup each surviving bit is a class representative, so we draw a random
+    // *member* across all surviving classes -- weighting each class by its size, which also gives
+    // the correct size-weighted tie-break when several classes survive to the end.
+    auto choose = [&](const emp::BitVector & survivor_bits, size_t survivor_count) -> size_t {
+      if (classes == nullptr) return survivor_bits.FindNthOne(random.GetUInt32(survivor_count));
+      size_t total_members = 0;
+      for (size_t rep : survivor_bits) {
+        const size_t c = classes->rep_class[rep];
+        total_members += classes->class_end[c] - classes->class_begin[c];
+      }
+      size_t pick = random.GetUInt32(total_members);
+      for (size_t rep : survivor_bits) {
+        const size_t c = classes->rep_class[rep];
+        const size_t class_size = classes->class_end[c] - classes->class_begin[c];
+        if (pick < class_size) return classes->sorted_ids[classes->class_begin[c] + pick];
+        pick -= class_size;
+      }
+      emp_assert(false, "weighted member pick fell through");
+      return survivor_bits.FindOne();
+    };
 
     if (parent_count == 1) {
       if (profile) {
@@ -230,17 +356,37 @@ public:
         ++profile_stats.survivor_sum;
         profile_stats.max_survivors = std::max<size_t>(profile_stats.max_survivors, 1);
       }
-      return parent_bits.FindNthOne(random.GetUInt32(parent_count));
+      return choose(parent_bits, parent_count);
     }
 
     emp::BitVector candidate_bits;
     size_t candidate_count = 0;
 
     // Apply one test to the current candidate set and return the number of score reads used.
-    auto apply_test = [&](size_t test_case_id) {
+    auto apply_test = [&](size_t test_case_id) -> size_t {
       const size_t start_candidate_count = candidate_count;
 
-      // Find score range on this test case; if all candidates are within epsilon, no one drops.
+      // Fast path (strict lexicase): this test's survivors are the candidates tied at the GLOBAL max,
+      // precomputed in best_on.  If any current candidate is among them, the max among candidates IS
+      // the global max, so the survivors are just the intersection -- a bit-AND, zero score reads.
+      if (best_on != nullptr) {
+        const emp::BitVector & best = (*best_on)[test_case_id];
+        if (candidate_bits.HasOverlap(best)) {
+          candidate_bits &= best;
+          candidate_count = candidate_bits.CountOnes();
+          if (profile) {
+            ++profile_stats.lexicase_steps;
+            ++profile_stats.best_on_hits;
+          }
+          return 0;
+        }
+        // No candidate holds the global best (typically only after the pool has shrunk): fall through
+        // to a manual max scan over the remaining candidates.
+        if (profile) ++profile_stats.best_on_scans;
+      }
+
+      // Slow path: find the score range on this test case; if all candidates are within epsilon, no
+      // one drops.
       double max_score = 0.0;
       double min_score = 0.0;
       bool first = true;
@@ -272,29 +418,38 @@ public:
       return score_reads;
     };
 
-    // Choose the first test before copying candidates. Its full-population result is reusable
-    // whenever this test leads another selection during the same generation.
+    // Choose the first test before copying candidates.
     std::swap(test_case_ids[0], test_case_ids[random.GetUInt32(test_case_ids.size())]);
     const size_t first_test_id = test_case_ids[0];
-    FirstPassCacheEntry & cache_entry = first_pass_cache[first_test_id];
-    if (cache_first_pass && cache_entry.valid) {
-      candidate_bits = cache_entry.survivors;
-      candidate_count = cache_entry.survivor_count;
-      if (profile) {
-        ++profile_stats.lexicase_steps;
-        ++profile_stats.first_pass_cache_hits;
-        profile_stats.first_pass_score_reads_saved += cache_entry.score_reads;
-      }
-    } else {
+    if (best_on != nullptr) {
+      // best_on already holds each test's global-best set (which is exactly the first-pass result),
+      // so the first_pass_cache is redundant here -- just apply the first test via the fast path.
       candidate_bits = parent_bits;
       candidate_count = parent_count;
-      const size_t score_reads = apply_test(first_test_id);
-      if (cache_first_pass) {
-        cache_entry.score_reads = score_reads;
-        cache_entry.survivors = candidate_bits;
-        cache_entry.survivor_count = candidate_count;
-        cache_entry.valid = true;
-        if (profile) ++profile_stats.first_pass_cache_misses;
+      apply_test(first_test_id);
+    } else {
+      // Cache the first test's full-population result; it is reusable whenever this test leads
+      // another selection during the same generation.
+      FirstPassCacheEntry & cache_entry = first_pass_cache[first_test_id];
+      if (cache_first_pass && cache_entry.valid) {
+        candidate_bits = cache_entry.survivors;
+        candidate_count = cache_entry.survivor_count;
+        if (profile) {
+          ++profile_stats.lexicase_steps;
+          ++profile_stats.first_pass_cache_hits;
+          profile_stats.first_pass_score_reads_saved += cache_entry.score_reads;
+        }
+      } else {
+        candidate_bits = parent_bits;
+        candidate_count = parent_count;
+        const size_t score_reads = apply_test(first_test_id);
+        if (cache_first_pass) {
+          cache_entry.score_reads = score_reads;
+          cache_entry.survivors = candidate_bits;
+          cache_entry.survivor_count = candidate_count;
+          cache_entry.valid = true;
+          if (profile) ++profile_stats.first_pass_cache_misses;
+        }
       }
     }
 
@@ -313,7 +468,7 @@ public:
       profile_stats.survivor_sum += candidate_count;
       profile_stats.max_survivors = std::max(profile_stats.max_survivors, candidate_count);
     }
-    return parent_bits.FindNthOne(random.GetUInt32(candidate_count));
+    return choose(candidate_bits, candidate_count);
   }
 
   /// For each task, identify the set of organisms that have within epsilon of the top score.
@@ -412,25 +567,27 @@ public:
   void DoSelection(
     const emp::BitVector & parent_bits,
     size_t parent_count,
-    const emp::vector<const emp::vector<double> *> & score_cache,
+    const emp::vector<const score_vec_t *> & score_cache,
     std::span<size_t> test_case_ids,
     size_t num_test_cases,
-    size_t num_rounds = 0)
+    size_t num_rounds = 0,
+    const PhenotypeClasses * classes = nullptr,
+    const emp::vector<emp::BitVector> * best_on = nullptr)
   {
     if (num_rounds == 0) num_rounds = pop_size;
     emp::vector<FirstPassCacheEntry> first_pass_cache(num_test_cases);
 
     // Run num_rounds rounds of lexicase selection to generate the next generation.
-    for (size_t round = 0; round < num_rounds; ++round) {      
-      const size_t parent_id =
-        SelectParent(parent_bits, parent_count, score_cache, test_case_ids, first_pass_cache);
+    for (size_t round = 0; round < num_rounds; ++round) {
+      const size_t parent_id = SelectParent(
+        parent_bits, parent_count, score_cache, test_case_ids, first_pass_cache, classes, best_on);
       avida.DivideOrg(parent_id);
     }
   }
 
   void DoCohortSelection(
     emp::BitVector parent_bits,
-    const emp::vector<const emp::vector<double> *> & score_cache,
+    const emp::vector<const score_vec_t *> & score_cache,
     std::span<size_t> test_case_ids)
   {
     if (downsample_frac > 0.5) {
@@ -473,7 +630,7 @@ public:
 
     // Look up the typed scores accessor once per update (avoids per-offspring map lookups).
     const auto & score_accessor =
-      avida.template GetTypedTrait<emp::vector<double>>(scores_name).GetConstAccessFun();
+      avida.template GetTypedTrait<score_vec_t>(scores_name).GetConstAccessFun();
     const size_t num_test_cases = score_accessor(avida.GetFirstOrg()).size();
 
     // Collect the parent population.
@@ -486,7 +643,7 @@ public:
       profile_stats.test_count = num_test_cases;
     }
 
-    emp::vector<const emp::vector<double> *> score_cache(avida.GetBiotaSize(), nullptr);
+    emp::vector<const score_vec_t *> score_cache(avida.GetBiotaSize(), nullptr);
     for (size_t parent_id : parent_bits) {
       score_cache[parent_id] = &score_accessor(avida.GetOrg(parent_id));
     }
@@ -499,8 +656,34 @@ public:
     }
 
     const auto selection_start = clock_t::now();
-    if (mode == "cohort") DoCohortSelection(parent_bits, score_cache, test_case_ids);
-    else DoSelection(parent_bits, parent_count, score_cache, test_case_ids, num_test_cases);
+    if (mode == "cohort") {
+      DoCohortSelection(parent_bits, score_cache, test_case_ids);
+    } else {
+      // Strict lexicase (epsilon==0) uses two optional accelerators, both keyed to the set of orgs
+      // we actually winnow: (1) phenotype dedup -- winnow one representative per identical-vector
+      // class, expanding to a random member when a class wins; (2) best_on masks -- resolve each
+      // test by bit-AND against its global-best set instead of a score scan.
+      const bool strict = (epsilon == 0.0);
+      const emp::BitVector * winnow_bits = &parent_bits;
+      size_t winnow_count = parent_count;
+      const PhenotypeClasses * classes = nullptr;
+
+      if (dedup_phenotypes && strict) {
+        BuildPhenotypeClasses(parent_bits, score_cache);
+        winnow_bits = &pheno_classes.representatives;
+        winnow_count = pheno_classes.class_begin.size();
+        classes = &pheno_classes;
+      }
+
+      const emp::vector<emp::BitVector> * best_on = nullptr;
+      if (strict) {
+        BuildBestOnMasks(*winnow_bits, num_test_cases, score_cache);
+        best_on = &best_on_masks;
+      }
+
+      DoSelection(*winnow_bits, winnow_count, score_cache, test_case_ids, num_test_cases,
+                  0, classes, best_on);
+    }
     if (profile) profile_stats.selection_ms += ElapsedMS(selection_start);
 
     // Remove the parent generation now that offspring have been placed.
