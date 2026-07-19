@@ -89,6 +89,7 @@ private:
       auto & fitness_values = FitnessValues(org);
 
       error_values = org.GetGenome().Values() - target_genome;
+      error_values = error_values * error_values;
 
       // FOR LEXICASE:
       // fitness_values = 1.0 / error_values;
@@ -96,8 +97,6 @@ private:
       for (size_t i = 0; i < error_values.size(); ++i) {
         fitness_values[i] = 1.0 / error_values[i];
       }
-
-      error_values = error_values * error_values;
 
       org.GetPhenotype().total_error = error_values.CalcSum();
       org.GetPhenotype().true_fitness = 1.0 / org.GetPhenotype().total_error;
@@ -148,7 +147,7 @@ public:
   // === Phenotypic Traits ===
 
   struct Phenotype {
-    emp::Vector<double> error_values{}; // No need to square error values for Lexicase, but fitness is still going to be squared for tournament
+    emp::Vector<double> error_values{};
     emp::Vector<double> fitness_values{}; // 1/error_values, use for Lexicase as it maximizes
     double mut_prob = 0.0;
     double total_error = 0.0; // Sum of squared errors
