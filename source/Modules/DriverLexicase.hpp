@@ -9,6 +9,8 @@
  *  Handles its own population management.
  */
 
+#include <algorithm>
+#include <chrono>
 #include <cstddef>    // for size_t
 #include <filesystem> // for path joining
 #include <iostream>
@@ -40,6 +42,74 @@ private:
   emp::String mode = "base";                 // Modes: "base", "informed", "cohort"
   emp::String scores_name = "trait_values";  // Traits to use for lexicase scores
   emp::String fitness_name = "fitness";      // Trait to output for "combined" fitness
+  bool profile = false;                      // Print lexicase timing and counter diagnostics?
+  size_t profile_frequency = 1;              // Updates between profile outputs.
+  bool cache_first_pass = true;               // Reuse full-population filtering by first test?
+
+  using clock_t = std::chrono::steady_clock;
+
+  struct ProfileStats {
+    double get_tests_ms = 0.0;
+    double score_matrix_ms = 0.0;
+    double informed_sample_ms = 0.0;
+    double selection_ms = 0.0;
+    double delete_ms = 0.0;
+    size_t parent_count = 0;
+    size_t test_count = 0;
+    size_t tests_used = 0;
+    size_t selection_rounds = 0;
+    size_t lexicase_steps = 0;
+    size_t candidate_score_reads = 0;
+    size_t survivor_sum = 0;
+    size_t max_survivors = 0;
+    size_t first_pass_cache_hits = 0;
+    size_t first_pass_cache_misses = 0;
+    size_t first_pass_score_reads_saved = 0;
+
+    void Reset() { *this = {}; }
+  };
+
+  mutable ProfileStats profile_stats;
+
+  [[nodiscard]] static double ElapsedMS(clock_t::time_point start) {
+    return std::chrono::duration<double, std::milli>(clock_t::now() - start).count();
+  }
+
+  void PrintProfile(size_t update) const {
+    const double ave_steps = profile_stats.selection_rounds
+      ? static_cast<double>(profile_stats.lexicase_steps) / profile_stats.selection_rounds
+      : 0.0;
+    const double ave_survivors = profile_stats.selection_rounds
+      ? static_cast<double>(profile_stats.survivor_sum) / profile_stats.selection_rounds
+      : 0.0;
+
+    std::println(
+      "LexicaseProfile update={} parents={} tests_used={}/{} "
+      "time_ms[get_tests={:.3f} score_matrix={:.3f} informed_sample={:.3f} "
+      "selection={:.3f} delete={:.3f}] "
+      "rounds={} steps={} ave_steps={:.3f} score_reads={} "
+      "first_pass_cache[hits={} misses={} reads_saved={}] "
+      "ave_final_survivors={:.3f} max_final_survivors={}",
+      update,
+      profile_stats.parent_count,
+      profile_stats.tests_used,
+      profile_stats.test_count,
+      profile_stats.get_tests_ms,
+      profile_stats.score_matrix_ms,
+      profile_stats.informed_sample_ms,
+      profile_stats.selection_ms,
+      profile_stats.delete_ms,
+      profile_stats.selection_rounds,
+      profile_stats.lexicase_steps,
+      ave_steps,
+      profile_stats.candidate_score_reads,
+      profile_stats.first_pass_cache_hits,
+      profile_stats.first_pass_cache_misses,
+      profile_stats.first_pass_score_reads_saved,
+      ave_survivors,
+      profile_stats.max_survivors
+    );
+  }
 
   void PrintStats(size_t ud) {
     std::println("Generation: {} ; PopSize: {} ; Fitness0: {}\nGenome0:{}",
@@ -82,6 +152,10 @@ public:
     avida.AddSetting("lexicase.max_generations", max_generations, "Maximum number of generations to run", 'm');
     avida.AddSetting("lexicase.scores_name", scores_name, "Name of trait to use for scores");
     avida.AddSetting("lexicase.fitness_name", fitness_name, "Name of trait to use for fitness");
+    avida.AddSetting("lexicase.profile", profile, "Print lexicase timing and inner-loop counters");
+    avida.AddSetting("lexicase.profile_frequency", profile_frequency, "Updates between lexicase profile outputs");
+    avida.AddSetting("lexicase.cache_first_pass", cache_first_pass,
+      "Cache each test's first-pass survivors within a generation");
   }
 
   size_t GetOrgReserveCount() const { return pop_size * 2; }
@@ -126,33 +200,120 @@ public:
     return max_scores;
   }
 
+  struct FirstPassCacheEntry {
+    emp::BitVector survivors;
+    size_t survivor_count = 0;
+    size_t score_reads = 0;
+    bool valid = false;
+  };
+
   /// Select a parent via lexicase selection from the candidates and test cases provided.
-  /// @param score_accessor Direct (non-virtual) accessor for the scores trait.
-  /// @param parent_bits    Bit vector of candidate org IDs (copied; modifications are local).
+  /// @param parent_bits    Bit vector containing all candidate org IDs.
+  /// @param parent_count   Number of one bits in parent_bits.
+  /// @param score_cache    Current generation's score-vector pointers, indexed by org ID.
   /// @param test_case_ids  Indices into each organism's score vector; shuffled in place.
-  [[nodiscard]] size_t SelectParent(const auto & score_accessor,
-                      emp::BitVector parent_bits, std::span<size_t> test_case_ids) {
-    emp_assert(parent_bits.CountOnes() > 0);
+  /// @param first_pass_cache Cached survivors when each test is applied to all parents first.
+  [[nodiscard]] size_t SelectParent(
+    const emp::BitVector & parent_bits,
+    size_t parent_count,
+    const emp::vector<const emp::vector<double> *> & score_cache,
+    std::span<size_t> test_case_ids,
+    emp::vector<FirstPassCacheEntry> & first_pass_cache)
+  {
+    emp_assert(parent_count > 0);
     emp_assert(test_case_ids.size() > 0);
     emp::Random & random = avida.GetRandom();
-    size_t next_pos = 0;  // Fisher-Yates frontier: test_case_ids[0..next_pos) already used.
 
-    while (parent_bits.CountOnes() > 1 && next_pos < test_case_ids.size()) {
+    if (parent_count == 1) {
+      if (profile) {
+        ++profile_stats.selection_rounds;
+        ++profile_stats.survivor_sum;
+        profile_stats.max_survivors = std::max<size_t>(profile_stats.max_survivors, 1);
+      }
+      return parent_bits.FindNthOne(random.GetUInt32(parent_count));
+    }
+
+    emp::BitVector candidate_bits;
+    size_t candidate_count = 0;
+
+    // Apply one test to the current candidate set and return the number of score reads used.
+    auto apply_test = [&](size_t test_case_id) {
+      const size_t start_candidate_count = candidate_count;
+
+      // Find score range on this test case; if all candidates are within epsilon, no one drops.
+      double max_score = 0.0;
+      double min_score = 0.0;
+      bool first = true;
+      for (size_t org_id : candidate_bits) {
+        const double cur_score = (*score_cache[org_id])[test_case_id];
+        if (first || cur_score > max_score) max_score = cur_score;
+        if (first || cur_score < min_score) {
+          min_score = cur_score;
+          first = false;
+        }
+      }
+
+      size_t score_reads = start_candidate_count;
+      if (min_score + epsilon < max_score) {
+        const double score_threshold = max_score - epsilon;
+        for (size_t org_id : candidate_bits) {
+          if ((*score_cache[org_id])[test_case_id] < score_threshold) {
+            candidate_bits.Clear(org_id);
+            --candidate_count;
+          }
+        }
+        score_reads += start_candidate_count;
+      }
+
+      if (profile) {
+        ++profile_stats.lexicase_steps;
+        profile_stats.candidate_score_reads += score_reads;
+      }
+      return score_reads;
+    };
+
+    // Choose the first test before copying candidates. Its full-population result is reusable
+    // whenever this test leads another selection during the same generation.
+    std::swap(test_case_ids[0], test_case_ids[random.GetUInt32(test_case_ids.size())]);
+    const size_t first_test_id = test_case_ids[0];
+    FirstPassCacheEntry & cache_entry = first_pass_cache[first_test_id];
+    if (cache_first_pass && cache_entry.valid) {
+      candidate_bits = cache_entry.survivors;
+      candidate_count = cache_entry.survivor_count;
+      if (profile) {
+        ++profile_stats.lexicase_steps;
+        ++profile_stats.first_pass_cache_hits;
+        profile_stats.first_pass_score_reads_saved += cache_entry.score_reads;
+      }
+    } else {
+      candidate_bits = parent_bits;
+      candidate_count = parent_count;
+      const size_t score_reads = apply_test(first_test_id);
+      if (cache_first_pass) {
+        cache_entry.score_reads = score_reads;
+        cache_entry.survivors = candidate_bits;
+        cache_entry.survivor_count = candidate_count;
+        cache_entry.valid = true;
+        if (profile) ++profile_stats.first_pass_cache_misses;
+      }
+    }
+
+    size_t next_pos = 1;  // Fisher-Yates frontier: test_case_ids[0..next_pos) already used.
+    while (candidate_count > 1 && next_pos < test_case_ids.size()) {
       // Randomly select the next test case from the remaining ones (Fisher-Yates step).
       std::swap(test_case_ids[next_pos],
                 test_case_ids[random.GetUInt32(next_pos, test_case_ids.size())]);
       const size_t test_case_id = test_case_ids[next_pos++];  // Index into each org's score vector.
-      auto score_fun = [&](size_t org_id) {
-        return score_accessor(avida.GetOrg(org_id))[test_case_id];
-      };
-
-      // Find highest score on this test case, then eliminate all candidates below the threshold.
-      const double score_threshold = score_fun(parent_bits.MaxIndex(score_fun)) - epsilon;
-      parent_bits.ClearIf([&](size_t org_id){ return score_fun(org_id) < score_threshold; });
+      apply_test(test_case_id);
     }
 
     // Choose randomly from the surviving candidates.
-    return parent_bits.FindNthOne(random.GetUInt32(parent_bits.CountOnes()));
+    if (profile) {
+      ++profile_stats.selection_rounds;
+      profile_stats.survivor_sum += candidate_count;
+      profile_stats.max_survivors = std::max(profile_stats.max_survivors, candidate_count);
+    }
+    return parent_bits.FindNthOne(random.GetUInt32(candidate_count));
   }
 
   /// For each task, identify the set of organisms that have within epsilon of the top score.
@@ -160,6 +321,7 @@ public:
     const auto & score_accessor,
     const emp::BitVector & org_set
   ) const {
+    const auto start = clock_t::now();
     auto max_scores = CalcMaxScores(score_accessor, org_set);
     emp::vector<emp::BitVector> score_matrix(max_scores.size());
     for (size_t score_id = 0; score_id < score_matrix.size(); ++score_id) {
@@ -172,6 +334,7 @@ public:
         }
       }
     }
+    if (profile) profile_stats.score_matrix_ms += ElapsedMS(start);
     return score_matrix;
   }
 
@@ -185,6 +348,7 @@ public:
   {
     static emp::vector<size_t> min_distances;  // Smallest distances to current set.
 
+    const auto start = clock_t::now();
     const size_t num_test_cases = test_case_ids.size();
     auto score_matrix = CalcScoreMatrix(score_accessor, org_set);
 
@@ -213,6 +377,7 @@ public:
         if (d < min_distances[i]) min_distances[i] = d;
       }
     }
+    if (profile) profile_stats.informed_sample_ms += ElapsedMS(start);
   }
 
   [[nodiscard]] std::span<size_t> GetTestCases(
@@ -246,23 +411,26 @@ public:
 
   void DoSelection(
     const emp::BitVector & parent_bits,
-    const auto & score_accessor,
+    size_t parent_count,
+    const emp::vector<const emp::vector<double> *> & score_cache,
     std::span<size_t> test_case_ids,
+    size_t num_test_cases,
     size_t num_rounds = 0)
   {
     if (num_rounds == 0) num_rounds = pop_size;
+    emp::vector<FirstPassCacheEntry> first_pass_cache(num_test_cases);
 
     // Run num_rounds rounds of lexicase selection to generate the next generation.
     for (size_t round = 0; round < num_rounds; ++round) {      
       const size_t parent_id =
-        SelectParent(score_accessor, parent_bits, test_case_ids);
+        SelectParent(parent_bits, parent_count, score_cache, test_case_ids, first_pass_cache);
       avida.DivideOrg(parent_id);
     }
   }
 
   void DoCohortSelection(
     emp::BitVector parent_bits,
-    const auto & score_accessor,
+    const emp::vector<const emp::vector<double> *> & score_cache,
     std::span<size_t> test_case_ids)
   {
     if (downsample_frac > 0.5) {
@@ -291,14 +459,18 @@ public:
       // Do selection in this cohort.
       const size_t cohort_offset = cohort_scores * cohort_id;
       DoSelection(parent_bits,
-        score_accessor,
+        cohort_orgs,
+        score_cache,
         test_case_ids.subspan(cohort_offset, cohort_scores),
+        score_cache[org_ids[org_offset]]->size(),
         cohort_orgs);
     }
   }
 
-  void OnUpdate(size_t /*update*/) {
+  void OnUpdate(size_t update) {
     emp::Timer<"OnUpdate"> fun_timer;
+    if (profile) profile_stats.Reset();
+
     // Look up the typed scores accessor once per update (avoids per-offspring map lookups).
     const auto & score_accessor =
       avida.template GetTypedTrait<emp::vector<double>>(scores_name).GetConstAccessFun();
@@ -306,15 +478,38 @@ public:
 
     // Collect the parent population.
     const emp::BitVector parent_bits = avida.GetActiveBits();
-    emp_assert(parent_bits.CountOnes() > 0);
+    const size_t parent_count = parent_bits.CountOnes();
+    emp_assert(parent_count > 0);
 
+    if (profile) {
+      profile_stats.parent_count = parent_count;
+      profile_stats.test_count = num_test_cases;
+    }
+
+    emp::vector<const emp::vector<double> *> score_cache(avida.GetBiotaSize(), nullptr);
+    for (size_t parent_id : parent_bits) {
+      score_cache[parent_id] = &score_accessor(avida.GetOrg(parent_id));
+    }
+
+    const auto get_tests_start = clock_t::now();
     std::span<size_t> test_case_ids = GetTestCases(num_test_cases, parent_bits, score_accessor);
+    if (profile) {
+      profile_stats.get_tests_ms += ElapsedMS(get_tests_start);
+      profile_stats.tests_used = test_case_ids.size();
+    }
 
-    if (mode == "cohort") DoCohortSelection(parent_bits, score_accessor, test_case_ids);
-    else DoSelection(parent_bits, score_accessor, test_case_ids);
+    const auto selection_start = clock_t::now();
+    if (mode == "cohort") DoCohortSelection(parent_bits, score_cache, test_case_ids);
+    else DoSelection(parent_bits, parent_count, score_cache, test_case_ids, num_test_cases);
+    if (profile) profile_stats.selection_ms += ElapsedMS(selection_start);
 
     // Remove the parent generation now that offspring have been placed.
+    const auto delete_start = clock_t::now();
     for (size_t id : parent_bits) avida.DeleteOrg(id);
+    if (profile) {
+      profile_stats.delete_ms += ElapsedMS(delete_start);
+      if (profile_frequency == 0 || update % profile_frequency == 0) PrintProfile(update);
+    }
   }
 
   void OnUpdateEnd(size_t update) {
