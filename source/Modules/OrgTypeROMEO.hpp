@@ -252,7 +252,7 @@ public:
         return avida.FindOrg_MaxTrait("fitness").GetGenomeSequence();
       });
       output.AddColumn("Fittest Organism Phenotype",  [this](){
-        return avida.FindOrg_MaxTrait("fitness").GetPhenotype().error_values;
+        return avida.FindOrg_MaxTrait("fitness").GetPhenotype().fitness_values;
       });
     }
   }
