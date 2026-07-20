@@ -28,8 +28,8 @@ PopGrid<T>;
 
 // Which DRIVER to use?
 template <typename T> using driver_t = 
-DriverBasic<T>;
-// DriverBuffered<T>;
+// DriverBasic<T>;
+DriverBuffered<T>;
 // DriverConstant<T>;
 
 int main(int argc, char * argv[])
