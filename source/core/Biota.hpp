@@ -71,12 +71,16 @@ public:
     requires concepts::Genome<std::remove_cvref_t<GENOME_T>>
   organism_t & ReserveOrganism(GENOME_T && new_genome) {
     size_t index = active_bits.ToggleZero();  // Find empty position in Biota and set it.
-    emp_assert(index <= orgs.size());
     if (index < orgs.size()) {
       orgs[index].SetGenome(std::forward<GENOME_T>(new_genome));
-    } else {
+    }
+    else if (index < active_bits.GetSize()) {
+      emp_assert(index == orgs.size());
       orgs.emplace_back(std::forward<GENOME_T>(new_genome));
       orgs.back().SetBiotaID(index);
+    }
+    else {
+      emp::notify::Error("Trying to reserve more organisms than reserved!");
     }
 
     organism_t & reserved_org = orgs[index];
