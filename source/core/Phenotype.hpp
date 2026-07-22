@@ -97,7 +97,6 @@ public:
     } else {
       emp::notify::Error("Cannot convert trait '", base_t::name, "' to type double (is type ",
                          GetTypeID(), ")");
-      return 0.0;
     }
   }
 
@@ -115,7 +114,6 @@ public:
     } else {
       emp::notify::Error("Cannot convert trait '", base_t::name, "' to span<double> (is type ",
                          GetTypeID(), ")");
-      return std::span<double>{};
     }
   }
 
@@ -139,7 +137,7 @@ public:
   // Generic lookup — use for AsDouble/AsString/AsSpan (virtual, safe for any type).
   const trait_base_t & Get(const emp::String & name) const {
     auto trait_ptr = trait_map.FindValue(name, nullptr);
-    emp_assert(trait_ptr, "Requesting an invalid trait name", name);
+    if (!trait_ptr) emp::notify::Error("Requesting unknown phenotype trait '", name, "'.");
     return *trait_ptr;
   }
 
@@ -148,9 +146,10 @@ public:
   template <typename TRAIT_T>
   const Trait<TRAIT_T, AVIDA_T> & GetTyped(const emp::String & name) const {
     const trait_base_t & base = Get(name);
-    emp_assert(base.GetTypeID() == emp::GetTypeID<TRAIT_T>(),
-               "trait type mismatch for '", name, "': expected ",
-               emp::GetTypeID<TRAIT_T>(), " but got ", base.GetTypeID());
+    if (base.GetTypeID() != emp::GetTypeID<TRAIT_T>()) {
+      emp::notify::Error("Trait type mismatch for '", name, "': expected ",
+        emp::GetTypeID<TRAIT_T>(), " but found ", base.GetTypeID(), ".");
+    }
     return static_cast<const Trait<TRAIT_T, AVIDA_T> &>(base);
   }
 
