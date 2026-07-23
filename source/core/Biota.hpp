@@ -8,6 +8,8 @@
  *  The Biota tracks all of the extant organisms in Avida.
  */
 
+#include <cstdint>
+
 #include "emp/base/vector.hpp"
 #include "emp/bits/BitVector.hpp"
 
@@ -31,6 +33,7 @@ private:
   emp::BitVector active_bits;    // Bit representation of available orgs (Slower)
   size_t num_orgs = 0;           // Number of currently-living organisms in biota
   size_t total_orgs = 0;         // Number of organisms that have ever existed
+  uint64_t epoch = 0;            // Changes whenever population membership/storage changes
 
 public:
   [[nodiscard]] size_t GetSize() const { return orgs.size(); }
@@ -38,6 +41,7 @@ public:
   [[nodiscard]] bool IsActive(size_t id) const { return active_bits.Get(id); }
   [[nodiscard]] const emp::BitVector & GetActiveBits() const { return active_bits; }
   [[nodiscard]] size_t GetTotalOrgs() const { return total_orgs; }
+  [[nodiscard]] uint64_t GetEpoch() const { return epoch; }
 
   [[nodiscard]] auto & GetOrg(this auto & self, size_t id) {
     emp_assert(self.IsActive(id));
@@ -61,7 +65,10 @@ public:
 
   void Reserve(size_t max_size) {
     orgs.reserve(max_size);
-    if (max_size > active_bits.GetSize()) active_bits.Resize(max_size);
+    if (max_size > active_bits.GetSize()) {
+      active_bits.Resize(max_size);
+      ++epoch;  // Change in number of bits requires updates elsewhere.
+    }
   }
 
   [[nodiscard]] size_t GetCapacity() const { return orgs.capacity(); }
@@ -86,6 +93,7 @@ public:
     organism_t & reserved_org = orgs[index];
     reserved_org.SetGlobalID(total_orgs++);
     ++num_orgs;
+    ++epoch;
 
     return reserved_org;
   }
@@ -95,12 +103,14 @@ public:
     emp_assert(IsActive(org_id));
     active_bits.Clear(org_id);
     --num_orgs;
+    ++epoch;
   }
   
   void Clear() {
     orgs.clear();
     active_bits.Clear();
     num_orgs = 0;
+    ++epoch;
   }
 
   /// Run each active organism through a provided function.
@@ -178,6 +188,7 @@ public:
 
   void Serialize(emp::SerialPod & pod) {
     pod(orgs, active_bits, num_orgs, total_orgs);
+    if (pod.IsLoad()) ++epoch;
   }
 
   bool OK() {
