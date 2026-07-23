@@ -112,6 +112,7 @@ public:
       [this](){ return data_dir.string(); },
       [this](const emp::String & s){ data_dir = s.str(); },
       "Default directory to write data files.", 'd');
+    AddValue("base.update", update, "Current population update");
 
     AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
@@ -248,12 +249,12 @@ public:
       if (desc == "first") return self.GetFirstOrg();
 
       // If not ':first' it better be ':<id>'
-      if (!trait_name.OnlyDigits()) {
+      if (!desc.OnlyDigits()) {
         emp::notify::Error("Invalid organism selector '", original_desc,
           "'; expected ':first' or a numeric organism ID such as ':1038'.");
       }
 
-      size_t org_id = trait_name.As<size_t>();
+      size_t org_id = desc.As<size_t>();
       if (org_id >= self.GetBiotaSize() || !self.IsOccupied(org_id)) {
         emp::notify::Error(
           "Organism selector '", original_desc, "' refers to inactive ID ", org_id, ".");
@@ -325,6 +326,8 @@ public:
 
   template <typename... ARG_Ts>
   void AddSetting(ARG_Ts &&... args) { settings.AddSetting(std::forward<ARG_Ts>(args)...); }
+  template <typename... ARG_Ts>
+  void AddValue(ARG_Ts &&... args) { settings.AddValue(std::forward<ARG_Ts>(args)...); }
   template <typename... ARG_Ts>
   void AddKeyword(ARG_Ts &&... args) { settings.AddKeyword(std::forward<ARG_Ts>(args)...); }
 
