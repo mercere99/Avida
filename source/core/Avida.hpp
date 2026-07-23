@@ -33,6 +33,10 @@
 namespace fs = std::filesystem;
 
 /// Main Avida-control object.
+///
+/// Within a single signal, modules are called from left to right in the order they are listed
+/// in this class's template arguments.  Use separate lifecycle signals when one module must
+/// finish a phase before another module begins the next phase.
 template <template <typename> typename... PLUG_IN_Ts>
 class Avida {
 public:
@@ -80,7 +84,6 @@ private:
   TraitManager<this_t> trait_man;
   emp::RobinHoodMap<emp::String, size_t> task_ids;
   emp::vector<emp::String> task_names;  // Task name by ID (index == task ID).
-  PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
 
   emp::SettingsManager settings; // Collection of all configurable settings
   fs::path data_dir = "data/";   // Directory for all data files
@@ -92,6 +95,8 @@ private:
   // COMPLETE = end-of-run teardown has happened (organisms cleared); nothing left to run.
   enum class RunState { INITIALIZING, PAUSED, RUNNING, EXITING, COMPLETE, ERROR };
   RunState run_state = RunState::INITIALIZING;
+
+  PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
 
 public:
   Avida() : plug_ins(*this) {
@@ -139,6 +144,11 @@ public:
     AVIDA_SIGNAL(RegisterCallbacks()); // Set up new instructions for the instruction set.
   }
   Avida(emp::vector<emp::String> args) : Avida() { settings.LoadArgs(args); }
+  Avida(const Avida &) = delete;
+  Avida(Avida &&) = delete;
+  Avida & operator=(const Avida &) = delete;
+  Avida & operator=(Avida &&) = delete;
+
   ~Avida() {
     Shutdown();
   }
@@ -159,6 +169,7 @@ public:
   [[nodiscard]] emp::BitVector GetActiveBits() const { return biota.GetActiveBits(); }
 
   [[nodiscard]] auto & GetFirstOrg(this auto & self) {
+    if (self.GetNumOrgs() == 0) emp::notify::Error("Cannot select from an empty population.");
     const size_t id = self.biota.FindFirstActive();
     return self.biota[id];
   }
@@ -204,33 +215,56 @@ public:
     });
   }
 
-  [[nodiscard]] auto & FindOrg_MinTrait(const emp::String & name) const {
-    emp_assert(biota.GetNumOrgs() > 0);
-    const auto & trait = GetTrait(name);
-    const size_t id = biota.FindMinimumID([&trait](const organism_t & org){
+  [[nodiscard]] auto & FindOrg_MinTrait(this auto & self, const emp::String & name) {
+    if (self.GetNumOrgs() == 0) emp::notify::Error("Cannot select from an empty population.");
+    const auto & trait = self.GetTrait(name);
+    const size_t id = self.biota.FindMinimumID([&trait](const organism_t & org){
       return trait.AsDouble(org);
     });
-    return biota[id];
+    return self.biota[id];
   }
 
-  [[nodiscard]] auto & FindOrg_MaxTrait(const emp::String & name) const {
-    emp_assert(biota.GetNumOrgs() > 0);
-    const auto & trait = GetTrait(name);
-    const size_t id = biota.FindMaximumID([&trait](const organism_t & org){
+  [[nodiscard]] auto & FindOrg_MaxTrait(this auto & self, const emp::String & name) {
+    if (self.GetNumOrgs() == 0) emp::notify::Error("Cannot select from an empty population.");
+    const auto & trait = self.GetTrait(name);
+    const size_t id = self.biota.FindMaximumID([&trait](const organism_t & org){
       return trait.AsDouble(org);
     });
-    return biota[id];
+    return self.biota[id];
   }
 
-  // Find an organism by a description, such as "fitness:max" or ":first" or ":1038"
+  // Find an organism by a description: "<trait>:min", "<trait>:max", ":first", or ":<id>".
   [[nodiscard]] auto & FindOrg(this auto & self, emp::String desc) {
-    emp::String trait_name = desc.Pop(':');
-    if (trait_name == "") {
-      if (desc == "first") return self.GetFirstOrg(); // ":first"
-      else emp::notify::Error("Uknown FindOrg command ':", desc, "'");
+    const emp::String original_desc = desc;
+    if (desc.Count(':') != 1) {
+      emp::notify::Error("Invalid organism selector '", original_desc,
+        "'; expected '<trait>:min', '<trait>:max', ':first', or ':<id>'.");
     }
-    else if (desc == "max") return self.FindOrg_MaxTrait(trait_name);
-    else if (desc == "min") return self.FindOrg_MinTrait(trait_name);
+
+    const size_t colon_pos = desc.find(':');
+    emp::String trait_name = desc.substr(0, colon_pos);
+    desc.erase(0, colon_pos + 1);
+    if (trait_name.empty()) {
+      if (desc == "first") return self.GetFirstOrg();
+
+      // If not ':first' it better be ':<id>'
+      if (!trait_name.OnlyDigits()) {
+        emp::notify::Error("Invalid organism selector '", original_desc,
+          "'; expected ':first' or a numeric organism ID such as ':1038'.");
+      }
+
+      size_t org_id = trait_name.As<size_t>();
+      if (org_id >= self.GetBiotaSize() || !self.IsOccupied(org_id)) {
+        emp::notify::Error(
+          "Organism selector '", original_desc, "' refers to inactive ID ", org_id, ".");
+      }
+      return self.GetOrg(org_id);
+    }
+
+    if (desc == "max") return self.FindOrg_MaxTrait(trait_name);
+    if (desc == "min") return self.FindOrg_MinTrait(trait_name);
+    emp::notify::Error(
+      "Invalid organism selector '", original_desc, "'; expected '<trait>:min' or '<trait>:max'.");
   }
 
   // ====== Output Management ======
@@ -307,7 +341,9 @@ public:
   }
 
   size_t RegisterTask(const emp::String & name) {
-    emp_assert(!task_ids.contains(name), "Registering same task twice", name);
+    if (task_ids.contains(name)) {
+      emp::notify::Error("Duplicate task registration for '", name, "'.");
+    }
     const size_t task_id = task_names.size();
     task_ids[name] = task_id;
     task_names.push_back(name);
@@ -321,13 +357,14 @@ public:
 
   // Look up the unique ID for an already-registered task by name.
   [[nodiscard]] size_t GetTaskID(const emp::String & name) const {
-    emp_assert(task_ids.contains(name), "Requesting an unknown task name", name);
-    return task_ids.FindValue(name, 0);
+    auto it = task_ids.find(name);
+    if (it == task_ids.end()) emp::notify::Error("Requesting unknown task '", name, "'.");
+    return it->second;
   }
 
   // Look up the name of a task by its ID.
   [[nodiscard]] const emp::String & GetTaskName(size_t task_id) const {
-    emp_assert(task_id < task_names.size(), "Requesting an invalid task ID", task_id);
+    if (task_id >= task_names.size()) emp::notify::Error("Invalid task ID ", task_id, ".");
     return task_names[task_id];
   }
 
@@ -463,12 +500,12 @@ public:
 
   template <typename... Ts>
   bool TriggerTests(Ts &&... args) {
-    return plug_ins.template TriggerTests(std::forward<Ts>(args)...);
+    return plug_ins.TriggerTests(std::forward<Ts>(args)...);
   }
 
   template <typename... Ts>
   bool TriggerTests(Ts &&... args) const {
-    return plug_ins.template TriggerTests(std::forward<Ts>(args)...);
+    return plug_ins.TriggerTests(std::forward<Ts>(args)...);
   }
 
   // Process a single update for Avida
@@ -503,6 +540,11 @@ public:
   }
 
   void Initialize() {
+    // Validate all configured cross-module names and cache their resolved IDs/accessors before
+    // reservation, output setup, population creation, or random-number use.
+    AVIDA_SIGNAL(ValidateConfig());
+    if (run_state != RunState::INITIALIZING) return;
+
     auto reserve_counts = AVIDA_COLLECT(size_t, GetOrgReserveCount());
     auto reserve_total = std::accumulate(reserve_counts.begin(), reserve_counts.end(), size_t{0});
     biota.Reserve(reserve_total + 1);
@@ -513,16 +555,29 @@ public:
       return biota.CalcAverage([](const organism_t & org){ return org.GetGenome().size(); });
     });
     AddOutput(">", "PopSize", [this](){ return GetNumOrgs(); });
-    AVIDA_SIGNAL(BeforeStart()); // Trigger plug-ins to initialize.
     AddOutput(">", "\n    First Genome", [this](){ return std::format("[{}]", GetFirstOrg().GetGenomeSequence()); });
+
+    // Phase 1: configure modules and declare outputs without assuming a population exists.
+    AVIDA_SIGNAL(BeforeStart());
+    if (run_state != RunState::INITIALIZING) return;
+
     settings.PrintStatus();
-    AVIDA_SIGNAL(OnStart());     // Trigger injection of start organisms.
+
+    // Phase 2: create and inject the initial population.  Modules must not read the population
+    // here since other OnStart listeners may not have run yet.
+    AVIDA_SIGNAL(OnStart());
+    if (run_state != RunState::INITIALIZING) return;
+
+    if (GetNumOrgs() == 0) emp::notify::Error("Avida initialization produced no organisms.");
+
+    // Phase 3: the complete initial population is now available to all modules.
+    AVIDA_SIGNAL(OnPopulationReady());
   }
 
   void Run() {
     emp_assert(run_state != RunState::COMPLETE, "Run() should not be called on finished run.");
+    if (run_state == RunState::INITIALIZING) Initialize();
     if (run_state < RunState::EXITING) {
-      if (run_state == RunState::INITIALIZING) Initialize();
       run_state = RunState::RUNNING;
       while (run_state == RunState::RUNNING) DoUpdate();
     }
@@ -539,7 +594,6 @@ public:
   void Shutdown() {
     if (run_state == RunState::COMPLETE) return;
     run_state = RunState::COMPLETE;
-    SaveState("final_save");
     AVIDA_SIGNAL(BeforeExit());                 // Notify plug-ins of impending exit (biota intact)
     biota.Clear();                              // Clean up organisms
     trait_man.Clear();                          // Clean up traits
