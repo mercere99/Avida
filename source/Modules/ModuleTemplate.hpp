@@ -57,11 +57,17 @@ public:
 
   // === Signal Listeners ===
 
+  // Triggered: Once before startup to validate configured names and cache resolved IDs/accessors.
+  void ValidateConfig() { }
+
   // Triggered: Once, just before a run starts, after all configurations have been loaded.
   void BeforeStart() { }
 
   // Triggered: Once as a run begins; typically injects starting organisms.
   void OnStart() { }
+
+  // Triggered: Once after all OnStart listeners finish and the initial population is available.
+  void OnPopulationReady() { }
 
   // Triggered: Every update before organisms are executed.
   void OnUpdateStart([[maybe_unused]] size_t update) { }
