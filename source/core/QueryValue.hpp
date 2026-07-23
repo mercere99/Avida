@@ -15,6 +15,7 @@
  *  OrgRef and OrgSet contain validation methods to ensure info is still accurate.
  */
 
+#include <cmath>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -291,21 +292,49 @@ public:
     return "unknown";
   }
 
-  [[nodiscard]] bool IsNull() const {
-    return std::holds_alternative<std::monostate>(value);
-  }
-
-  [[nodiscard]] bool IsNumeric() const {
-    return std::holds_alternative<int64_t>(value)
-      || std::holds_alternative<uint64_t>(value)
-      || std::holds_alternative<double>(value);
-  }
-
   template <typename T>
   [[nodiscard]] bool Is() const { return std::holds_alternative<T>(value); }
 
+  [[nodiscard]] bool IsNull() const { return Is<std::monostate>(); }
+  [[nodiscard]] bool IsBool() const { return Is<bool>(); }
+  [[nodiscard]] bool IsInt() const { return Is<int64_t>(); }
+  [[nodiscard]] bool IsUInt() const { return Is<uint64_t>(); }
+  [[nodiscard]] bool IsDouble() const { return Is<double>(); }
+  [[nodiscard]] bool IsString() const { return Is<emp::String>(); }
+  [[nodiscard]] bool IsOrgRef() const { return Is<org_ref_t>(); }
+  [[nodiscard]] bool IsOrgSet() const { return Is<org_set_t>(); }
+
+  [[nodiscard]] bool IsNumeric() const {
+    return IsInt() || IsUInt() || IsDouble();
+  }
+
   template <typename T>
-  [[nodiscard]] auto & Get(this auto & self) { return std::get<T>(self.value); }
+  [[nodiscard]] decltype(auto) Get(this auto && self) {
+    return std::get<T>(std::forward<decltype(self)>(self).value);
+  }
+
+  // Convert type to double
+  [[nodiscard]] double AsDouble() const {
+    switch (GetType()) {
+      case QueryValueType::BOOL:   return static_cast<double>(Get<bool>());
+      case QueryValueType::INT64:  return static_cast<double>(Get<int64_t>());
+      case QueryValueType::UINT64: return static_cast<double>(Get<uint64_t>());
+      case QueryValueType::DOUBLE: return Get<double>();
+      default: return std::nan("");
+    }
+  }
+
+  // Convert type to a string
+  [[nodiscard]] emp::String AsString() const {
+    switch (GetType()) {
+      case QueryValueType::BOOL:   return Get<bool>() ? "true" : "false";
+      case QueryValueType::INT64:  return emp::MakeString(Get<int64_t>());
+      case QueryValueType::UINT64: return emp::MakeString(Get<uint64_t>());
+      case QueryValueType::DOUBLE: return emp::MakeString(Get<double>());
+      case QueryValueType::STRING: return Get<emp::String>();
+      default: return "";
+    }
+  }
 
   template <typename T>
   [[nodiscard]] auto * GetIf(this auto & self) { return std::get_if<T>(&self.value); }
