@@ -95,6 +95,9 @@ public:
   void OnStart() {
     std::println("Random seed = {}", avida.GetRandom().GetSeed());
     avida.Inject(avida.GetSettings().GetConfigDir() / ancestor_filename);
+  }
+
+  void OnPopulationReady() {
     PrintStats(0);  // Report initial state before any organisms run.
   }
 

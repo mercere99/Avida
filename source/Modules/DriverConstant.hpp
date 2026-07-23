@@ -28,7 +28,7 @@ private:
   void PrintStats(size_t ud) {
     std::cout << "UD:" << ud
               << "  PopSize:" << avida.GetNumOrgs()
-              << "  Generation: " << avida.GetAveTrait("generation")
+              << "  Generation: " << avida.CalcTraitAve("generation")
               << "  Genome0:[" << avida.GetFirstOrg().GetGenomeSequence() << "]"
               << std::endl;
   }
@@ -62,6 +62,9 @@ public:
   void OnStart() {
     std::println("Random seed = {}", avida.GetRandom().GetSeed());
     avida.Inject(avida.GetSettings().GetConfigDir() / ancestor_filename);
+  }
+
+  void OnPopulationReady() {
     PrintStats(0);  // Report initial state before any organisms run.
   }
 

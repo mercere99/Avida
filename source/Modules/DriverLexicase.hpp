@@ -33,8 +33,8 @@ private:
   using ModuleBase<AVIDA_T>::avida;
 
   // Per-organism score vector used for lexicase test cases.  This must match the type the org-type
-  // module registers the scores trait as (ROMEO/DOSSIER use emp::Vector<double>); a mismatch trips
-  // a trait type-ID assert in TraitManager::GetTyped.
+  // module registers the scores trait as (ROMEO/DOSSIER use emp::Vector<double>); a mismatch is
+  // reported as a configuration error by TraitManager::GetTyped.
   using score_vec_t = emp::Vector<double>;
 
   emp::DataOutput output;
@@ -48,6 +48,7 @@ private:
   emp::String mode = "base";                 // Modes: "base", "informed", "cohort"
   emp::String scores_name = "trait_values";  // Traits to use for lexicase scores
   emp::String fitness_name = "fitness";      // Trait to output for "combined" fitness
+  emp::Ptr<const Trait<score_vec_t, AVIDA_T>> scores_trait;
   bool profile = false;                      // Print lexicase timing and counter diagnostics?
   size_t profile_frequency = 1;              // Updates between profile outputs.
   bool cache_first_pass = true;               // Reuse full-population filtering by first test?
@@ -178,6 +179,11 @@ public:
 
   // === Signal Listeners ===
 
+  void ValidateConfig() {
+    scores_trait = &avida.template GetTypedTrait<score_vec_t>(scores_name);
+    (void) avida.GetTrait(fitness_name);
+  }
+
   void BeforeStart() {
     // The phenotype-dedup optimization is only wired up for strict, non-cohort lexicase so far.
     // Warn (rather than silently ignore) so a mis-set config doesn't look like it took effect.
@@ -195,7 +201,7 @@ public:
     }
   }
 
-  void OnStart() {
+  void OnPopulationReady() {
     PrintStats(0);  // Report initial state before any organisms run.
     output.DoOutput();
   }
@@ -628,9 +634,7 @@ public:
     emp::Timer<"OnUpdate"> fun_timer;
     if (profile) profile_stats.Reset();
 
-    // Look up the typed scores accessor once per update (avoids per-offspring map lookups).
-    const auto & score_accessor =
-      avida.template GetTypedTrait<score_vec_t>(scores_name).GetConstAccessFun();
+    const auto & score_accessor = scores_trait->GetConstAccessFun();
     const size_t num_test_cases = score_accessor(avida.GetFirstOrg()).size();
 
     // Collect the parent population.

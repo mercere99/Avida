@@ -35,8 +35,7 @@ private:
   int64_t cycles_executed = 0;                      // How many CPU cycles have been run so far?
 
   emp::vector<PendingOffspring<typename AVIDA_T::genome_t>> pending_offspring;
-  // unique_ptr keeps DriverThreaded movable (std::mutex itself is not movable).
-  std::unique_ptr<std::mutex> offspring_mutex = std::make_unique<std::mutex>();
+  std::mutex offspring_mutex;
 
   void PrintStats(size_t ud) {
     std::cout << "UD:" << ud
@@ -78,7 +77,7 @@ public:
       auto & parent = avida.GetOrg(biota_id);
       auto genome = avida.GetOffspringGenome(parent);
       if (avida.TestOffspringGenome(parent, genome)) {
-        std::lock_guard lock(*offspring_mutex);
+        std::lock_guard lock(offspring_mutex);
         pending_offspring.emplace_back(biota_id, std::move(genome));
       }
     });
@@ -89,6 +88,9 @@ public:
   void OnStart() {
     std::println("Random seed = {}", avida.GetRandom().GetSeed());
     avida.Inject(avida.GetSettings().GetConfigDir() / ancestor_filename);
+  }
+
+  void OnPopulationReady() {
     PrintStats(0);  // Report initial state before any organisms run.
   }
 

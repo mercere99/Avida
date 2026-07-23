@@ -33,6 +33,7 @@ private:
   size_t tourny_size = 7;
   size_t pop_size = 1000;
   emp::String fitness_name = "fitness";      // Which trait to determine winner of tournament?
+  emp::Ptr<const TraitBase<AVIDA_T>> fitness_trait;
 
   void PrintStats(size_t ud) {
     std::println("Generation: {} ; PopSize: {} ; Fitness0: {}\nGenome0:{}",
@@ -68,6 +69,10 @@ public:
 
   // === Signal Listeners ===
 
+  void ValidateConfig() {
+    fitness_trait = &avida.GetTrait(fitness_name);
+  }
+
   void BeforeStart() {
     // If we have a filename, set up the date file columns.
     if (output.GetFilename().size()) {
@@ -78,15 +83,12 @@ public:
     }
   }
 
-  void OnStart() {
+  void OnPopulationReady() {
     PrintStats(0);  // Report initial state before any organisms run.
     output.DoOutput();
   }
 
   void OnUpdate(size_t /*update*/) {
-    // Get the trait that we need for determining fitness.
-    const auto & fit_trait = avida.GetTrait(fitness_name);
-
     // Collect the initial organisms in the population
     emp::vector<size_t> parent_ids = avida.GetActiveIDs();
     emp_assert(parent_ids.size() > 0);
@@ -101,10 +103,10 @@ public:
 
       // Determine winner of this tournament.
       size_t best_id = tourny_ids[0];
-      double best_fit = fit_trait.AsDouble(avida.GetOrg(tourny_ids[0]));
+      double best_fit = fitness_trait->AsDouble(avida.GetOrg(tourny_ids[0]));
 
       for (size_t i = 1; i < tourny_size; ++i) {
-        const double cur_fit = fit_trait.AsDouble(avida.GetOrg(tourny_ids[i]));
+        const double cur_fit = fitness_trait->AsDouble(avida.GetOrg(tourny_ids[i]));
         if (best_fit < cur_fit) {
           best_id = tourny_ids[i];
           best_fit = cur_fit;
