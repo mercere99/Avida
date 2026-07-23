@@ -6,6 +6,13 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
  *  Runtime value types used by Avida's query infrastructure.
+ *  
+ *  Classed include:
+ *   OrgRef - reference to a specific organism in the current population.
+ *   OrgSet - reference to a collection of organisms in the current population.
+ *   QueryValue - a data value (string, numeric, etc) returned from a query.
+ * 
+ *  OrgRef and OrgSet contain validation methods to ensure info is still accurate.
  */
 
 #include <concepts>
