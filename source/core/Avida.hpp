@@ -29,6 +29,7 @@
 #include "Organism.hpp"
 #include "Phenotype.hpp"
 #include "PlugInManager.hpp"
+#include "QueryValue.hpp"
 
 namespace fs = std::filesystem;
 
@@ -75,6 +76,9 @@ public:
   // Isolate the types used in this Avida instance.
   using organism_t = Organism<genome_t, phenotype_t>;  // Type for each individual organism
   using biota_t = Biota<organism_t>;                   // All current organisms in Avida
+  using org_ref_t = OrgRef<biota_t>;                   // Stable, validity-aware organism handle
+  using org_set_t = OrgSet<biota_t>;                   // Epoch-bound collection of organisms
+  using query_value_t = QueryValue<biota_t>;           // Runtime value returned by queries
 
   // Make sure all of the components fit the proper concepts.
   static_assert(concepts::Genome<genome_t>);
@@ -168,6 +172,8 @@ public:
   [[nodiscard]] size_t GetTotalOrgs() const { return biota.GetTotalOrgs(); }
   [[nodiscard]] emp::vector<size_t> GetActiveIDs() const { return biota.GetActiveIDs(); }
   [[nodiscard]] emp::BitVector GetActiveBits() const { return biota.GetActiveBits(); }
+  [[nodiscard]] org_ref_t GetOrgRef(size_t id) const { return org_ref_t{biota, id}; }
+  [[nodiscard]] org_set_t GetActiveOrgSet() const { return org_set_t::All(biota); }
 
   [[nodiscard]] auto & GetFirstOrg(this auto & self) {
     if (self.GetNumOrgs() == 0) emp::notify::Error("Cannot select from an empty population.");
