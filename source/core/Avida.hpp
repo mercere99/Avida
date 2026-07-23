@@ -30,6 +30,7 @@
 #include "Phenotype.hpp"
 #include "PlugInManager.hpp"
 #include "QueryValue.hpp"
+#include "QueryManager.hpp"
 
 namespace fs = std::filesystem;
 
@@ -79,6 +80,9 @@ public:
   using org_ref_t = OrgRef<biota_t>;                   // Stable, validity-aware organism handle
   using org_set_t = OrgSet<biota_t>;                   // Epoch-bound collection of organisms
   using query_value_t = QueryValue<biota_t>;           // Runtime value returned by queries
+  using query_manager_t = QueryManager<this_t>;        // Compile and evaluate query strings
+  using query_context_t = QueryContext<this_t>;        // Optional organism/collection scope
+  using compiled_query_t = CompiledQuery<this_t>;      // A reusable, parsed query
 
   // Make sure all of the components fit the proper concepts.
   static_assert(concepts::Genome<genome_t>);
@@ -100,10 +104,11 @@ private:
   enum class RunState { INITIALIZING, PAUSED, RUNNING, EXITING, COMPLETE, ERROR };
   RunState run_state = RunState::INITIALIZING;
 
+  query_manager_t query_man;
   PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
 
 public:
-  Avida() : plug_ins(*this) {
+  Avida() : query_man(*this), plug_ins(*this) {
     AddSetting("base.random_seed",
       [this](){ return random.GetSeed(); },
       [this](size_t new_seed){ random.ResetSeed(new_seed); },
@@ -116,7 +121,7 @@ public:
       [this](){ return data_dir.string(); },
       [this](const emp::String & s){ data_dir = s.str(); },
       "Default directory to write data files.", 'd');
-    AddValue("base.update", update, "Current population update");
+    AddValue("base.update", [this](){ return update; }, "Current population update");
 
     AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
@@ -174,6 +179,15 @@ public:
   [[nodiscard]] emp::BitVector GetActiveBits() const { return biota.GetActiveBits(); }
   [[nodiscard]] org_ref_t GetOrgRef(size_t id) const { return org_ref_t{biota, id}; }
   [[nodiscard]] org_set_t GetActiveOrgSet() const { return org_set_t::All(biota); }
+
+  [[nodiscard]] const query_manager_t & GetQueryManager() const { return query_man; }
+  [[nodiscard]] query_manager_t & GetQueryManager() { return query_man; }
+  [[nodiscard]] compiled_query_t CompileQuery(const emp::String & query) const {
+    return query_man.Compile(query);
+  }
+  [[nodiscard]] query_value_t EvaluateQuery(const emp::String & query) const {
+    return query_man.Evaluate(query);
+  }
 
   [[nodiscard]] auto & GetFirstOrg(this auto & self) {
     if (self.GetNumOrgs() == 0) emp::notify::Error("Cannot select from an empty population.");
@@ -330,10 +344,57 @@ public:
   const emp::SettingsManager & GetSettings() const { return settings; }
   emp::SettingsManager & GetSettings() { return settings; }
 
-  template <typename... ARG_Ts>
-  void AddSetting(ARG_Ts &&... args) { settings.AddSetting(std::forward<ARG_Ts>(args)...); }
-  template <typename... ARG_Ts>
-  void AddValue(ARG_Ts &&... args) { settings.AddValue(std::forward<ARG_Ts>(args)...); }
+  template <typename T>
+  void AddSetting(const emp::String & name, T & value, emp::String desc,
+                  char flag = '\0', emp::String default_val = "") {
+    settings.AddSetting(name, value, std::move(desc), flag, std::move(default_val));
+    using value_t = std::remove_cvref_t<T>;
+    using query_t = std::conditional_t<std::same_as<value_t, std::string>, emp::String, value_t>;
+    query_man.RegisterValue(name, [this, name](){ return settings.template Get<query_t>(name); });
+  }
+
+  template <typename GETTER_T, typename SETTER_T,
+            typename VALUE_T = std::remove_cvref_t<std::invoke_result_t<GETTER_T>>>
+    requires std::invocable<GETTER_T>
+      && std::invocable<SETTER_T, VALUE_T>
+  void AddSetting(const emp::String & name, GETTER_T getter, SETTER_T setter,
+                  emp::String desc, char flag = '\0', emp::String default_val = "") {
+    settings.AddSetting(
+      name, std::move(getter), std::move(setter), std::move(desc), flag, std::move(default_val)
+    );
+    using query_t = std::conditional_t<std::same_as<VALUE_T, std::string>, emp::String, VALUE_T>;
+    query_man.RegisterValue(name, [this, name](){ return settings.template Get<query_t>(name); });
+  }
+
+  template <typename T>
+    requires (!std::invocable<std::remove_cvref_t<T>>)
+  void AddValue(const emp::String & name, T && value, emp::String desc = "") {
+    settings.AddValue(name, std::forward<T>(value), std::move(desc));
+    using value_t = std::conditional_t<
+      std::is_convertible_v<T, const char *>, emp::String, std::remove_cvref_t<T>
+    >;
+    using query_t = std::conditional_t<std::same_as<value_t, std::string>, emp::String, value_t>;
+    query_man.RegisterValue(name, [this, name](){ return settings.template Get<query_t>(name); });
+  }
+
+  template <typename GETTER_T,
+            typename VALUE_T = std::remove_cvref_t<std::invoke_result_t<GETTER_T>>>
+    requires std::invocable<GETTER_T>
+  void AddValue(const emp::String & name, GETTER_T getter, emp::String desc = "") {
+    settings.AddValue(name, std::move(getter), std::move(desc));
+    using query_t = std::conditional_t<std::same_as<VALUE_T, std::string>, emp::String, VALUE_T>;
+    query_man.RegisterValue(name, [this, name](){ return settings.template Get<query_t>(name); });
+  }
+
+  template <typename GETTER_T, typename SETTER_T,
+            typename VALUE_T = std::remove_cvref_t<std::invoke_result_t<GETTER_T>>>
+    requires std::invocable<GETTER_T>
+      && std::invocable<SETTER_T, VALUE_T>
+  void AddValue(const emp::String & name, GETTER_T getter, SETTER_T setter, emp::String desc = "") {
+    settings.AddValue(name, std::move(getter), std::move(setter), std::move(desc));
+    using query_t = std::conditional_t<std::same_as<VALUE_T, std::string>, emp::String, VALUE_T>;
+    query_man.RegisterValue(name, [this, name](){ return settings.template Get<query_t>(name); });
+  }
   template <typename... ARG_Ts>
   void AddKeyword(ARG_Ts &&... args) { settings.AddKeyword(std::forward<ARG_Ts>(args)...); }
 
