@@ -81,7 +81,7 @@ private:
 
   [[nodiscard]] static Landscape ToLandscape(emp::String name) {
     if (name.IsNumber()) {
-      const int id = name.ConvertTo<int>();
+      const int id = name.As<int>();
       emp_always_assert(id > 0 && id < static_cast<int>(Landscape::ERROR), "invalid landscape", id);
       return static_cast<Landscape>(id);
     }
@@ -294,6 +294,9 @@ public:
 
     // Inject starting organisms...
     avida.Inject(empty_genome, starting_count);
+  }
+
+  void OnPopulationReady() {
     output.DoOutput();
   }
 

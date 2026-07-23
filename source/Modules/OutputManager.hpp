@@ -96,8 +96,8 @@ public:
     }
   }
 
-  // Write headers and the initial (update 0) row.
-  void OnStart() {
+  // Write headers and the initial (update 0) row once the population is available.
+  void OnPopulationReady() {
     if (file_frequency != 0) DoFileOutputs();
     if (terminal_frequency != 0) DoTerminalOutputs();
   }

@@ -337,7 +337,7 @@ public:
     pareto_front.AddEntry(org.GetPhenotype().trait_values, avida.GetUpdate());
   }
 
-  void OnStart() {
+  void OnPopulationReady() {
     output.DoOutput();
   }
 

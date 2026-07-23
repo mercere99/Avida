@@ -194,6 +194,11 @@ public:
   // === Signal Listeners ===
 
   void BeforeStart() {
+    target_genome.Resize(genome_length);
+    for (auto & x : target_genome) {
+      x = avida.GetRandom().GetDouble(max_value);
+    }
+
     if (output.GetFilename().size()) {
       output.SetFilepath(avida.GetDataDir());
       output.AddColumn("Update", [this](){ return avida.GetUpdate(); });
@@ -262,13 +267,11 @@ public:
   void OnStart() {
     Genome<double> empty_genome{max_value, genome_length, 0.0};
 
-    target_genome.Resize(genome_length);
-    for (auto & x : target_genome) {
-      x = avida.GetRandom().GetDouble(max_value);
-    }
-
     // Inject starting organisms...
     avida.Inject(empty_genome, starting_count);
+  }
+
+  void OnPopulationReady() {
     EvaluateAll();
     output.DoOutput();
   }
