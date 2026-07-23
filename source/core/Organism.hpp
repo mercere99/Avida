@@ -114,12 +114,10 @@ public:
       if (Hardware().GetBiotaID() != biota_id) {
         emp::notify::Error("Hardware biota_id = ", Hardware().GetBiotaID(),
                           " but organism biota_id = ", biota_id, ".");
-        return false;
       }
 
       if (!Hardware().OK()) {
         emp::notify::Error("Organism: Failed hardware OK() check.");
-        return false;
       }
     }
     return true;
