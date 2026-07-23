@@ -45,7 +45,7 @@ private:
 
     // Internally calculated:
     size_t task_id = 0;                                // Resolved task ID
-    // Target trait, resolved in BeforeStart.  A Trait *pointer* (template-id) is cached rather
+    // Target trait, resolved in ValidateConfig.  A Trait *pointer* (template-id) is cached rather
     // than the accessor by value, so this struct names no organism_t-dependent type at class
     // scope -- which would fail while Avida's phenotype (and thus organism_t) is still forming.
     emp::Ptr<const Trait<double, AVIDA_T>> trait_ptr;
@@ -59,7 +59,6 @@ private:
     if (name == "add"  || name == "+") return Op::ADD;
     if (name == "mult" || name == "*") return Op::MULT;
     emp::notify::Error("Unknown reaction operation '", name, "'; expected 'add' or 'mult'.");
-    return Op::ADD;
   }
 
   // Count active organisms whose parent performed `task_id` at least once (a capability proxy).
@@ -79,7 +78,7 @@ public:
   ~ReactionsManager() {}
 
   void Serialize(emp::SerialPod & /* pod */) {
-    // `reactions`/`targets`/`task_reactions` are rebuilt from config keywords plus BeforeStart.
+    // `reactions`/`targets`/`task_reactions` are rebuilt from config keywords plus ValidateConfig.
     // Per-organism task counts are registered traits (serialized with each organism), and the
     // output tally is recomputed before each write -- so there is nothing extra to save here.
   }
@@ -111,14 +110,13 @@ public:
     if (args.size() < 4 || args.size() > 5) {
       emp::notify::Error("Reaction needs 4-5 args: <task> <trait> <add|mult> <value> [max_triggers];"
                          " received ", args.size(), ".");
-      return;
     }
     Reaction react;
     react.task_name    = args[0];
     react.trait_name   = args[1];
     react.op           = ToOp(args[2]);
-    react.value        = args[3].ConvertTo<double>();
-    react.max_triggers = (args.size() >= 5) ? args[4].ConvertTo<size_t>() : 0;
+    react.value        = args[3].As<double>();
+    react.max_triggers = (args.size() >= 5) ? args[4].As<size_t>() : 0;
     reactions.push_back(std::move(react));
   }
 
@@ -126,7 +124,7 @@ public:
 
   // Validate the configuration and resolve task IDs + trait accessors, now that every
   // module has registered its tasks and traits.
-  void BeforeStart() {
+  void ValidateConfig() {
     task_reactions.resize(avida.GetNumTasks());
 
     // Process each reaction...
@@ -144,15 +142,14 @@ public:
       if (!avida.HasTrait(react.trait_name)) {
         emp::notify::Error("Reaction targets unknown trait '", react.trait_name, "'.");
       }
-      if (avida.GetTrait(react.trait_name).GetTypeID() != emp::GetTypeID<double>()) {
-        emp::notify::Error("Reaction trait '", react.trait_name, "' must be type double, but is ",
-          avida.GetTrait(react.trait_name).GetTypeID(), ".");
-      }
-
       react.trait_ptr = &avida.template GetTypedTrait<double>(react.trait_name);
 
       task_reactions[react.task_id].push_back(react_id);
+    }
+  }
 
+  void BeforeStart() {
+    for (const Reaction & react : reactions) {
       avida.AddOutput("reactions.csv", react.task_name,
         [this, task_id=react.task_id](){ return CountParentPerformers(task_id); });
     }
