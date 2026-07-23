@@ -31,8 +31,14 @@ private:
     return requires { fun(module); };
   }
 
+  // Produce one constructor argument per plug-in type.  Passing AVIDA_T& directly to
+  // std::tuple lets each plug-in be constructed in its final storage, so plug-ins do
+  // not need to be copyable or movable.
+  template <typename>
+  static AVIDA_T & AvidaArg(AVIDA_T & avida) { return avida; }
+
 public:
-  PlugInManager(AVIDA_T & avida) : plug_ins(PLUG_IN_Ts{avida}...) { }
+  PlugInManager(AVIDA_T & avida) : plug_ins(AvidaArg<PLUG_IN_Ts>(avida)...) { }
 
   // Accessor to individual plug-ins by realized type.
   template <typename PLUG_IN_T>
