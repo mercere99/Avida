@@ -474,6 +474,13 @@ public:
   template <typename... ARG_Ts>
   void AddKeyword(ARG_Ts &&... args) { settings.AddKeyword(std::forward<ARG_Ts>(args)...); }
 
+  /// Register a read-only value that can be accessed from an organism query reference.
+  template <typename GETTER_T>
+    requires std::invocable<GETTER_T, const organism_t &>
+  void RegisterOrganismProperty(const emp::String & name, GETTER_T getter) {
+    query_man.RegisterOrganismProperty(name, std::move(getter));
+  }
+
   void AddCallback(const emp::String & name, std::function<void(size_t)> callback) {
     AVIDA_SIGNAL( AddCallback(name, callback) );
   }
