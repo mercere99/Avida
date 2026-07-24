@@ -10,6 +10,8 @@
 
 #include <filesystem>  // std::filesystem::path
 #include <fstream>     // std::ifstream, std::ofstream
+#include <iostream>    // std::cout, std::ostream
+#include <sstream>     // std::istringstream
 #include <type_traits> // std::is_arithmetic_v, std::invoke_result_t
 
 #include "emp/base/Ptr.hpp"
@@ -123,6 +125,10 @@ public:
       "Default directory to write data files.", 'd');
     AddValue("base.update", [this](){ return update; }, "Current population update");
 
+    AddKeyword("print",
+      [this](emp::vector<emp::String> args) { PrintQueries(args); },
+      "Print comma-separated query expressions");
+
     AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
         std::println("Avida v5.0.0\n");
@@ -187,6 +193,76 @@ public:
   }
   [[nodiscard]] query_value_t EvaluateQuery(const emp::String & query) const {
     return query_man.Evaluate(query);
+  }
+
+  /// Convert any query result into a visible representation suitable for the print keyword.
+  [[nodiscard]] emp::String FormatQueryValue(const query_value_t & value) const {
+    if (value.IsNull()) return "null";
+    if (value.IsOrgRef()) {
+      const org_ref_t & ref = value.template Get<org_ref_t>();
+      if (ref.GetBiota() != &biota || !ref.IsValid()) return "invalid_org";
+      return emp::MakeString("org(", ref.GetBiotaID(), ')');
+    }
+    if (value.IsOrgSet()) {
+      const org_set_t & set = value.template Get<org_set_t>();
+      if (set.GetBiota() != &biota || !set.IsValid()) return "invalid_org_set";
+      return emp::MakeString("org_set(size=", set.GetSize(), ')');
+    }
+    return value.AsString();
+  }
+
+  /// Evaluate and concatenate comma-separated query expressions, followed by one newline.
+  void PrintQueries(const emp::vector<emp::String> & tokens, std::ostream & os = std::cout) const {
+    if (tokens.empty()) emp::notify::Error("print requires at least one query expression.");
+
+    emp::vector<emp::String> queries;
+    emp::String query;
+    size_t paren_depth = 0;
+    size_t brace_depth = 0;
+
+    const auto store_query = [&]() {
+      if (query.empty()) emp::notify::Error("print contains an empty query expression.");
+      queries.push_back(std::move(query));
+      query.clear();
+    };
+
+    for (const emp::String & token : tokens) {
+      if (token == "," && paren_depth == 0 && brace_depth == 0) {
+        store_query();
+        continue;
+      }
+
+      if (token == ")" && paren_depth == 0) {
+        emp::notify::Error("print contains an unmatched ')'.");
+      }
+      if (token == "}" && brace_depth == 0) {
+        emp::notify::Error("print contains an unmatched '}'.");
+      }
+
+      query += token;
+
+      if (token == "(") ++paren_depth;
+      else if (token == ")") --paren_depth;
+      else if (token == "{") ++brace_depth;
+      else if (token == "}") --brace_depth;
+    }
+
+    if (paren_depth || brace_depth) {
+      emp::notify::Error("print contains an unmatched grouping delimiter.");
+    }
+    store_query();
+
+    for (const emp::String & source : queries) {
+      os << FormatQueryValue(EvaluateQuery(source));
+    }
+    os << '\n';
+  }
+
+  /// Parse and execute one or more SettingsManager commands from an in-memory string.
+  void ExecuteCommand(const emp::String & command) {
+    if (command.empty()) emp::notify::Error("Cannot execute an empty SettingsManager command.");
+    std::istringstream input{command.str() + '\n'};
+    settings.Load(input);
   }
 
   [[nodiscard]] auto & GetFirstOrg(this auto & self) {
