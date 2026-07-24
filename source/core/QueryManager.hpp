@@ -5,9 +5,9 @@
  *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
- *  Compile and evaluate typed Avida query expressions.  This initial scalar layer supports
- *  registered setting/value names, literals, arithmetic and comparison operators, short-circuit
- *  boolean and ternary operators, scalar math functions, org(id), and the .valid property.
+ *  Compile and evaluate typed Avida query expressions.  Supports registered settings and values,
+ *  scalar expressions, organism traits and properties, collection reductions such as mean{...},
+ *  and organism selectors such as orgmax{...}.
  */
 
 #include <algorithm>
@@ -83,9 +83,13 @@ public:
   using value_t = typename AVIDA_T::query_value_t;
   using org_ref_t = typename AVIDA_T::org_ref_t;
   using org_set_t = typename AVIDA_T::org_set_t;
+  using organism_t = typename AVIDA_T::organism_t;
   using context_t = QueryContext<AVIDA_T>;
   using compiled_query_t = CompiledQuery<AVIDA_T>;
   using value_getter_t = std::function<value_t(const context_t &)>;
+  using collection_fun_t = std::function<value_t(
+    const org_set_t &, const value_getter_t &, const context_t &
+  )>;
 
 private:
   struct Expression {
@@ -98,6 +102,11 @@ private:
     value_getter_t getter;
   };
 
+  struct TraitInfo {
+    QueryValueType type;
+    std::function<value_t(const organism_t &)> getter;
+  };
+
   using function_t = std::function<value_t(const emp::vector<value_t> &)>;
 
   struct FunctionInfo {
@@ -108,9 +117,17 @@ private:
     function_t fun;
   };
 
+  struct CollectionFunctionInfo {
+    QueryValueType return_type;
+    bool require_numeric;
+    collection_fun_t fun;
+  };
+
   AVIDA_T & avida;
   std::map<emp::String, ValueInfo> value_map;
+  std::map<emp::String, TraitInfo> trait_map;
   std::map<emp::String, FunctionInfo> function_map;
+  std::map<emp::String, CollectionFunctionInfo> collection_function_map;
 
   emp::Lexer lexer;
   const int ident_id;
@@ -124,6 +141,19 @@ private:
   const int less_equal_id;
   const int greater_equal_id;
   const int power_id;
+
+  template <typename T>
+  [[nodiscard]] static consteval bool IsQueryValueType() {
+    using base_t = std::remove_cvref_t<T>;
+    return std::same_as<base_t, bool>
+      || std::signed_integral<base_t>
+      || std::unsigned_integral<base_t>
+      || std::floating_point<base_t>
+      || std::same_as<base_t, emp::String>
+      || std::same_as<base_t, std::string>
+      || std::same_as<base_t, org_ref_t>
+      || std::same_as<base_t, org_set_t>;
+  }
 
   template <typename T>
   [[nodiscard]] static consteval QueryValueType GetQueryType() {
@@ -143,6 +173,20 @@ private:
     return type == QueryValueType::INT64
       || type == QueryValueType::UINT64
       || type == QueryValueType::DOUBLE;
+  }
+
+  [[nodiscard]] static emp::String QueryValueTypeName(QueryValueType type) {
+    switch (type) {
+      case QueryValueType::NULL_VALUE: return "null";
+      case QueryValueType::BOOL: return "bool";
+      case QueryValueType::INT64: return "int64";
+      case QueryValueType::UINT64: return "uint64";
+      case QueryValueType::DOUBLE: return "double";
+      case QueryValueType::STRING: return "string";
+      case QueryValueType::ORG_REF: return "organism";
+      case QueryValueType::ORG_SET: return "organism_set";
+    }
+    return "unknown";
   }
 
   [[nodiscard]] static bool IsConditionType(QueryValueType type) {
@@ -228,14 +272,101 @@ private:
     });
   }
 
+  enum class Reduction { MIN, MAX, MEAN, SUM };
+
+  void SetupCollectionFunctions() {
+    const auto make_reducer = [](Reduction reduction) -> collection_fun_t {
+      return [reduction](const org_set_t & collection,
+                         const value_getter_t & expression,
+                         const context_t & context) -> value_t {
+        if (!collection.IsValid()
+            || collection.GetBiota() != &context.avida.GetBiota()) return {};
+
+        bool found = false;
+        double result = 0.0;
+        size_t count = 0;
+        for (size_t id : collection.GetBits()) {
+          const organism_t & organism = context.avida.GetOrg(id);
+          const value_t value = expression(context_t{context.avida, &organism, &collection});
+          if (value.IsNull()) continue;
+          const double number = AsDouble(value);
+
+          if (!found) {
+            result = number;
+            found = true;
+          } else if (reduction == Reduction::MIN) {
+            result = std::min(result, number);
+          } else if (reduction == Reduction::MAX) {
+            result = std::max(result, number);
+          } else {
+            result += number;
+          }
+          ++count;
+        }
+
+        if (!found) return reduction == Reduction::SUM ? value_t{0.0} : value_t{};
+        if (reduction == Reduction::MEAN) return result / static_cast<double>(count);
+        return result;
+      };
+    };
+
+    collection_function_map.emplace(
+      "min", CollectionFunctionInfo{QueryValueType::DOUBLE, true, make_reducer(Reduction::MIN)}
+    );
+    collection_function_map.emplace(
+      "max", CollectionFunctionInfo{QueryValueType::DOUBLE, true, make_reducer(Reduction::MAX)}
+    );
+    collection_function_map.emplace(
+      "mean", CollectionFunctionInfo{QueryValueType::DOUBLE, true, make_reducer(Reduction::MEAN)}
+    );
+    collection_function_map.emplace(
+      "sum", CollectionFunctionInfo{QueryValueType::DOUBLE, true, make_reducer(Reduction::SUM)}
+    );
+
+    const auto make_selector = [](bool find_maximum) -> collection_fun_t {
+      return [find_maximum](const org_set_t & collection,
+                            const value_getter_t & expression,
+                            const context_t & context) -> value_t {
+        if (!collection.IsValid()
+            || collection.GetBiota() != &context.avida.GetBiota()) return org_ref_t{};
+
+        bool found = false;
+        double best_value = 0.0;
+        size_t best_id = 0;
+        for (size_t id : collection.GetBits()) {
+          const organism_t & organism = context.avida.GetOrg(id);
+          const value_t value = expression(context_t{context.avida, &organism, &collection});
+          if (value.IsNull()) continue;
+          const double number = AsDouble(value);
+          if (!found || (find_maximum ? number > best_value : number < best_value)) {
+            found = true;
+            best_value = number;
+            best_id = id;
+          }
+        }
+        return found ? value_t{context.avida.GetOrgRef(best_id)} : value_t{org_ref_t{}};
+      };
+    };
+
+    collection_function_map.emplace("orgmin", CollectionFunctionInfo{
+      QueryValueType::ORG_REF, true, make_selector(false)
+    });
+    collection_function_map.emplace("orgmax", CollectionFunctionInfo{
+      QueryValueType::ORG_REF, true, make_selector(true)
+    });
+  }
+
   class Parser {
   private:
     const QueryManager & manager;
     emp::String source;
     emp::TokenStream tokens;
     emp::TokenStream::Iterator pos;
+    size_t organism_scope_depth = 0;
 
-    [[noreturn]] void Error(const emp::String & message) const {
+    template <typename... ARG_Ts>
+    [[noreturn]] void ParseError(ARG_Ts &&... args) const {
+      const emp::String & message = emp::MakeString(args...);
       const auto & token = pos.Peek();
       if (token.id == 0) {
         emp::notify::Error("Invalid query ", source.AsLiteral(), ": ", message, " at end of input.");
@@ -253,7 +384,7 @@ private:
     }
 
     void Require(int token_id, const emp::String & description) {
-      if (!Match(token_id)) Error(emp::MakeString("expected ", description));
+      if (!Match(token_id)) ParseError("expected ", description);
     }
 
     [[nodiscard]] static Expression Literal(value_t value) {
@@ -263,7 +394,7 @@ private:
 
     [[nodiscard]] Expression MakeUnary(int op, Expression operand) {
       if (op == '!') {
-        if (!IsConditionType(operand.type)) Error("operator '!' requires a condition");
+        if (!IsConditionType(operand.type)) ParseError("operator '!' requires a condition");
         return {
           QueryValueType::BOOL,
           [operand=std::move(operand)](const context_t & context){
@@ -273,7 +404,7 @@ private:
       }
 
       if (!IsNumericOrNull(operand.type)) {
-        Error(emp::MakeString("unary '", static_cast<char>(op), "' requires a numeric operand"));
+        ParseError("unary '", static_cast<char>(op), "' requires a numeric operand");
       }
       if (op == '+') return operand;
       return {
@@ -304,7 +435,7 @@ private:
       }
 
       if (!IsNumericOrNull(lhs.type) || !IsNumericOrNull(rhs.type)) {
-        Error(emp::MakeString("operator '", static_cast<char>(op), "' requires numeric operands"));
+        ParseError("operator '", static_cast<char>(op), "' requires numeric operands");
       }
 
       if (lhs.type == QueryValueType::NULL_VALUE && rhs.type == QueryValueType::NULL_VALUE) {
@@ -326,14 +457,14 @@ private:
             case '/': return a / b;
             case '%': return std::fmod(a, b);
           }
-          emp::notify::Error("Unknown arithmetic query operator.");
+          emp::notify::Error("Unknown arithmetic query operator ", op, ".");
         }
       };
     }
 
     [[nodiscard]] Expression MakePower(Expression lhs, Expression rhs) {
       if (!IsNumericOrNull(lhs.type) || !IsNumericOrNull(rhs.type)) {
-        Error("operator '**' requires numeric operands");
+        ParseError("operator '**' requires numeric operands");
       }
       return {
         QueryValueType::DOUBLE,
@@ -350,7 +481,7 @@ private:
       const bool numeric = IsNumericOrNull(lhs.type) && IsNumericOrNull(rhs.type);
       const bool strings = (lhs.type == QueryValueType::STRING || lhs.type == QueryValueType::NULL_VALUE)
         && (rhs.type == QueryValueType::STRING || rhs.type == QueryValueType::NULL_VALUE);
-      if (!numeric && !strings) Error("comparison requires two numeric values or two strings");
+      if (!numeric && !strings) ParseError("comparison requires two numeric values or two strings");
 
       return {
         QueryValueType::BOOL,
@@ -387,7 +518,7 @@ private:
         || (IsNumericType(lhs.type) && IsNumericType(rhs.type))
         || lhs.type == QueryValueType::NULL_VALUE
         || rhs.type == QueryValueType::NULL_VALUE;
-      if (!compatible) Error("equality comparison uses incompatible types");
+      if (!compatible) ParseError("equality comparison uses incompatible types");
 
       return {
         QueryValueType::BOOL,
@@ -405,7 +536,7 @@ private:
 
     [[nodiscard]] Expression MakeLogical(bool is_and, Expression lhs, Expression rhs) {
       if (!IsConditionType(lhs.type) || !IsConditionType(rhs.type)) {
-        Error(is_and ? "operator '&&' requires conditions" : "operator '||' requires conditions");
+        ParseError(is_and ? "operator '&&' requires conditions" : "operator '||' requires conditions");
       }
       return {
         QueryValueType::BOOL,
@@ -429,7 +560,7 @@ private:
         emp::String text = pos.Use().lexeme;
         errno = 0;
         const unsigned long long number = text.PopUnsigned();
-        if (errno == ERANGE) Error("integer literal is out of range");
+        if (errno == ERANGE) ParseError("integer literal is out of range");
         if (number <= static_cast<unsigned long long>(std::numeric_limits<int64_t>::max())) {
           return Literal(static_cast<int64_t>(number));
         }
@@ -440,7 +571,7 @@ private:
         emp::String text = pos.Use().lexeme;
         errno = 0;
         const double number = text.PopFloat();
-        if (errno == ERANGE) Error("floating-point literal is out of range");
+        if (errno == ERANGE) ParseError("floating-point literal is out of range");
         return Literal(number);
       }
 
@@ -448,7 +579,7 @@ private:
         return Literal(pos.Use().lexeme.ConvertStringFromLiteral("\"'"));
       }
 
-      if (!pos.Is(manager.ident_id)) Error("expected a value");
+      if (!pos.Is(manager.ident_id)) ParseError("expected a value");
 
       emp::vector<emp::String> name_parts{pos.Use().lexeme};
       emp::vector<emp::String> name_paths{name_parts[0]};
@@ -460,17 +591,25 @@ private:
 
       size_t path_size = name_paths.size();
       const emp::String & full_name = name_paths.back();
-      const bool full_is_function = pos.Is('(') && manager.function_map.contains(full_name);
-      if (!manager.value_map.contains(full_name) && !full_is_function) {
-        while (path_size > 1 && !manager.value_map.contains(name_paths[path_size - 2])) {
-          --path_size;
+      const auto is_scoped_name = [this](const emp::String & candidate) {
+        return organism_scope_depth > 0
+          && (candidate == "biota_id"
+              || candidate == "global_id"
+              || manager.trait_map.contains(candidate));
+      };
+      const auto is_value_name = [&manager=manager, &is_scoped_name](const emp::String & candidate) {
+        return manager.value_map.contains(candidate) || is_scoped_name(candidate);
+      };
+      const bool full_is_function =
+        (pos.Is('(') && manager.function_map.contains(full_name))
+        || (pos.Is('{') && manager.collection_function_map.contains(full_name));
+      if (!is_value_name(full_name) && !full_is_function) {
+        path_size = 0;
+        for (size_t i = name_paths.size(); i > 0; --i) {
+          if (is_value_name(name_paths[i - 1])) { path_size = i; break; }
         }
-        if (path_size > 1) {
-          --path_size;
-          pos.Rewind((name_paths.size() - path_size) * 2);
-        } else {
-          path_size = name_paths.size();
-        }
+        if (path_size) pos.Rewind((name_paths.size() - path_size) * 2);
+        else path_size = name_paths.size();
       }
       const emp::String & name = name_paths[path_size - 1];
 
@@ -487,19 +626,16 @@ private:
 
         auto fun_it = manager.function_map.find(name);
         if (fun_it == manager.function_map.end()) {
-          Error(emp::MakeString("unknown scalar function '", name, "'"));
+          ParseError("unknown scalar function '", name, "'");
         }
         const FunctionInfo & info = fun_it->second;
         if (args.size() != info.arity) {
-          Error(emp::MakeString(
-            "function '", name, "' expects ", info.arity,
-            " argument", info.arity == 1 ? "" : "s"
-          ));
+          ParseError("function '", name, "' expects ", info.arity, " argument(s)");
         }
         if (info.require_numeric) {
           for (const Expression & arg : args) {
             if (!IsNumericType(arg.type) && arg.type != QueryValueType::NULL_VALUE) {
-              Error(emp::MakeString("function '", name, "' requires numeric arguments"));
+              ParseError("function '", name, "' requires numeric arguments");
             }
           }
         }
@@ -523,9 +659,72 @@ private:
         };
       }
 
+      if (Match('{')) {
+        auto fun_it = manager.collection_function_map.find(name);
+        if (fun_it == manager.collection_function_map.end()) {
+          ParseError("unknown collection function '", name, "'");
+        }
+
+        ++organism_scope_depth;
+        Expression expression = ParseTernary();
+        --organism_scope_depth;
+        Require('}', "'}'");
+
+        const CollectionFunctionInfo & info = fun_it->second;
+        if (info.require_numeric
+            && !IsNumericType(expression.type)
+            && expression.type != QueryValueType::NULL_VALUE) {
+          ParseError("collection function '", name, "' requires a numeric expression");
+        }
+
+        return {
+          info.return_type,
+          [expression_fun=std::move(expression.eval), fun=info.fun]
+          (const context_t & context) -> value_t {
+            const org_set_t collection = context.collection
+              ? *context.collection
+              : context.avida.GetActiveOrgSet();
+            return fun(collection, expression_fun, context);
+          }
+        };
+      }
+
+      if (organism_scope_depth > 0) {
+        auto trait_it = manager.trait_map.find(name);
+        if (trait_it != manager.trait_map.end()) {
+          return {
+            trait_it->second.type,
+            [name, getter=trait_it->second.getter](const context_t & context) -> value_t {
+              if (!context.organism) {
+                emp::notify::Error("Trait '", name, "' requires an organism context.");
+              }
+              return getter(*context.organism);
+            }
+          };
+        }
+
+        if (name == "biota_id" || name == "global_id") {
+          return {
+            QueryValueType::UINT64,
+            [name](const context_t & context) -> value_t {
+              if (!context.organism) {
+                emp::notify::Error("Organism value '", name, "' requires an organism context.");
+              }
+              return name == "biota_id"
+                ? value_t{context.organism->GetBiotaID()}
+                : value_t{context.organism->GetGlobalID()};
+            }
+          };
+        }
+
+        if (manager.avida.HasTrait(name)) {
+          ParseError("trait '", name, "' cannot be represented as a query value");
+        }
+      }
+
       auto value_it = manager.value_map.find(name);
       if (value_it == manager.value_map.end()) {
-        Error(emp::MakeString("unknown value '", name, "'"));
+        ParseError("unknown value '", name, "'");
       }
       return {value_it->second.type, value_it->second.getter};
     }
@@ -533,31 +732,74 @@ private:
     [[nodiscard]] Expression ParsePostfix() {
       Expression out = ParsePrimary();
       while (Match('.')) {
-        if (!pos.Is(manager.ident_id)) Error("expected a property name after '.'");
+        if (!pos.Is(manager.ident_id)) ParseError("expected a property name after '.'");
         const emp::String property = pos.Use().lexeme;
-        if (property != "valid") {
-          Error(emp::MakeString("unknown phase-2 property '", property, "'"));
-        }
-        if (out.type == QueryValueType::ORG_REF) {
+
+        if (property == "valid" && out.type == QueryValueType::ORG_REF) {
           out = {
             QueryValueType::BOOL,
             [base=std::move(out)](const context_t & context) -> value_t {
               value_t value = base.eval(context);
               if (value.IsNull()) return false;
-              return value.template Get<org_ref_t>().IsValid();
+              const org_ref_t & ref = value.template Get<org_ref_t>();
+              return ref.GetBiota() == &context.avida.GetBiota() && ref.IsValid();
             }
           };
-        } else if (out.type == QueryValueType::ORG_SET) {
+        } else if (property == "valid" && out.type == QueryValueType::ORG_SET) {
           out = {
             QueryValueType::BOOL,
             [base=std::move(out)](const context_t & context) -> value_t {
               value_t value = base.eval(context);
               if (value.IsNull()) return false;
-              return value.template Get<org_set_t>().IsValid();
+              const org_set_t & collection = value.template Get<org_set_t>();
+              return collection.GetBiota() == &context.avida.GetBiota()
+                && collection.IsValid();
+            }
+          };
+        } else if (property == "size" && out.type == QueryValueType::ORG_SET) {
+          out = {
+            QueryValueType::UINT64,
+            [base=std::move(out)](const context_t & context) -> value_t {
+              value_t value = base.eval(context);
+              if (value.IsNull()) return {};
+              const org_set_t & collection = value.template Get<org_set_t>();
+              return collection.GetBiota() == &context.avida.GetBiota()
+                  && collection.IsValid()
+                ? value_t{collection.GetSize()}
+                : value_t{};
+            }
+          };
+        } else if ((property == "biota_id" || property == "global_id")
+                   && out.type == QueryValueType::ORG_REF) {
+          out = {
+            QueryValueType::UINT64,
+            [property, base=std::move(out)](const context_t & context) -> value_t {
+              value_t value = base.eval(context);
+              if (value.IsNull()) return {};
+              const org_ref_t & ref = value.template Get<org_ref_t>();
+              if (ref.GetBiota() != &context.avida.GetBiota() || !ref.IsValid()) return {};
+              return property == "biota_id"
+                ? value_t{ref.GetBiotaID()}
+                : value_t{ref.GetGlobalID()};
+            }
+          };
+        } else if (out.type == QueryValueType::ORG_REF
+                   && manager.trait_map.contains(property)) {
+          const TraitInfo & trait = manager.trait_map.at(property);
+          out = {
+            trait.type,
+            [base=std::move(out), getter=trait.getter](const context_t & context) -> value_t {
+              value_t value = base.eval(context);
+              if (value.IsNull()) return {};
+              const org_ref_t & ref = value.template Get<org_ref_t>();
+              const organism_t * organism = ref.GetBiota() == &context.avida.GetBiota()
+                ? ref.TryGet()
+                : nullptr;
+              return organism ? getter(*organism) : value_t{};
             }
           };
         } else {
-          Error("property '.valid' requires an organism or organism set");
+          ParseError("property '", property, "' is not available on ", QueryValueTypeName(out.type));
         }
       }
       return out;
@@ -635,7 +877,9 @@ private:
     [[nodiscard]] Expression ParseTernary() {
       Expression condition = ParseLogicalOr();
       if (!Match('?')) return condition;
-      if (!IsConditionType(condition.type)) Error("ternary condition is not boolean or numeric");
+      if (!IsConditionType(condition.type)) {
+        ParseError("ternary condition is not boolean or numeric");
+      }
 
       Expression if_true = ParseTernary();
       Require(':', "':'");
@@ -648,7 +892,7 @@ private:
         } else if (if_true.type == QueryValueType::NULL_VALUE) {
           result_type = if_false.type;
         } else if (if_false.type != QueryValueType::NULL_VALUE) {
-          Error("ternary branches have incompatible types");
+          ParseError("ternary branches have incompatible types");
         }
       }
 
@@ -675,9 +919,9 @@ private:
     { }
 
     [[nodiscard]] compiled_query_t Compile() {
-      if (pos.None()) Error("query is empty");
+      if (pos.None()) ParseError("query is empty");
       Expression expression = ParseTernary();
-      if (pos.Any()) Error("unexpected token");
+      if (pos.Any()) ParseError("unexpected token");
       return compiled_query_t(manager.avida, source, expression.type, std::move(expression.eval));
     }
   };
@@ -704,6 +948,47 @@ public:
     lexer.IgnoreToken("whitespace", "[ \\t\\r\\n]+");
     lexer.Generate();
     SetupFunctions();
+    SetupCollectionFunctions();
+  }
+
+  template <typename TRAIT_T, typename GETTER_T>
+    requires std::invocable<GETTER_T, const organism_t &>
+  void RegisterTrait(const emp::String & name, GETTER_T getter) {
+    if constexpr (IsQueryValueType<TRAIT_T>()) {
+      if (trait_map.contains(name)) {
+        emp::notify::Error("Query trait '", name, "' is already registered.");
+      }
+      trait_map.emplace(name, TraitInfo{
+        GetQueryType<TRAIT_T>(),
+        [getter=std::move(getter)](const organism_t & organism) {
+          return value_t{getter(organism)};
+        }
+      });
+    }
+  }
+
+  [[nodiscard]] bool HasTrait(const emp::String & name) const {
+    return trait_map.contains(name);
+  }
+
+  void RegisterCollectionFunction(const emp::String & name,
+                                  QueryValueType return_type,
+                                  bool require_numeric,
+                                  collection_fun_t fun) {
+    if (!name.IsIdentifier()) {
+      emp::notify::Error("Invalid query collection function name '", name, "'.");
+    }
+    if (collection_function_map.contains(name)) {
+      emp::notify::Error("Query collection function '", name, "' is already registered.");
+    }
+    collection_function_map.emplace(
+      name,
+      CollectionFunctionInfo{return_type, require_numeric, std::move(fun)}
+    );
+  }
+
+  [[nodiscard]] bool HasCollectionFunction(const emp::String & name) const {
+    return collection_function_map.contains(name);
   }
 
   template <typename GETTER_T,
