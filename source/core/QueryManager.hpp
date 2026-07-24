@@ -12,6 +12,8 @@
  *  `all` denotes the active population.  `filter{condition}` and `|{condition}` produce filtered
  *  sets.  For organism sets, `&` intersects while `|` unions another set or pipes the set into a
  *  collection function according to the right-hand expression's static category.
+ *  Organism properties such as `genome` and `genome_length` share the same expression namespace
+ *  as traits and can be read from an OrgRef or within a collection expression.
  */
 
 #include <algorithm>
@@ -113,6 +115,11 @@ private:
     std::function<value_t(const organism_t &)> getter;
   };
 
+  struct OrganismPropertyInfo {
+    QueryValueType type;
+    std::function<value_t(const organism_t &)> getter;
+  };
+
   using function_t = std::function<value_t(const emp::vector<value_t> &)>;
 
   struct FunctionInfo {
@@ -133,6 +140,7 @@ private:
   AVIDA_T & avida;
   std::map<emp::String, ValueInfo> value_map;
   std::map<emp::String, TraitInfo> trait_map;
+  std::map<emp::String, OrganismPropertyInfo> organism_property_map;
   std::map<emp::String, FunctionInfo> function_map;
   std::map<emp::String, CollectionFunctionInfo> collection_function_map;
 
@@ -752,6 +760,7 @@ private:
         return organism_scope_depth > 0
           && (candidate == "biota_id"
               || candidate == "global_id"
+              || manager.organism_property_map.contains(candidate)
               || manager.trait_map.contains(candidate));
       };
       const auto is_value_name = [&manager=manager, &is_scoped_name](const emp::String & candidate) {
@@ -821,6 +830,21 @@ private:
       }
 
       if (organism_scope_depth > 0) {
+        auto property_it = manager.organism_property_map.find(name);
+        if (property_it != manager.organism_property_map.end()) {
+          return {
+            property_it->second.type,
+            [name, getter=property_it->second.getter](const context_t & context) -> value_t {
+              if (!context.organism) {
+                emp::notify::Error(
+                  "Organism property '", name, "' requires an organism context."
+                );
+              }
+              return getter(*context.organism);
+            }
+          };
+        }
+
         auto trait_it = manager.trait_map.find(name);
         if (trait_it != manager.trait_map.end()) {
           return {
@@ -925,6 +949,19 @@ private:
               return property == "biota_id"
                 ? value_t{ref.GetBiotaID()}
                 : value_t{ref.GetGlobalID()};
+            }
+          );
+        } else if (out.type == QueryValueType::ORG_REF
+                   && manager.organism_property_map.contains(property)) {
+          const OrganismPropertyInfo & info = manager.organism_property_map.at(property);
+          out = MapExpression(std::move(out), info.type,
+            [getter=info.getter](value_t value, const context_t & context) -> value_t {
+              if (value.IsNull()) return {};
+              const org_ref_t & ref = value.template Get<org_ref_t>();
+              const organism_t * organism = ref.GetBiota() == &context.avida.GetBiota()
+                ? ref.TryGet()
+                : nullptr;
+              return organism ? getter(*organism) : value_t{};
             }
           );
         } else if (out.type == QueryValueType::ORG_REF
@@ -1115,6 +1152,12 @@ public:
     SetupFunctions();
     SetupCollectionFunctions();
     RegisterValue("all", [this](){ return avida.GetActiveOrgSet(); });
+    RegisterOrganismProperty("genome", [](const organism_t & organism){
+      return organism.GetGenomeSequence();
+    });
+    RegisterOrganismProperty("genome_length", [](const organism_t & organism){
+      return organism.GetGenome().size();
+    });
   }
 
   template <typename TRAIT_T, typename GETTER_T>
@@ -1123,6 +1166,11 @@ public:
     if constexpr (IsQueryValueType<TRAIT_T>()) {
       if (trait_map.contains(name)) {
         emp::notify::Error("Query trait '", name, "' is already registered.");
+      }
+      if (organism_property_map.contains(name)) {
+        emp::notify::Error(
+          "Query trait '", name, "' conflicts with an organism property of the same name."
+        );
       }
       trait_map.emplace(name, TraitInfo{
         GetQueryType<TRAIT_T>(),
@@ -1135,6 +1183,39 @@ public:
 
   [[nodiscard]] bool HasTrait(const emp::String & name) const {
     return trait_map.contains(name);
+  }
+
+  template <typename GETTER_T,
+            typename RESULT_T = std::remove_cvref_t<
+              std::invoke_result_t<GETTER_T, const organism_t &>
+            >>
+    requires std::invocable<GETTER_T, const organism_t &>
+  void RegisterOrganismProperty(const emp::String & name, GETTER_T getter) {
+    if (!name.IsIdentifier()
+        || name == "valid"
+        || name == "biota_id"
+        || name == "global_id") {
+      emp::notify::Error("Invalid query organism property name '", name, "'.");
+    }
+    if (organism_property_map.contains(name)) {
+      emp::notify::Error("Query organism property '", name, "' is already registered.");
+    }
+    if (trait_map.contains(name)) {
+      emp::notify::Error(
+        "Query organism property '", name, "' conflicts with a trait of the same name."
+      );
+    }
+    static_assert(IsQueryValueType<RESULT_T>(), "Unsupported query organism property type.");
+    organism_property_map.emplace(name, OrganismPropertyInfo{
+      GetQueryType<RESULT_T>(),
+      [getter=std::move(getter)](const organism_t & organism) {
+        return value_t{getter(organism)};
+      }
+    });
+  }
+
+  [[nodiscard]] bool HasOrganismProperty(const emp::String & name) const {
+    return organism_property_map.contains(name);
   }
 
   void RegisterCollectionFunction(const emp::String & name,
