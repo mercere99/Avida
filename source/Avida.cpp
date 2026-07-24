@@ -10,6 +10,7 @@
 #include "Modules/DriverBuffered.hpp"
 #include "Modules/DriverConstant.hpp"
 #include "Modules/EnvironmentLogic.hpp"
+#include "Modules/EventManager.hpp"
 #include "Modules/OutputManager.hpp"
 #include "Modules/LogModule.hpp"
 #include "Modules/MutationsDivideSub.hpp"
@@ -41,6 +42,7 @@ int main(int argc, char * argv[])
     MutationsDivideSub,
     TrackGeneration,
     TrackGenotypes,
+    EventManager,
     EnvironmentLogic,
     ReactionsManager,
     OutputManager,
