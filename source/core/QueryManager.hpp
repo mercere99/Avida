@@ -6,8 +6,12 @@
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  *
  *  Compile and evaluate typed Avida query expressions.  Supports registered settings and values,
- *  scalar expressions, organism traits and properties, collection reductions such as mean{...},
- *  and organism selectors such as orgmax{...}.
+ *  scalar expressions, organism traits and properties, collection filters and set operations,
+ *  reductions such as mean{...}, and organism selectors such as orgmax{...}.
+ *
+ *  `all` denotes the active population.  `filter{condition}` and `|{condition}` produce filtered
+ *  sets.  For organism sets, `&` intersects while `|` unions another set or pipes the set into a
+ *  collection function according to the right-hand expression's static category.
  */
 
 #include <algorithm>
@@ -90,11 +94,13 @@ public:
   using collection_fun_t = std::function<value_t(
     const org_set_t &, const value_getter_t &, const context_t &
   )>;
+  using collection_apply_t = std::function<value_t(const org_set_t &, const context_t &)>;
 
 private:
   struct Expression {
     QueryValueType type;
     value_getter_t eval;
+    collection_apply_t apply_collection{};
   };
 
   struct ValueInfo {
@@ -121,6 +127,7 @@ private:
     QueryValueType return_type;
     bool require_numeric;
     collection_fun_t fun;
+    bool require_condition = false;
   };
 
   AVIDA_T & avida;
@@ -354,6 +361,27 @@ private:
     collection_function_map.emplace("orgmax", CollectionFunctionInfo{
       QueryValueType::ORG_REF, true, make_selector(true)
     });
+
+    collection_function_map.emplace("filter", CollectionFunctionInfo{
+      QueryValueType::ORG_SET,
+      false,
+      [](const org_set_t & collection,
+         const value_getter_t & expression,
+         const context_t & context) -> value_t {
+        if (!collection.IsValid()
+            || collection.GetBiota() != &context.avida.GetBiota()) return org_set_t{};
+
+        org_set_t result(context.avida.GetBiota());
+        for (size_t id : collection.GetBits()) {
+          const organism_t & organism = context.avida.GetOrg(id);
+          if (AsBool(expression(context_t{context.avida, &organism, &collection}))) {
+            result.Insert(id);
+          }
+        }
+        return result;
+      },
+      true
+    });
   }
 
   class Parser {
@@ -403,6 +431,22 @@ private:
         };
       }
 
+      if (op == '~') {
+        if (operand.type != QueryValueType::ORG_SET) {
+          ParseError("operator '~' requires an organism set");
+        }
+        return {
+          QueryValueType::ORG_SET,
+          [operand=std::move(operand)](const context_t & context) -> value_t {
+            value_t value = operand.eval(context);
+            if (value.IsNull()) return org_set_t{};
+            const org_set_t & collection = value.template Get<org_set_t>();
+            if (collection.GetBiota() != &context.avida.GetBiota()) return org_set_t{};
+            return ~collection;
+          }
+        };
+      }
+
       if (!IsNumericOrNull(operand.type)) {
         ParseError("unary '", static_cast<char>(op), "' requires a numeric operand");
       }
@@ -418,6 +462,20 @@ private:
     }
 
     [[nodiscard]] Expression MakeArithmetic(int op, Expression lhs, Expression rhs) {
+      if (op == '-'
+          && lhs.type == QueryValueType::ORG_SET
+          && rhs.type == QueryValueType::ORG_SET) {
+        return {
+          QueryValueType::ORG_SET,
+          [lhs=std::move(lhs), rhs=std::move(rhs)](const context_t & context) -> value_t {
+            value_t left = lhs.eval(context);
+            value_t right = rhs.eval(context);
+            if (left.IsNull() || right.IsNull()) return org_set_t{};
+            return left.template Get<org_set_t>() - right.template Get<org_set_t>();
+          }
+        };
+      }
+
       const bool string_concat = op == '+'
         && (lhs.type == QueryValueType::STRING || rhs.type == QueryValueType::STRING)
         && (lhs.type == QueryValueType::STRING || lhs.type == QueryValueType::NULL_VALUE)
@@ -458,6 +516,59 @@ private:
             case '%': return std::fmod(a, b);
           }
           emp::notify::Error("Unknown arithmetic query operator ", op, ".");
+        }
+      };
+    }
+
+    [[nodiscard]] Expression MakeSetIntersection(Expression lhs, Expression rhs) {
+      if (lhs.type != QueryValueType::ORG_SET || rhs.type != QueryValueType::ORG_SET) {
+        ParseError("operator '&' requires organism-set operands");
+      }
+      return {
+        QueryValueType::ORG_SET,
+        [lhs=std::move(lhs), rhs=std::move(rhs)](const context_t & context) -> value_t {
+          value_t left = lhs.eval(context);
+          value_t right = rhs.eval(context);
+          if (left.IsNull() || right.IsNull()) return org_set_t{};
+          return left.template Get<org_set_t>() & right.template Get<org_set_t>();
+        }
+      };
+    }
+
+    [[nodiscard]] Expression MakeSetUnionOrPipe(Expression lhs, Expression rhs) {
+      if (lhs.type != QueryValueType::ORG_SET) {
+        ParseError("operator '|' requires an organism set on its left-hand side");
+      }
+
+      if (rhs.apply_collection) {
+        const QueryValueType result_type = rhs.type;
+        return {
+          result_type,
+          [lhs=std::move(lhs),
+           apply=std::move(rhs.apply_collection)](const context_t & context) -> value_t {
+            value_t left = lhs.eval(context);
+            if (left.IsNull()) {
+              const org_set_t invalid_collection;
+              return apply(invalid_collection, context);
+            }
+            return apply(left.template Get<org_set_t>(), context);
+          }
+        };
+      }
+
+      if (rhs.type != QueryValueType::ORG_SET) {
+        ParseError(
+          "operator '|' requires an organism set or collection function "
+          "on its right-hand side"
+        );
+      }
+      return {
+        QueryValueType::ORG_SET,
+        [lhs=std::move(lhs), rhs=std::move(rhs)](const context_t & context) -> value_t {
+          value_t left = lhs.eval(context);
+          value_t right = rhs.eval(context);
+          if (left.IsNull() || right.IsNull()) return org_set_t{};
+          return left.template Get<org_set_t>() | right.template Get<org_set_t>();
         }
       };
     }
@@ -549,7 +660,53 @@ private:
       };
     }
 
+    /// Parse a collection function after its opening brace has been consumed.
+    [[nodiscard]] Expression ParseCollectionCall(const emp::String & name) {
+      auto fun_it = manager.collection_function_map.find(name);
+      if (fun_it == manager.collection_function_map.end()) {
+        ParseError("unknown collection function '", name, "'");
+      }
+
+      ++organism_scope_depth;
+      Expression expression = ParseTernary();
+      --organism_scope_depth;
+      Require('}', "'}'");
+
+      const CollectionFunctionInfo & info = fun_it->second;
+      if (info.require_numeric
+          && !IsNumericType(expression.type)
+          && expression.type != QueryValueType::NULL_VALUE) {
+        ParseError("collection function '", name, "' requires a numeric expression");
+      }
+
+      if (info.require_condition && !IsConditionType(expression.type)) {
+        ParseError("collection function '", name, "' requires a condition expression");
+      }
+
+      collection_apply_t apply = [expression_fun=std::move(expression.eval), fun=info.fun]
+        (const org_set_t & collection, const context_t & context) -> value_t {
+          return fun(collection, expression_fun, context);
+        };
+      return {
+        info.return_type,
+        [apply](const context_t & context) -> value_t {
+          const org_set_t collection = context.collection
+            ? *context.collection
+            : context.avida.GetActiveOrgSet();
+          return apply(collection, context);
+        },
+        std::move(apply)
+      };
+    }
+
     [[nodiscard]] Expression ParsePrimary() {
+      // A leading |{...} is shorthand for filtering the active population.  After a set,
+      // the collection parser consumes the same '|' as the pipe and parses {...} as its RHS.
+      if (Match('|')) {
+        Require('{', "'{' after prefix '|'");
+        return ParseCollectionCall("filter");
+      }
+
       if (Match('(')) {
         Expression out = ParseTernary();
         Require(')', "')'");
@@ -660,33 +817,7 @@ private:
       }
 
       if (Match('{')) {
-        auto fun_it = manager.collection_function_map.find(name);
-        if (fun_it == manager.collection_function_map.end()) {
-          ParseError("unknown collection function '", name, "'");
-        }
-
-        ++organism_scope_depth;
-        Expression expression = ParseTernary();
-        --organism_scope_depth;
-        Require('}', "'}'");
-
-        const CollectionFunctionInfo & info = fun_it->second;
-        if (info.require_numeric
-            && !IsNumericType(expression.type)
-            && expression.type != QueryValueType::NULL_VALUE) {
-          ParseError("collection function '", name, "' requires a numeric expression");
-        }
-
-        return {
-          info.return_type,
-          [expression_fun=std::move(expression.eval), fun=info.fun]
-          (const context_t & context) -> value_t {
-            const org_set_t collection = context.collection
-              ? *context.collection
-              : context.avida.GetActiveOrgSet();
-            return fun(collection, expression_fun, context);
-          }
-        };
+        return ParseCollectionCall(name);
       }
 
       if (organism_scope_depth > 0) {
@@ -729,38 +860,53 @@ private:
       return {value_it->second.type, value_it->second.getter};
     }
 
-    [[nodiscard]] Expression ParsePostfix() {
-      Expression out = ParsePrimary();
+    /// Apply a value/property transformation without discarding collection-pipe behavior.
+    template <typename TRANSFORM_T>
+    [[nodiscard]] Expression MapExpression(Expression base,
+                                           QueryValueType result_type,
+                                           TRANSFORM_T transform) {
+      collection_apply_t mapped_apply;
+      if (base.apply_collection) {
+        mapped_apply = [apply=std::move(base.apply_collection), transform]
+          (const org_set_t & collection, const context_t & context) -> value_t {
+            return transform(apply(collection, context), context);
+          };
+      }
+      return {
+        result_type,
+        [eval=std::move(base.eval), transform=std::move(transform)]
+          (const context_t & context) -> value_t {
+            return transform(eval(context), context);
+          },
+        std::move(mapped_apply)
+      };
+    }
+
+    [[nodiscard]] Expression ParsePostfixProperties(Expression out) {
       while (Match('.')) {
         if (!pos.Is(manager.ident_id)) ParseError("expected a property name after '.'");
         const emp::String property = pos.Use().lexeme;
 
         if (property == "valid" && out.type == QueryValueType::ORG_REF) {
-          out = {
-            QueryValueType::BOOL,
-            [base=std::move(out)](const context_t & context) -> value_t {
-              value_t value = base.eval(context);
+          out = MapExpression(std::move(out), QueryValueType::BOOL,
+            [](value_t value, const context_t & context) -> value_t {
               if (value.IsNull()) return false;
               const org_ref_t & ref = value.template Get<org_ref_t>();
               return ref.GetBiota() == &context.avida.GetBiota() && ref.IsValid();
             }
-          };
+          );
         } else if (property == "valid" && out.type == QueryValueType::ORG_SET) {
-          out = {
-            QueryValueType::BOOL,
-            [base=std::move(out)](const context_t & context) -> value_t {
-              value_t value = base.eval(context);
+          out = MapExpression(std::move(out), QueryValueType::BOOL,
+            [](value_t value, const context_t & context) -> value_t {
               if (value.IsNull()) return false;
               const org_set_t & collection = value.template Get<org_set_t>();
               return collection.GetBiota() == &context.avida.GetBiota()
                 && collection.IsValid();
             }
-          };
+          );
         } else if (property == "size" && out.type == QueryValueType::ORG_SET) {
-          out = {
-            QueryValueType::UINT64,
-            [base=std::move(out)](const context_t & context) -> value_t {
-              value_t value = base.eval(context);
+          out = MapExpression(std::move(out), QueryValueType::UINT64,
+            [](value_t value, const context_t & context) -> value_t {
               if (value.IsNull()) return {};
               const org_set_t & collection = value.template Get<org_set_t>();
               return collection.GetBiota() == &context.avida.GetBiota()
@@ -768,13 +914,11 @@ private:
                 ? value_t{collection.GetSize()}
                 : value_t{};
             }
-          };
+          );
         } else if ((property == "biota_id" || property == "global_id")
                    && out.type == QueryValueType::ORG_REF) {
-          out = {
-            QueryValueType::UINT64,
-            [property, base=std::move(out)](const context_t & context) -> value_t {
-              value_t value = base.eval(context);
+          out = MapExpression(std::move(out), QueryValueType::UINT64,
+            [property](value_t value, const context_t & context) -> value_t {
               if (value.IsNull()) return {};
               const org_ref_t & ref = value.template Get<org_ref_t>();
               if (ref.GetBiota() != &context.avida.GetBiota() || !ref.IsValid()) return {};
@@ -782,14 +926,12 @@ private:
                 ? value_t{ref.GetBiotaID()}
                 : value_t{ref.GetGlobalID()};
             }
-          };
+          );
         } else if (out.type == QueryValueType::ORG_REF
                    && manager.trait_map.contains(property)) {
           const TraitInfo & trait = manager.trait_map.at(property);
-          out = {
-            trait.type,
-            [base=std::move(out), getter=trait.getter](const context_t & context) -> value_t {
-              value_t value = base.eval(context);
+          out = MapExpression(std::move(out), trait.type,
+            [getter=trait.getter](value_t value, const context_t & context) -> value_t {
               if (value.IsNull()) return {};
               const org_ref_t & ref = value.template Get<org_ref_t>();
               const organism_t * organism = ref.GetBiota() == &context.avida.GetBiota()
@@ -797,7 +939,7 @@ private:
                 : nullptr;
               return organism ? getter(*organism) : value_t{};
             }
-          };
+          );
         } else {
           ParseError("property '", property, "' is not available on ", QueryValueTypeName(out.type));
         }
@@ -805,8 +947,12 @@ private:
       return out;
     }
 
+    [[nodiscard]] Expression ParsePostfix() {
+      return ParsePostfixProperties(ParsePrimary());
+    }
+
     [[nodiscard]] Expression ParseUnary() {
-      if (pos.Peek().IsOneOf('!', '+', '-')) {
+      if (pos.Peek().IsOneOf('!', '+', '-', '~')) {
         const int op = pos.Use().id;
         return MakeUnary(op, ParseUnary());
       }
@@ -858,10 +1004,29 @@ private:
       return lhs;
     }
 
-    [[nodiscard]] Expression ParseLogicalAnd() {
+    [[nodiscard]] Expression ParseSetIntersection() {
       Expression lhs = ParseEquality();
+      while (Match('&')) {
+        lhs = MakeSetIntersection(std::move(lhs), ParseEquality());
+      }
+      return lhs;
+    }
+
+    [[nodiscard]] Expression ParseSetUnionOrPipe() {
+      Expression lhs = ParseSetIntersection();
+      while (Match('|')) {
+        Expression rhs = Match('{')
+          ? ParsePostfixProperties(ParseCollectionCall("filter"))
+          : ParseSetIntersection();
+        lhs = MakeSetUnionOrPipe(std::move(lhs), std::move(rhs));
+      }
+      return lhs;
+    }
+
+    [[nodiscard]] Expression ParseLogicalAnd() {
+      Expression lhs = ParseSetUnionOrPipe();
       while (Match(manager.logical_and_id)) {
-        lhs = MakeLogical(true, std::move(lhs), ParseEquality());
+        lhs = MakeLogical(true, std::move(lhs), ParseSetUnionOrPipe());
       }
       return lhs;
     }
@@ -949,6 +1114,7 @@ public:
     lexer.Generate();
     SetupFunctions();
     SetupCollectionFunctions();
+    RegisterValue("all", [this](){ return avida.GetActiveOrgSet(); });
   }
 
   template <typename TRAIT_T, typename GETTER_T>
