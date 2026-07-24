@@ -10,9 +10,10 @@
 
 #include <charconv>
 #include <cstddef>
-#include <limits>
 #include <system_error>
 #include <utility>
+
+#include <emp/math/constants.hpp>
 
 #include "../core/Avida.hpp"
 
@@ -21,7 +22,7 @@ class EventManager : public ModuleBase<AVIDA_T> {
 private:
   using ModuleBase<AVIDA_T>::avida;
 
-  static constexpr size_t NO_STOP = std::numeric_limits<size_t>::max();
+  static constexpr size_t NO_STOP = emp::MAX_SIZE_T;
 
   struct UpdateEvent {
     size_t start = 0;
@@ -46,15 +47,12 @@ private:
   bool started = false;
   bool ended = false;
 
-  [[nodiscard]] static size_t ParseUpdate(const emp::String & token,
+  [[nodiscard]] static size_t ParseUpdate(const emp::String & lexeme,
                                           const emp::String & field_name) {
-    size_t value = 0;
-    const char * begin = token.data();
-    const char * end = begin + token.size();
-    const auto [ptr, error] = std::from_chars(begin, end, value);
-    if (begin == end || error != std::errc{} || ptr != end) {
+    size_t value = lexeme.As<size_t>(emp::MAX_SIZE_T);
+    if (value == emp::MAX_SIZE_T) {
       emp::notify::Error(
-        "Invalid ", field_name, " '", token, "' in update event; expected an unsigned integer."
+        "Invalid ", field_name, " '", lexeme, "' in update event; expected an unsigned integer."
       );
     }
     return value;
