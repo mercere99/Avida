@@ -408,6 +408,7 @@ public:
                      auto get_fun, auto cget_fun)
   {
     trait_man.template Register<TRAIT_T>(name, desc, filename, line, get_fun, cget_fun);
+    query_man.template RegisterTrait<TRAIT_T>(name, std::move(cget_fun));
   }
 
   size_t RegisterTask(const emp::String & name) {
