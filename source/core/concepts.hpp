@@ -103,6 +103,8 @@ namespace concepts {
     // Core execution (ProcessStep runs a single instruction; Trace steps and logs).
     { hardware.ProcessStep() } -> std::same_as<void>;
     { hardware.Trace(value) };
+    { const_hardware.MakeAnalysisCopy() } -> std::same_as<HARDWARE_T>;
+    { const_hardware.IsAnalysis() } -> std::convertible_to<bool>;
 
     // Lifecycle: (re)load a genome to run, and partially reset after a birth.
     { hardware.Reset(genome) } -> std::same_as<void>;
