@@ -48,11 +48,20 @@ public:
     }
   };
 
+  template <concepts::Organism ORG_T>
+  [[nodiscard]] static double CalcFitness(const ORG_T & org) {
+    const double metabolic_rate = org.GetPhenotype().MetabolicRate(org.GetGenome().size());
+    return metabolic_rate / org.GetPhenotype().gestation_cost;
+  }
+
   void RegisterTraits() {
     AVIDA_REGISTER_TRAIT(metabolic_base,   "Relative base speed of the virtual CPU for this organism.");
     AVIDA_REGISTER_TRAIT(metabolic_mult,   "Bonus speed multiple from tasks.");
     AVIDA_REGISTER_TRAIT(parent_bonus,     "Bonus received while producing this offspring.");
     AVIDA_REGISTER_TRAIT(gestation_cost,   "How many CPU cycles to produce an offspring?");
+    avida.RegisterOrganismProperty("fitness", [](const auto & org){
+      return CalcFitness(org);
+    });
   }
 
   void RegisterSettings() {
@@ -68,29 +77,27 @@ public:
       return org.GetPhenotype().MetabolicRate(org.GetGenome().size());
     };
     auto fitness_fun = [](const concepts::Organism auto & org) {
-      const double mrate = org.GetPhenotype().MetabolicRate(org.GetGenome().size());
-      const uint32_t gest = org.GetPhenotype().gestation_cost;
-      return mrate / gest;
+      return CalcFitness(org);
     };
 
     avida.AddOutputTrait("metabolism.csv", "Minimum Bonus", "parent_bonus:min");
     avida.AddOutputTrait("metabolism.csv", "Average Bonus", "parent_bonus:mean");
     avida.AddOutputTrait("metabolism.csv", "Maximum Bonus", "parent_bonus:max");
     avida.AddOutput("metabolism.csv", "Minimum Metabolic Rate",
-      [&](){ return avida.GetBiota().CalcMinimum(metabolic_fun); });
+      [this, metabolic_fun](){ return avida.GetBiota().CalcMinimum(metabolic_fun); });
     avida.AddOutput("metabolism.csv", "Average Metabolic Rate",
-      [&](){ return avida.GetBiota().CalcAverage(metabolic_fun); });
+      [this, metabolic_fun](){ return avida.GetBiota().CalcAverage(metabolic_fun); });
     avida.AddOutput("metabolism.csv", "Maximum Metabolic Rate",
-      [&](){ return avida.GetBiota().CalcMaximum(metabolic_fun); });
+      [this, metabolic_fun](){ return avida.GetBiota().CalcMaximum(metabolic_fun); });
     avida.AddOutputTrait("metabolism.csv", "Minimum Gestation Cost", "gestation_cost:min");
     avida.AddOutputTrait("metabolism.csv", "Average Gestation Cost", "gestation_cost:mean");
     avida.AddOutputTrait("metabolism.csv", "Maximum Gestation Cost", "gestation_cost:max");
     avida.AddOutput("metabolism.csv", "Minimum Fitness",
-      [&](){ return avida.GetBiota().CalcMinimum(fitness_fun); });
+      [this, fitness_fun](){ return avida.GetBiota().CalcMinimum(fitness_fun); });
     avida.AddOutput("metabolism.csv", "Average Fitness",
-      [&](){ return avida.GetBiota().CalcAverage(fitness_fun); });
+      [this, fitness_fun](){ return avida.GetBiota().CalcAverage(fitness_fun); });
     avida.AddOutput("metabolism.csv", "Maximum Fitness",
-      [&](){ return avida.GetBiota().CalcMaximum(fitness_fun); });
+      [this, fitness_fun](){ return avida.GetBiota().CalcMaximum(fitness_fun); });
   }
 
   // Reset all phenotype traits on inject.
