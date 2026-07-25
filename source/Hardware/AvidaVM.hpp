@@ -55,6 +55,9 @@ public:
   using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU
   using callback_t = void (*)(AvidaVM &);         // Special functions added to inst set
 
+  static constexpr size_t ANALYSIS_BIOTA_ID = OrganismBase::ANALYSIS_BIOTA_ID;
+  static constexpr size_t NO_BIOTA_ID = OrganismBase::NO_BIOTA_ID;
+
   enum class Nop {
     A = 0, B = 1, C = 2, D = 3, E = 4, F = 5, // Nops referring to specific stacks or heads
     FIRST_ARG, SECOND_ARG, NEXT_ARG           // Specialty nops to refer to other arguments
@@ -99,7 +102,27 @@ private:
   size_t exe_count = 0;              // How many instructions have been executed?
   size_t copy_count = 0;             // How many instructions copied into the genome this gestation?
   size_t error_count = 0;            // How many instructions tried something illegal?
-  size_t biota_id = emp::MAX_SIZE_T; // ID of organism from the biota.
+  size_t biota_id = NO_BIOTA_ID;     // Live Biota slot, analysis marker, or no location.
+
+  struct AnalysisCopyTag { };
+
+  AvidaVM(const AvidaVM & source, AnalysisCopyTag)
+    : genome(source.genome)
+    , memory(source.memory)
+    , inst_set_ptr(source.analysis_inst_set_ptr)
+    , analysis_inst_set_ptr(source.analysis_inst_set_ptr)
+    , heads(source.heads)
+    , stacks(source.stacks)
+    , exe_count(source.exe_count)
+    , copy_count(source.copy_count)
+    , error_count(source.error_count)
+    , biota_id(ANALYSIS_BIOTA_ID)
+  {
+    emp_always_assert(
+      analysis_inst_set_ptr,
+      "Cannot make an AvidaVM analysis copy without an analysis instruction set."
+    );
+  }
 
   // =========== Helper Functions ============
 
@@ -245,13 +268,32 @@ public:
   [[nodiscard]] size_t GetErrorCount() const { return error_count; }
   
   [[nodiscard]] size_t GetBiotaID() const { return biota_id; }
-  AvidaVM & SetBiotaID(size_t in) { biota_id = in; return *this; }
+  [[nodiscard]] bool IsAnalysis() const { return biota_id == ANALYSIS_BIOTA_ID; }
+  [[nodiscard]] bool HasLiveBiotaID() const { return biota_id < ANALYSIS_BIOTA_ID; }
+  AvidaVM & SetBiotaID(size_t in) {
+    emp_always_assert(in < ANALYSIS_BIOTA_ID, "Cannot assign a reserved Biota ID to a live VM.");
+    biota_id = in;
+    return *this;
+  }
+
+  /// Copy this VM's complete state for isolated execution under its analysis instruction set.
+  [[nodiscard]] AvidaVM MakeAnalysisCopy() const {
+    return AvidaVM(*this, AnalysisCopyTag{});
+  }
 
   [[nodiscard]] const inst_set_t & GetInstSet() const { emp_assert(inst_set_ptr); return *inst_set_ptr; }
-  AvidaVM & SetInstSet(const inst_set_t & is) { inst_set_ptr = &is; return *this; }
+  AvidaVM & SetInstSet(const inst_set_t & is) {
+    emp_always_assert(!IsAnalysis(), "Cannot assign a live instruction set to an analysis VM.");
+    inst_set_ptr = &is;
+    return *this;
+  }
 
   // Supply the alternate instruction set used by Trace()/analysis (see analysis_inst_set_ptr).
-  AvidaVM & SetAnalysisInstSet(const inst_set_t & is) { analysis_inst_set_ptr = &is; return *this; }
+  AvidaVM & SetAnalysisInstSet(const inst_set_t & is) {
+    analysis_inst_set_ptr = &is;
+    if (IsAnalysis()) inst_set_ptr = &is;
+    return *this;
+  }
 
 
 
@@ -269,16 +311,11 @@ public:
   }
 
   void Trace(size_t cpu_cycles=200, std::ostream & os=std::cout) {
-    // Run under the analysis instruction set (if one was supplied) so population-mutating
-    // callbacks are neutralized -- tracing must never perturb the live population.  The swap is
-    // confined to Trace(), so the evolutionary hot path (ProcessStep) is unaffected.
-    emp::Ptr<const inst_set_t> saved_inst_set = inst_set_ptr;
-    if (analysis_inst_set_ptr) inst_set_ptr = analysis_inst_set_ptr;
+    emp_always_assert(IsAnalysis(), "AvidaVM::Trace requires an analysis copy.");
     for (size_t i = 0; i <= cpu_cycles; ++i) {
       if (i) ProcessStep();
       std::println(os, "STEP {}: {}", i, StatusString());
     }
-    inst_set_ptr = saved_inst_set;
   }
 
   // Initialize the state of the virtual CPU
