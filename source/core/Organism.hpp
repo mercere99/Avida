@@ -70,6 +70,7 @@ public:
   }
 
   Organism & SetBiotaID(size_t id) {
+    emp_always_assert(id < ANALYSIS_BIOTA_ID, "Cannot place an organism at a reserved Biota ID.");
     biota_id = id;
     if constexpr (HasHardware()) Hardware().SetBiotaID(id);
     return *this;
