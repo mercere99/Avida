@@ -21,7 +21,43 @@ private:
 
   AvidaVM::inst_set_t inst_set;           // Live instruction set (used during evolution).
   AvidaVM::inst_set_t analysis_inst_set;  // Parallel set for isolated tracing/analysis.
-  double offspring_size_range = 2.0;  // Offspring genome must be within this factor of parent size.
+  double offspring_size_range = 2.0;      // Offspring genome must be within this factor of parent size.
+  size_t trace_cycles = 200;              // Number of CPU cycles to show in a requested trace.
+
+  void TraceQuery(const emp::vector<emp::String> & args) {
+    if (args.empty()) emp::notify::Error("trace requires an organism query.");
+
+    emp::String query = args[0];
+    for (size_t i = 1; i < args.size(); ++i) query += args[i];
+
+    const auto compiled_query = avida.CompileQuery(query);
+    if (compiled_query.GetType() != QueryValueType::ORG_REF) {
+      emp::notify::Error(
+        "trace query ", query.AsLiteral(), " does not return an organism."
+      );
+    }
+
+    const auto result = compiled_query.Evaluate();
+    if (result.IsNull()) {
+      emp::notify::Warning(
+        "trace query ", query.AsLiteral(), " did not select a valid organism; skipping trace."
+      );
+      return;
+    }
+    const auto & ref = result.template Get<typename AVIDA_T::org_ref_t>();
+    if (ref.GetBiota() != &avida.GetBiota() || !ref.IsValid()) {
+      emp::notify::Warning(
+        "trace query ", query.AsLiteral(), " did not select a valid organism; skipping trace."
+      );
+      return;
+    }
+
+    std::println(
+      "Tracing organism {} selected by {} for {} CPU cycles:",
+      ref.GetBiotaID(), query.AsLiteral(), trace_cycles
+    );
+    avida.TraceOrg(ref.GetBiotaID(), trace_cycles);
+  }
 
 public:
   OrgTypeAvidian(AVIDA_T & avida)
@@ -49,6 +85,15 @@ public:
     avida.AddSetting("AvidaGP.offspring_size_range", offspring_size_range,
       "Offspring genome size must be within this factor of the parent's (2.0 = half to double); "
       "divides outside the range fail.");
+    avida.AddSetting(
+      "AvidaGP.trace_cycles", trace_cycles,
+      "Number of CPU cycles printed by the trace command."
+    );
+    avida.AddKeyword(
+      "trace",
+      [this](emp::vector<emp::String> args){ TraceQuery(args); },
+      "Trace an organism selected by a query: trace <organism_query>"
+    );
   }
 
   void RegisterTraits() {
