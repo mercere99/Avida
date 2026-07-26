@@ -9,7 +9,9 @@
  */
 
 #include <cstddef>   // for size_t
+#include <expected>
 #include <iostream>
+#include <optional>
 
 #include "../core/Avida.hpp"
 #include "../Hardware/AvidaVM.hpp"
@@ -24,8 +26,24 @@ private:
   double offspring_size_range = 2.0;      // Offspring genome must be within this factor of parent size.
   size_t trace_cycles = 200;              // Number of CPU cycles to show in a requested trace.
 
-  void TraceQuery(const emp::vector<emp::String> & args) {
-    if (args.empty()) emp::notify::Error("trace requires an organism query.");
+  [[nodiscard]] std::expected<AvidaVM::genome_t, emp::String>
+  ParseGenomeSequence(emp::String sequence) const {
+    if (sequence.IsLiteralString("\"'")) sequence = sequence.ConvertStringFromLiteral("\"'");
+    if (sequence.empty()) return std::unexpected("Genome sequence cannot be empty.");
+
+    for (size_t pos = 0; pos < sequence.size(); ++pos) {
+      if (inst_set.GetID(sequence[pos]) == AvidaVM::inst_set_t::NULL_ID) {
+        return std::unexpected(emp::MakeString(
+          "Unknown instruction symbol ", sequence[pos], " at position ", pos, "."
+        ));
+      }
+    }
+    return inst_set.BuildGenome(sequence);
+  }
+
+  [[nodiscard]] std::optional<size_t>
+  ResolveTraceOrg(const emp::vector<emp::String> & args, const emp::String & command) {
+    if (args.empty()) emp::notify::Error(command, " requires an organism query.");
 
     emp::String query = args[0];
     for (size_t i = 1; i < args.size(); ++i) query += args[i];
@@ -33,30 +51,69 @@ private:
     const auto compiled_query = avida.CompileQuery(query);
     if (compiled_query.GetType() != QueryValueType::ORG_REF) {
       emp::notify::Error(
-        "trace query ", query.AsLiteral(), " does not return an organism."
+        command, " query ", query.AsLiteral(), " does not return an organism."
       );
     }
 
     const auto result = compiled_query.Evaluate();
     if (result.IsNull()) {
       emp::notify::Warning(
-        "trace query ", query.AsLiteral(), " did not select a valid organism; skipping trace."
+        command, " query ", query.AsLiteral(),
+        " did not select a valid organism; skipping trace."
       );
-      return;
+      return std::nullopt;
     }
     const auto & ref = result.template Get<typename AVIDA_T::org_ref_t>();
     if (ref.GetBiota() != &avida.GetBiota() || !ref.IsValid()) {
       emp::notify::Warning(
-        "trace query ", query.AsLiteral(), " did not select a valid organism; skipping trace."
+        command, " query ", query.AsLiteral(),
+        " did not select a valid organism; skipping trace."
       );
+      return std::nullopt;
+    }
+
+    return ref.GetBiotaID();
+  }
+
+  void TraceQuery(const emp::vector<emp::String> & args, std::ostream & os) {
+    const auto ref = ResolveTraceOrg(args, "trace");
+    if (!ref) return;
+
+    std::println(os,
+      "Tracing genome from organism {} from the beginning for {} CPU cycles:",
+      *ref, trace_cycles
+    );
+    avida.TraceOrg(*ref, trace_cycles, os);
+  }
+
+  void TraceForwardQuery(const emp::vector<emp::String> & args, std::ostream & os) {
+    const auto ref = ResolveTraceOrg(args, "trace_forward");
+    if (!ref) return;
+
+    std::println(os,
+      "Tracing organism {} forward from its current state for {} CPU cycles:",
+      *ref, trace_cycles
+    );
+    avida.TraceOrgForward(*ref, trace_cycles, os);
+  }
+
+  void TraceGenomeSequence(const emp::vector<emp::String> & args, std::ostream & os) {
+    if (args.empty()) emp::notify::Error("trace_genome requires a genome sequence.");
+
+    emp::String sequence = args[0];
+    for (size_t i = 1; i < args.size(); ++i) sequence += args[i];
+
+    auto genome = ParseGenomeSequence(sequence);
+    if (!genome) {
+      emp::notify::Error("Cannot trace genome ", sequence.AsLiteral(), ": ", genome.error());
       return;
     }
 
-    std::println(
-      "Tracing organism {} selected by {} for {} CPU cycles:",
-      ref.GetBiotaID(), query.AsLiteral(), trace_cycles
+    std::println(os,
+      "Tracing genome {} from the beginning for {} CPU cycles:",
+      inst_set.ToSequence(*genome).AsLiteral(), trace_cycles
     );
-    avida.TraceOrg(ref.GetBiotaID(), trace_cycles);
+    avida.TraceGenome(*genome, trace_cycles, os);
   }
 
 public:
@@ -89,10 +146,27 @@ public:
       "AvidaGP.trace_cycles", trace_cycles,
       "Number of CPU cycles printed by the trace command."
     );
-    avida.AddKeyword(
+    avida.AddOutputKeyword(
       "trace",
-      [this](emp::vector<emp::String> args){ TraceQuery(args); },
-      "Trace an organism selected by a query: trace <organism_query>"
+      [this](const emp::vector<emp::String> & args, std::ostream & os){ TraceQuery(args, os); },
+      "Trace an organism's genome from the beginning: trace <organism_query>; "
+      "redirect with > filename or >> filename"
+    );
+    avida.AddOutputKeyword(
+      "trace_genome",
+      [this](const emp::vector<emp::String> & args, std::ostream & os){
+        TraceGenomeSequence(args, os);
+      },
+      "Trace an instruction sequence from the beginning: trace_genome <sequence>; "
+      "redirect with > filename or >> filename"
+    );
+    avida.AddOutputKeyword(
+      "trace_forward",
+      [this](const emp::vector<emp::String> & args, std::ostream & os){
+        TraceForwardQuery(args, os);
+      },
+      "Trace an organism forward from its current state: trace_forward <organism_query>; "
+      "redirect with > filename or >> filename"
     );
   }
 
@@ -116,9 +190,8 @@ public:
         auto & org = avida.GetOrg(biota_id);
         avida.SignalOutput(org, org.Hardware().GetOutput());
       },
-      [this](size_t biota_id){
-        auto & org = avida.GetOrg(biota_id);
-        avida.SignalAnalyzeOutput(org, org.Hardware().GetOutput());
+      [this](AvidaVM & hardware){
+        avida.SignalAnalyzeOutput(hardware, hardware.GetOutput());
       });
   }
 
@@ -141,7 +214,7 @@ public:
   // Kept in a parallel array -- rather than a second field per slot -- so the evolutionary hot
   // path (GetCallbackStorage) is byte-for-byte unchanged and never touches this table.
   [[nodiscard]] static auto & GetAnalysisCallbackStorage(size_t id) {
-    static std::array<std::function<void(size_t)>, MAX_CALLBACKS> callbacks;
+    static std::array<std::function<void(AvidaVM &)>, MAX_CALLBACKS> callbacks;
     emp_assert(id < GetNumCallbacks());
     return callbacks[id];
   }
@@ -149,9 +222,15 @@ public:
   // Simple template functions that forward to the std::function in the matching storage array.
   // These let a plain function pointer (not a std::function) be stored in the InstSet.
   template <size_t ID>
-  static void DoCallback(AvidaVM & vm) { GetCallbackStorage(ID)(vm.GetBiotaID()); }
+  static void DoCallback(AvidaVM & vm) {
+    emp_always_assert(vm.HasLiveBiotaID(), "Live callback invoked by a VM outside the Biota.");
+    GetCallbackStorage(ID)(vm.GetBiotaID());
+  }
   template <size_t ID>
-  static void DoAnalysisCallback(AvidaVM & vm) { GetAnalysisCallbackStorage(ID)(vm.GetBiotaID()); }
+  static void DoAnalysisCallback(AvidaVM & vm) {
+    emp_always_assert(vm.IsAnalysis(), "Analysis callback invoked by a live VM.");
+    GetAnalysisCallbackStorage(ID)(vm);
+  }
 
   // Pre-built tables of all MAX_CALLBACKS possible redirects, one per storage array.  Indexed by
   // slot number so AddCallback can look up the right trampoline in O(1).  Slot IDs stay aligned
@@ -175,7 +254,7 @@ public:
   // are added to their respective inst_sets in lockstep, keeping the two sets' IDs aligned.
   void AddCallback(const emp::String & name,
                    const std::function<void(size_t)> & callback,
-                   const std::function<void(size_t)> & analysis_fun = [](size_t){}) {
+                   const std::function<void(AvidaVM &)> & analysis_fun = [](AvidaVM &){}) {
     emp_always_assert(GetNumCallbacks() < MAX_CALLBACKS, "Too many callbacks; failed to add '", name, "'");
     const size_t id = GetNumCallbacks()++;  // Claim slot and increment before GetCallbackStorage.
     GetCallbackStorage(id) = callback;
@@ -187,15 +266,24 @@ public:
   // === Signal Listeners ===
 
   template <concepts::Organism ORG_T>
-  void OnInjectReady(ORG_T & org) {
+  void SetupHardware(ORG_T & org) {
     org.GetPhenotype().hardware.SetInstSet(inst_set);
     org.GetPhenotype().hardware.SetAnalysisInstSet(analysis_inst_set);
   }
 
   template <concepts::Organism ORG_T>
+  void OnInjectReady(ORG_T & org) {
+    SetupHardware(org);
+  }
+
+  template <concepts::Organism ORG_T>
   void OnOffspringInit(ORG_T & offspring, ORG_T & /*parent*/) {
-    offspring.GetPhenotype().hardware.SetInstSet(inst_set);
-    offspring.GetPhenotype().hardware.SetAnalysisInstSet(analysis_inst_set);
+    SetupHardware(offspring);
+  }
+
+  template <concepts::Organism ORG_T>
+  void OnAnalysisOrganism(ORG_T & org, emp::Random & /* analysis_random */) {
+    SetupHardware(org);
   }
 
   template <concepts::Organism ORG_T, concepts::Genome GENOME_T>
