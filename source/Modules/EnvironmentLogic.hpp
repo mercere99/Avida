@@ -18,6 +18,13 @@ class EnvironmentLogic : public ModuleBase<AVIDA_T> {
 private:
   using ModuleBase<AVIDA_T>::avida;
 
+  template <concepts::Organism ORG_T>
+  void SetInputs(ORG_T & org, emp::Random & random) {
+    org.GetPhenotype().inputs[0] = (random.GetUInt32() & random_mask) | fixed0;
+    org.GetPhenotype().inputs[1] = (random.GetUInt32() & random_mask) | fixed1;
+    org.Hardware().SetInput(org.GetPhenotype().inputs);
+  }
+
   enum LogicOp {
     // Inputs:       00  01  10  11    Min NANDs
     FALSE = 0,   //   0   0   0   0    0
@@ -150,9 +157,13 @@ public:
   // Before an organism is placed in the environment, make sure it has its inputs ready.
   template <concepts::Organism ORG_T>
   void BeforePlacement(ORG_T & org) {
-    org.GetPhenotype().inputs[0] = (avida.GetRandom().GetUInt32() & random_mask) | fixed0;
-    org.GetPhenotype().inputs[1] = (avida.GetRandom().GetUInt32() & random_mask) | fixed1;
-    org.Hardware().SetInput(org.GetPhenotype().inputs);
+    SetInputs(org, avida.GetRandom());
+  }
+
+  // Give isolated test organisms normal environment inputs without consuming the live RNG stream.
+  template <concepts::Organism ORG_T>
+  void OnAnalysisOrganism(ORG_T & org, emp::Random & analysis_random) {
+    SetInputs(org, analysis_random);
   }
 
   template <concepts::Organism ORG_T>
@@ -165,19 +176,6 @@ public:
       ++org.GetPhenotype().logic_counts[test_op];  // Inrement org phenotype count.
       ++update_counts[test_op];                    // Increment global task count this update.
       avida.SignalTask(org, task_id[test_op]);     // Allow other modules to know about task.
-    }
-  }
-
-  // Analysis-mode counterpart of OnOutputValue: detect which task the output represents and record
-  // it on the organism being characterized, but deliberately omit the population-level effects --
-  // no global update_counts bump and no SignalTask reward -- so analysis neither perturbs the run
-  // nor feeds back into selection.
-  template <concepts::Organism ORG_T>
-  void OnAnalyzeOutput(ORG_T & org, uint32_t output) {
-    const emp::array<uint32_t, 2> & inputs = org.GetPhenotype().inputs;
-    LogicOp test_op = static_cast<LogicOp>((output & fixed_mask) >> fixed_offset);
-    if (output == PerformOp(test_op, inputs[0], inputs[1])) {
-      ++org.GetPhenotype().logic_counts[test_op];  // Record the task on the analyzed organism.
     }
   }
 
