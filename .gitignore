@@ -15,8 +15,13 @@ old
 
 # Avida specific
 build/Avida
-build/Avida.cfg
+build/*.cfg
 build/avida.log
+build/data
+data/
+final_save
+runs/
+tmp/
 
 # DOSSIER
 build/DOSSIER
