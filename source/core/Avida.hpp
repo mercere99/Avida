@@ -10,6 +10,7 @@
 
 #include <filesystem>  // std::filesystem::path
 #include <fstream>     // std::ifstream, std::ofstream
+#include <functional>  // std::function
 #include <iostream>    // std::cout, std::ostream
 #include <sstream>     // std::istringstream
 #include <type_traits> // std::is_arithmetic_v, std::invoke_result_t
@@ -111,6 +112,10 @@ private:
 
 public:
   Avida() : query_man(*this), plug_ins(*this) {
+    settings.SetOutputPathResolver([this](const fs::path & path) {
+      return path.is_absolute() ? path : data_dir / path;
+    });
+
     AddSetting("base.random_seed",
       [this](){ return random.GetSeed(); },
       [this](size_t new_seed){ random.ResetSeed(new_seed); },
@@ -125,9 +130,11 @@ public:
       "Default directory to write data files.", 'd');
     AddValue("base.update", [this](){ return update; }, "Current population update");
 
-    AddKeyword("print",
-      [this](emp::vector<emp::String> args) { PrintQueries(args); },
-      "Print comma-separated query expressions");
+    AddOutputKeyword("print",
+      [this](const emp::vector<emp::String> & args, std::ostream & os) {
+        PrintQueries(args, os);
+      },
+      "Print comma-separated query expressions; supports trailing > filename or >> filename");
 
     AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
@@ -474,6 +481,11 @@ public:
   template <typename... ARG_Ts>
   void AddKeyword(ARG_Ts &&... args) { settings.AddKeyword(std::forward<ARG_Ts>(args)...); }
 
+  template <typename... ARG_Ts>
+  void AddOutputKeyword(ARG_Ts &&... args) {
+    settings.AddOutputKeyword(std::forward<ARG_Ts>(args)...);
+  }
+
   /// Register a read-only value that can be accessed from an organism query reference.
   template <typename GETTER_T>
     requires std::invocable<GETTER_T, const organism_t &>
@@ -532,11 +544,11 @@ public:
     AVIDA_SIGNAL(OnOutputValue(org, output));
   }
 
-  // Broadcast an output value produced while tracing/analyzing an organism in isolation.  Unlike
-  // SignalOutput, this must NOT feed back into the live population: responders should characterize
-  // the organism (e.g. detect which task fired) without applying rewards or updating run-wide stats.
-  void SignalAnalyzeOutput(organism_t & org, uint32_t output) {
-    AVIDA_SIGNAL(OnAnalyzeOutput(org, output));
+  // Broadcast an output produced by isolated analysis hardware.  No mutable reference to the
+  // source organism is provided; a responder must explicitly reach into Avida to alter live state.
+  template <typename HARDWARE_T>
+  void SignalAnalyzeOutput(HARDWARE_T & hardware, uint32_t output) {
+    AVIDA_SIGNAL(OnAnalyzeOutput(hardware, output));
   }
 
   // ====== Organism Management ======
@@ -547,6 +559,19 @@ public:
     AVIDA_SIGNAL(BeforePlacement(inject_org));  // Trigger to set up organisms for activation
     AVIDA_SIGNAL(OnPlacement(inject_org));      // Trigger to activate organism in populations
     return inject_org;
+  }
+
+  /// Finish setting up an isolated organism for tracing or other analyses.  Analysis setup has its
+  /// own signal so modules can initialize organism-local state without placement, logging, or
+  /// population side effects.  A copy of the central RNG provides reproducible inputs without
+  /// advancing the live run's random-number stream.
+  void SetupAnalysisOrganism(organism_t & analysis_org) {
+    emp_always_assert(
+      !analysis_org.HasLiveBiotaID(),
+      "SetupAnalysisOrganism cannot be used on an organism in the live Biota."
+    );
+    emp::Random analysis_random = random;
+    AVIDA_SIGNAL(OnAnalysisOrganism(analysis_org, analysis_random));
   }
 
   void Inject(const genome_t & genome, size_t count=1) {
@@ -678,8 +703,25 @@ public:
     }
   }
 
+  /// Trace a fresh analysis organism built from a genome.
+  void TraceGenome(const genome_t & genome, uint32_t num_cycles, std::ostream & os = std::cout) {
+    organism_t analysis_org(genome);
+    SetupAnalysisOrganism(analysis_org);
+    auto analysis_hardware = analysis_org.Hardware().MakeAnalysisCopy();
+    analysis_hardware.Trace(num_cycles, os);
+  }
+
+  /// Trace an organism's genome from the beginning of execution.
   void TraceOrg(size_t id, uint32_t num_cycles, std::ostream & os = std::cout) {
-    biota[id].Hardware().Trace(num_cycles, os);
+    emp_assert(biota.IsActive(id));
+    TraceGenome(biota[id].GetGenome(), num_cycles, os);
+  }
+
+  /// Trace an organism forward from its current hardware state.
+  void TraceOrgForward(size_t id, uint32_t num_cycles, std::ostream & os = std::cout) {
+    emp_assert(biota.IsActive(id));
+    auto analysis_hardware = biota[id].Hardware().MakeAnalysisCopy();
+    analysis_hardware.Trace(num_cycles, os);
   }
 
   void SetupDataDir() {
