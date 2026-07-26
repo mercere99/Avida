@@ -94,6 +94,12 @@ public:
   template <concepts::Organism ORG_T>
   void OnInjectReady([[maybe_unused]] ORG_T & inject_org) { }
 
+  // Triggered: An isolated organism is being prepared for tracing or another analysis.  The RNG is
+  // a copy of Avida's current RNG state; using it will not alter the live experiment.
+  template <concepts::Organism ORG_T>
+  void OnAnalysisOrganism([[maybe_unused]] ORG_T & analysis_org,
+                          [[maybe_unused]] emp::Random & analysis_random) { }
+
   // Triggered: Organism (either offspring or injected) is about to be placed into a population.
   template <concepts::Organism ORG_T>
   void BeforePlacement([[maybe_unused]] ORG_T & org) { }
