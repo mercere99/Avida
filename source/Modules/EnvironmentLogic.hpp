@@ -48,6 +48,7 @@ private:
 
   emp::array<size_t, LogicOp::NUM_OPS> task_id;       // Unique Avida ID for each task performed
   emp::array<size_t, LogicOp::NUM_OPS> update_counts; // Number of times task performed this update
+  emp::array<uint32_t, 2> analysis_inputs{};          // Inputs of the organism currently being analyzed
 
   static constexpr const char * ToName(LogicOp op) {
     switch (op) {
@@ -131,6 +132,15 @@ public:
     return 0;
   }
 
+  // Identify which logic task (if any) the given output value completes for these inputs.
+  // The fixed bits of the output select a single candidate op; a task is done only when the full
+  // output equals that op applied to the inputs.  Returns LogicOp::NUM_OPS when nothing matches.
+  static constexpr LogicOp DetectTask(uint32_t output, const emp::array<uint32_t, 2> & inputs) {
+    LogicOp test_op = static_cast<LogicOp>((output & fixed_mask) >> fixed_offset);
+    if (output == PerformOp(test_op, inputs[0], inputs[1])) return test_op;
+    return LogicOp::NUM_OPS;
+  }
+
   // === Phenotypic Traits ===
 
   struct Phenotype {
@@ -164,19 +174,29 @@ public:
   template <concepts::Organism ORG_T>
   void OnAnalysisOrganism(ORG_T & org, emp::Random & analysis_random) {
     SetInputs(org, analysis_random);
+    // Cache inputs for OnAnalyzeOutput, which sees only isolated analysis hardware with no live
+    // Biota slot and thus no phenotype to read.
+    // ASSUMPTION: only one organism is traced/analyzed at a time, so a single cache is sufficient.
+    analysis_inputs = org.GetPhenotype().inputs;
   }
 
   template <concepts::Organism ORG_T>
   void OnOutputValue(ORG_T & org, uint32_t output) {
-    const emp::array<uint32_t, 2> & inputs = org.GetPhenotype().inputs;
-
-    // Use the fixed bits to determine the candidate logic op.
-    LogicOp test_op = static_cast<LogicOp>((output & fixed_mask) >> fixed_offset);
-    if (output == PerformOp(test_op, inputs[0], inputs[1])) {
-      ++org.GetPhenotype().logic_counts[test_op];  // Inrement org phenotype count.
-      ++update_counts[test_op];                    // Increment global task count this update.
-      avida.SignalTask(org, task_id[test_op]);     // Allow other modules to know about task.
+    LogicOp op = DetectTask(output, org.GetPhenotype().inputs);
+    if (op != LogicOp::NUM_OPS) {
+      ++org.GetPhenotype().logic_counts[op];  // Increment org phenotype count.
+      ++update_counts[op];                    // Increment global task count this update.
+      avida.SignalTask(org, task_id[op]);     // Allow other modules to know about task.
     }
+  }
+
+  // Analysis counterpart to OnOutputValue: surface completed tasks in the trace without rewarding
+  // the organism or touching global stats.  Runs on isolated analysis hardware, so it annotates the
+  // hardware (which Trace() flushes) rather than mutating any organism or module state.
+  template <typename HARDWARE_T>
+  void OnAnalyzeOutput(HARDWARE_T & hardware, uint32_t output) {
+    LogicOp op = DetectTask(output, analysis_inputs);
+    if (op != LogicOp::NUM_OPS) hardware.AddNote("Task performed: ", ToName(op));
   }
 
   void OnConfigWrite(std::ostream & os) {
