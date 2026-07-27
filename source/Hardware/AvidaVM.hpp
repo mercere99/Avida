@@ -91,10 +91,9 @@ private:
   mem_t memory{};               // Storage of values being manipulated by this organism.
   emp::Ptr<const inst_set_t> inst_set_ptr = nullptr;  // Map of instruction names to functionality.
 
-  // Alternate instruction set used while tracing/analyzing this organism in isolation.  It shares
-  // the live set's instruction IDs (so the same genome decodes identically) but rebinds
-  // population-mutating callbacks (e.g. DivideCell) to neutral variants, so analysis never
-  // perturbs the live population.  Null when no analysis set has been supplied.
+  // Alternate instruction set used for tracing/analyzing organisms in isolation.  It shares the
+  // live set's instruction IDs (so genomes decode identically) but rebinds population-mutating
+  // callbacks (e.g. DivideCell) to neutral variants, so analysis never alters the live population.
   emp::Ptr<const inst_set_t> analysis_inst_set_ptr = nullptr;
 
   emp::array<size_t, NUM_NOPS> heads{};
@@ -103,6 +102,10 @@ private:
   size_t copy_count = 0;             // How many instructions copied into the genome this gestation?
   size_t error_count = 0;            // How many instructions tried something illegal?
   size_t biota_id = NO_BIOTA_ID;     // Live Biota slot, analysis marker, or no location.
+
+  // Scratch buffer for analysis/trace annotations (e.g. "Task performed: NAND").
+  // Stays empty during live evolution and flushed each step by Trace().
+  emp::String analysis_notes{};
 
   struct AnalysisCopyTag { };
 
@@ -310,11 +313,19 @@ public:
     ++exe_count;
   }
 
+  // Append an annotation to be emitted with the current Trace() step (For analysis-mode only!)
+  void AddNote(auto &&... args) {
+    analysis_notes.Append(args...);
+    analysis_notes += '\n';
+  }
+
   void Trace(size_t cpu_cycles=200, std::ostream & os=std::cout) {
     emp_always_assert(IsAnalysis(), "AvidaVM::Trace requires an analysis copy.");
     for (size_t i = 0; i <= cpu_cycles; ++i) {
       if (i) ProcessStep();
       std::println(os, "STEP {}: {}", i, StatusString());
+      // Emit anything the step's signal handlers recorded (e.g. completed tasks), then reset.
+      if (analysis_notes.size()) { std::print(os, "{}", analysis_notes); analysis_notes.clear(); }
     }
   }
 
