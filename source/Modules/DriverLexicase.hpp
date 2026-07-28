@@ -250,25 +250,31 @@ public:
 
   PhenotypeClasses pheno_classes;  // Reused across generations to avoid per-update reallocation.
 
-  // For each test case, the set of organisms tied at the GLOBAL best score on that test (strict
-  // lexicase only).  Reset across generations.  In a selection round, the survivors of a test are
-  // the current candidates at that test's max; if any candidate holds the global best, that is just
-  // candidate_bits & best_on_masks[test] -- a bit-AND instead of a full score scan.  Correct only
-  // for epsilon==0: with epsilon>0 survival depends on the max among candidates, not the global max.
+  // Per-test global-best masks, reset each generation, indicating best orgs on each test
+  // `best_on_masks[test_id]` indicates org_set members at the GLOBAL max on `test_id`
+  // `best_equiv_masks[test_id]` indicates those within epsilon of max (built only when epsilon>0).
+  // If any current candidate has the global max, allows quick lexicase filtering with bitwise-AND.
+  //   score == global_max (strict)          -> candidate_bits & best_on_masks[test]
+  //   score >= global_max-epsilon (epsilon) -> candidate_bits & best_equiv_masks[test]
+  // If no candidate holds the global max, we must fall back to a manual scan.
   emp::vector<emp::BitVector> best_on_masks;
+  emp::vector<emp::BitVector> best_equiv_masks;
 
-  // Fill best_on_masks: for each test case in test_ids, mark every org in org_set whose score
-  // equals the maximum score on that test across org_set.  (Exact equality is right here -- the max
-  // is itself one of the scores, so ties compare equal.)  best_on_masks stays sized to the full
-  // num_tests so it can be indexed by absolute test id, but only the test_ids entries are filled --
-  // and only those are ever queried during selection, so under downsampling we skip the unused rest.
-  void BuildBestOnMasks(
+  // Fill best_on_masks -- and, when epsilon>0, best_equiv_masks -- for each test case in test_ids:
+  // best_on_masks marks every org in org_set at the maximum score on that test (exact equality is
+  // right; the max is itself one of the scores, so ties compare equal), and best_equiv_masks marks
+  // every org within epsilon of that maximum.  Both stay sized to the full num_tests so they can be
+  // indexed by absolute test id, but only the test_ids entries are filled -- and only those are ever
+  // queried during selection, so under downsampling we skip the unused rest.
+  void BuildBestMasks(
     const emp::BitVector & org_set,
     std::span<const size_t> test_ids,
     size_t num_tests,
     const emp::vector<const score_vec_t *> & score_cache)
   {
+    const bool use_equiv = (epsilon > 0.0);
     best_on_masks.resize(num_tests);
+    if (use_equiv) best_equiv_masks.resize(num_tests);
     for (size_t test : test_ids) {
       emp::BitVector & mask = best_on_masks[test];
       mask.Resize(score_cache.size());
@@ -280,8 +286,22 @@ public:
         const double cur = (*score_cache[org_id])[test];
         if (first || cur > best_score) { best_score = cur; first = false; }
       }
-      for (size_t org_id : org_set) {
-        if ((*score_cache[org_id])[test] == best_score) mask.Set(org_id);
+
+      if (!use_equiv) {
+        for (size_t org_id : org_set) {
+          if ((*score_cache[org_id])[test] == best_score) mask.Set(org_id);
+        }
+      } else {
+        // epsilon: mark the max set and the within-epsilon set in one pass (best_on subset of equiv).
+        emp::BitVector & equiv = best_equiv_masks[test];
+        equiv.Resize(score_cache.size());
+        equiv.Clear();
+        const double threshold = best_score - epsilon;  // matches the slow path's max-epsilon cutoff
+        for (size_t org_id : org_set) {
+          const double cur = (*score_cache[org_id])[test];
+          if (cur == best_score) mask.Set(org_id);
+          if (cur >= threshold) equiv.Set(org_id);
+        }
       }
     }
   }
@@ -329,7 +349,8 @@ public:
     std::span<size_t> test_case_ids,
     emp::vector<FirstPassCacheEntry> & first_pass_cache,
     const PhenotypeClasses * classes = nullptr,
-    const emp::vector<emp::BitVector> * best_on = nullptr)
+    const emp::vector<emp::BitVector> * best_on = nullptr,
+    const emp::vector<emp::BitVector> * best_equiv = nullptr)
   {
     emp_assert(parent_count > 0);
     emp_assert(test_case_ids.size() > 0);
@@ -373,13 +394,14 @@ public:
     auto apply_test = [&](size_t test_case_id) -> size_t {
       const size_t start_candidate_count = candidate_count;
 
-      // Fast path (strict lexicase): this test's survivors are the candidates tied at the GLOBAL max,
-      // precomputed in best_on.  If any current candidate is among them, the max among candidates IS
-      // the global max, so the survivors are just the intersection -- a bit-AND, zero score reads.
+      // Fast path: if any current candidate holds the GLOBAL max on this test (precomputed in
+      // best_on), then the max AMONG CANDIDATES is that global max, so the survivors are a precomputed
+      // set -- the global-max set for strict lexicase, or the within-epsilon set (best_equiv) for
+      // epsilon lexicase.  Either way it is a bit-AND with zero score reads.
       if (best_on != nullptr) {
         const emp::BitVector & best = (*best_on)[test_case_id];
         if (candidate_bits.HasOverlap(best)) {
-          candidate_bits &= best;
+          candidate_bits &= (best_equiv != nullptr) ? (*best_equiv)[test_case_id] : best;
           candidate_count = candidate_bits.CountOnes();
           if (profile) {
             ++profile_stats.lexicase_steps;
@@ -429,8 +451,9 @@ public:
     std::swap(test_case_ids[0], test_case_ids[random.GetUInt32(test_case_ids.size())]);
     const size_t first_test_id = test_case_ids[0];
     if (best_on != nullptr) {
-      // best_on already holds each test's global-best set (which is exactly the first-pass result),
-      // so the first_pass_cache is redundant here -- just apply the first test via the fast path.
+      // The global-best masks make the first_pass_cache redundant: applying the first test to the
+      // full parent set via the fast path yields exactly that test's first-pass survivors (the
+      // global-best set for strict, or the within-epsilon set for epsilon).
       candidate_bits = parent_bits;
       candidate_count = parent_count;
       apply_test(first_test_id);
@@ -579,7 +602,8 @@ public:
     size_t num_test_cases,
     size_t num_rounds = 0,
     const PhenotypeClasses * classes = nullptr,
-    const emp::vector<emp::BitVector> * best_on = nullptr)
+    const emp::vector<emp::BitVector> * best_on = nullptr,
+    const emp::vector<emp::BitVector> * best_equiv = nullptr)
   {
     if (num_rounds == 0) num_rounds = pop_size;
     // The first-pass cache is consulted only on the best_on==nullptr path (SelectParent never
@@ -589,8 +613,8 @@ public:
 
     // Run num_rounds rounds of lexicase selection to generate the next generation.
     for (size_t round = 0; round < num_rounds; ++round) {
-      const size_t parent_id = SelectParent(
-        parent_bits, parent_count, score_cache, test_case_ids, first_pass_cache, classes, best_on);
+      const size_t parent_id = SelectParent(parent_bits, parent_count, score_cache, test_case_ids,
+        first_pass_cache, classes, best_on, best_equiv);
       avida.DivideOrg(parent_id);
     }
   }
@@ -686,10 +710,10 @@ public:
     if (mode == "cohort") {
       DoCohortSelection(parent_bits, score_cache, test_case_ids);
     } else {
-      // Strict lexicase (epsilon==0) uses two optional accelerators, both keyed to the set of orgs
-      // we actually winnow: (1) phenotype dedup -- winnow one representative per identical-vector
-      // class, expanding to a random member when a class wins; (2) best_on masks -- resolve each
-      // test by bit-AND against its global-best set instead of a score scan.
+      // Non-cohort lexicase uses up to two accelerators, both keyed to the set of orgs we winnow:
+      // (1) phenotype dedup (strict only) -- winnow one representative per identical-vector class,
+      // expanding to a random member when a class wins; (2) global-best masks -- resolve a test by
+      // bit-AND against best_on_masks (strict) or best_equiv_masks (epsilon) instead of a score scan.
       const bool strict = (epsilon == 0.0);
       const emp::BitVector * winnow_bits = &parent_bits;
       size_t winnow_count = parent_count;
@@ -702,16 +726,15 @@ public:
         classes = &pheno_classes;
       }
 
-      const emp::vector<emp::BitVector> * best_on = nullptr;
-      if (strict) {
-        // Only the (possibly downsampled) test_case_ids are queried during selection, so build
-        // masks for just those; num_test_cases keeps best_on_masks absolute-indexable by test id.
-        BuildBestOnMasks(*winnow_bits, test_case_ids, num_test_cases, score_cache);
-        best_on = &best_on_masks;
-      }
+      // Only the (possibly downsampled) test_case_ids are queried during selection, so build masks
+      // for just those; num_test_cases keeps them absolute-indexable by test id.  best_equiv_masks
+      // is filled (and used) only when epsilon>0; BuildBestMasks skips it otherwise.
+      BuildBestMasks(*winnow_bits, test_case_ids, num_test_cases, score_cache);
+      const emp::vector<emp::BitVector> * best_on = &best_on_masks;
+      const emp::vector<emp::BitVector> * best_equiv = strict ? nullptr : &best_equiv_masks;
 
       DoSelection(*winnow_bits, winnow_count, score_cache, test_case_ids, num_test_cases,
-                  0, classes, best_on);
+                  0, classes, best_on, best_equiv);
     }
     if (profile) profile_stats.selection_ms += ElapsedMS(selection_start);
 
