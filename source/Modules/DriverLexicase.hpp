@@ -15,6 +15,7 @@
 #include <filesystem> // for path joining
 #include <iostream>
 #include <numeric>    // for std::iota
+#include <print>      // for std::println
 #include <span>
 
 #include "emp/base/vector.hpp"
@@ -236,39 +237,39 @@ public:
     bool valid = false;
   };
 
-  // Groups the current parents into classes of bit-identical score vectors so lexicase winnows one
-  // representative per class instead of every clone.  Members of a class always survive/die
-  // together (identical scores), so this is a pure optimization -- as long as the final pick draws
-  // a random *member* of the winning class (not just the representative), since class members can
-  // differ in heritable state outside the score vector (e.g. ROMEO's per-organism mutation rate).
+  // Group parents into classes of identical score vectors.  Lexicase winnows one representative
+  // per class, guaranteeing no ties.  Final pick draws a random *member* of the winning class
   // Class members are contiguous in sorted_ids; class c spans [class_begin[c], class_end[c]).
   struct PhenotypeClasses {
     emp::vector<size_t> sorted_ids;   // Parent org IDs, grouped by identical score vector.
     emp::vector<size_t> class_begin;  // Start index into sorted_ids for each class.
     emp::vector<size_t> class_end;    // End index (exclusive) into sorted_ids for each class.
-    emp::BitVector representatives;    // One representative org ID (first member) per class.
-    emp::vector<size_t> rep_class;     // Representative org ID -> class index (only reps are valid).
+    emp::BitVector representatives;   // One representative org ID (first member) per class.
+    emp::vector<size_t> rep_class;    // Representative org ID -> class index (only reps are valid).
   };
 
   PhenotypeClasses pheno_classes;  // Reused across generations to avoid per-update reallocation.
 
   // For each test case, the set of organisms tied at the GLOBAL best score on that test (strict
-  // lexicase only).  Reused across generations.  In a selection round, the survivors of a test are
+  // lexicase only).  Reset across generations.  In a selection round, the survivors of a test are
   // the current candidates at that test's max; if any candidate holds the global best, that is just
   // candidate_bits & best_on_masks[test] -- a bit-AND instead of a full score scan.  Correct only
   // for epsilon==0: with epsilon>0 survival depends on the max among candidates, not the global max.
   emp::vector<emp::BitVector> best_on_masks;
 
-  // Fill best_on_masks: for each of num_tests test cases, mark every org in org_set whose score
+  // Fill best_on_masks: for each test case in test_ids, mark every org in org_set whose score
   // equals the maximum score on that test across org_set.  (Exact equality is right here -- the max
-  // is itself one of the scores, so ties compare equal.)
+  // is itself one of the scores, so ties compare equal.)  best_on_masks stays sized to the full
+  // num_tests so it can be indexed by absolute test id, but only the test_ids entries are filled --
+  // and only those are ever queried during selection, so under downsampling we skip the unused rest.
   void BuildBestOnMasks(
     const emp::BitVector & org_set,
+    std::span<const size_t> test_ids,
     size_t num_tests,
     const emp::vector<const score_vec_t *> & score_cache)
   {
     best_on_masks.resize(num_tests);
-    for (size_t test = 0; test < num_tests; ++test) {
+    for (size_t test : test_ids) {
       emp::BitVector & mask = best_on_masks[test];
       mask.Resize(score_cache.size());
       mask.Clear();
@@ -581,7 +582,10 @@ public:
     const emp::vector<emp::BitVector> * best_on = nullptr)
   {
     if (num_rounds == 0) num_rounds = pop_size;
-    emp::vector<FirstPassCacheEntry> first_pass_cache(num_test_cases);
+    // The first-pass cache is consulted only on the best_on==nullptr path (SelectParent never
+    // touches it when best_on is active), so skip the per-generation allocation in that case.
+    emp::vector<FirstPassCacheEntry> first_pass_cache;
+    if (best_on == nullptr) first_pass_cache.resize(num_test_cases);
 
     // Run num_rounds rounds of lexicase selection to generate the next generation.
     for (size_t round = 0; round < num_rounds; ++round) {
@@ -601,31 +605,50 @@ public:
     }
 
     const size_t num_orgs = parent_bits.CountOnes();
+    const size_t num_tests = test_case_ids.size();
     const size_t num_cohorts = std::llround(1.0 / downsample_frac);
-    const size_t cohort_orgs = std::llround(num_orgs * downsample_frac);
-    const size_t cohort_scores = std::llround(test_case_ids.size() * downsample_frac);
+    if (num_orgs < num_cohorts) {
+      emp::notify::Error("Population too small for cohort selection: ", num_orgs,
+        " organisms cannot fill ", num_cohorts, " cohorts.");
+    }
 
-    // Shuffle the parents and test cases into cohorts.
+    // Shuffle the parents and test cases, then split each evenly across the cohorts.  Rounding
+    // 1/downsample_frac to a whole cohort count means orgs and tests rarely divide evenly, so the
+    // remainder is spread one-per-cohort rather than using fixed-size slices -- fixed slices
+    // (num_cohorts * round(count*frac)) can exceed count and run off the ends of the arrays.
     emp::vector<size_t> org_ids;
-    org_ids.reserve(parent_bits.CountOnes());
+    org_ids.reserve(num_orgs);
     for (size_t parent_id : parent_bits) org_ids.push_back(parent_id);
     emp::Shuffle(avida.GetRandom(), org_ids);
     emp::Shuffle(avida.GetRandom(), test_case_ids);
 
-    // Select from each cohort.
+    // Start of cohort `c` when `count` items are split into num_cohorts near-equal contiguous
+    // blocks; the first (count % num_cohorts) cohorts get one extra item.  Since num_orgs>=num_cohorts
+    // every org cohort is non-empty, and cohort_begin(count, num_cohorts)==count, so consecutive
+    // begins give exact, non-overlapping ranges that cover every item.
+    auto cohort_begin = [num_cohorts](size_t count, size_t c) {
+      return c * (count / num_cohorts) + std::min(c, count % num_cohorts);
+    };
+
+    // Select from each cohort, pairing org cohort `c` with test cohort `c`.
     for (size_t cohort_id = 0; cohort_id < num_cohorts; ++cohort_id) {
+      const size_t org_begin   = cohort_begin(num_orgs, cohort_id);
+      const size_t org_end     = cohort_begin(num_orgs, cohort_id + 1);
+      const size_t score_begin = cohort_begin(num_tests, cohort_id);
+      const size_t score_end   = cohort_begin(num_tests, cohort_id + 1);
+      const size_t cohort_orgs = org_end - org_begin;
+
       // Identify parents for this cohort.
       parent_bits.Clear();
-      const size_t org_offset = cohort_id * cohort_orgs;
-      for (size_t i=0; i < cohort_orgs; ++i) parent_bits.Set(org_ids[i + org_offset]);
+      for (size_t i = org_begin; i < org_end; ++i) parent_bits.Set(org_ids[i]);
 
-      // Do selection in this cohort.
-      const size_t cohort_offset = cohort_scores * cohort_id;
+      // Do selection in this cohort.  Producing cohort_orgs offspring per cohort means the whole
+      // population reproduces exactly once across all cohorts, holding pop size steady.
       DoSelection(parent_bits,
         cohort_orgs,
         score_cache,
-        test_case_ids.subspan(cohort_offset, cohort_scores),
-        score_cache[org_ids[org_offset]]->size(),
+        test_case_ids.subspan(score_begin, score_end - score_begin),
+        score_cache[org_ids[org_begin]]->size(),
         cohort_orgs);
     }
   }
@@ -681,7 +704,9 @@ public:
 
       const emp::vector<emp::BitVector> * best_on = nullptr;
       if (strict) {
-        BuildBestOnMasks(*winnow_bits, num_test_cases, score_cache);
+        // Only the (possibly downsampled) test_case_ids are queried during selection, so build
+        // masks for just those; num_test_cases keeps best_on_masks absolute-indexable by test id.
+        BuildBestOnMasks(*winnow_bits, test_case_ids, num_test_cases, score_cache);
         best_on = &best_on_masks;
       }
 
