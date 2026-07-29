@@ -163,21 +163,22 @@ public:
   void AddFront(const ParetoFront & in, size_t cur_gen) {
     emp_assert(OK());
     ResetCounts();
-    for (auto & entry : in.front) AddEntry(entry, cur_gen);
+    for (auto & entry : in.front) AddEntry(entry.score_set, cur_gen);
   }
 
   // No member of this front should dominate any other member.
   bool OK() const {
     for (size_t i = 1; i < front.size(); ++i) {
       for (size_t j = 0; j < i; ++j) {
-        if (TestCover(front[i], front[j]) || TestCover(front[j], front[i])) {
+        if (TestCover(front[i].score_set, front[j].score_set) ||
+            TestCover(front[j].score_set, front[i].score_set)) {
           std::println("Error: Pareto front members not independent\nScores 1: {}, Scores 2: {}",
-                       front[i], front[j]);
+                       front[i].score_set, front[j].score_set);
           return false;
         }
       }
     }
-    return false;
+    return true;
   }
 };
 
