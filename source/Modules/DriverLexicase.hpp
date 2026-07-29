@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>    // for size_t
 #include <filesystem> // for path joining
 #include <iostream>
@@ -52,8 +53,7 @@ private:
   emp::Ptr<const Trait<score_vec_t, AVIDA_T>> scores_trait;
   bool profile = false;                      // Print lexicase timing and counter diagnostics?
   size_t profile_frequency = 1;              // Updates between profile outputs.
-  bool cache_first_pass = true;               // Reuse full-population filtering by first test?
-  bool dedup_phenotypes = false;              // Collapse identical score vectors during selection?
+  bool dedup_phenotypes = false;             // Collapse identical score vectors during selection?
 
   using clock_t = std::chrono::steady_clock;
 
@@ -168,12 +168,10 @@ public:
     avida.AddSetting("lexicase.fitness_name", fitness_name, "Name of trait to use for fitness");
     avida.AddSetting("lexicase.profile", profile, "Print lexicase timing and inner-loop counters");
     avida.AddSetting("lexicase.profile_frequency", profile_frequency, "Updates between lexicase profile outputs");
-    avida.AddSetting("lexicase.cache_first_pass", cache_first_pass,
-      "Cache each test's first-pass survivors within a generation");
     avida.AddSetting("lexicase.dedup_phenotypes", dedup_phenotypes,
       "Collapse organisms sharing an identical score vector during selection (picks a random "
-      "member of the winning group). Speeds up runs with many clones. Applied only when "
-      "epsilon==0 and mode is not 'cohort'.");
+      "member of the winning group). Speeds up runs with many clones. Applied when mode is "
+      "not 'cohort'.");
   }
 
   size_t GetOrgReserveCount() const { return pop_size * 2; }
@@ -181,16 +179,23 @@ public:
   // === Signal Listeners ===
 
   void ValidateConfig() {
+    if (!std::isfinite(epsilon) || epsilon < 0.0) {
+      emp::notify::Error("lexicase.epsilon must be finite and non-negative; received ", epsilon, ".");
+    }
+    if (!std::isfinite(info_epsilon) || info_epsilon < 0.0) {
+      emp::notify::Error(
+        "lexicase.info_epsilon must be finite and non-negative; received ", info_epsilon, ".");
+    }
     scores_trait = &avida.template GetTypedTrait<score_vec_t>(scores_name);
     (void) avida.GetTrait(fitness_name);
   }
 
   void BeforeStart() {
-    // The phenotype-dedup optimization is only wired up for strict, non-cohort lexicase so far.
+    // Phenotype classes are built globally, so they cannot be reused by independent cohorts.
     // Warn (rather than silently ignore) so a mis-set config doesn't look like it took effect.
-    if (dedup_phenotypes && (epsilon != 0.0 || mode == "cohort")) {
-      emp::notify::Warning("lexicase.dedup_phenotypes currently applies only when epsilon==0 and "
-        "mode is not 'cohort'; it will be disabled for this configuration.");
+    if (dedup_phenotypes && mode == "cohort") {
+      emp::notify::Warning("lexicase.dedup_phenotypes does not apply in cohort mode; "
+        "it will be disabled for this configuration.");
     }
 
     // If we have a filename, set up the date file columns.
@@ -238,7 +243,8 @@ public:
   };
 
   // Group parents into classes of identical score vectors.  Lexicase winnows one representative
-  // per class, guaranteeing no ties.  Final pick draws a random *member* of the winning class
+  // per class without changing survival behavior.  Final pick draws a random *member* of a winning
+  // class, weighted by class size.
   // Class members are contiguous in sorted_ids; class c spans [class_begin[c], class_end[c]).
   struct PhenotypeClasses {
     emp::vector<size_t> sorted_ids;   // Parent org IDs, grouped by identical score vector.
@@ -461,7 +467,7 @@ public:
       // Cache the first test's full-population result; it is reusable whenever this test leads
       // another selection during the same generation.
       FirstPassCacheEntry & cache_entry = first_pass_cache[first_test_id];
-      if (cache_first_pass && cache_entry.valid) {
+      if (cache_entry.valid) {
         candidate_bits = cache_entry.survivors;
         candidate_count = cache_entry.survivor_count;
         if (profile) {
@@ -473,13 +479,11 @@ public:
         candidate_bits = parent_bits;
         candidate_count = parent_count;
         const size_t score_reads = apply_test(first_test_id);
-        if (cache_first_pass) {
-          cache_entry.score_reads = score_reads;
-          cache_entry.survivors = candidate_bits;
-          cache_entry.survivor_count = candidate_count;
-          cache_entry.valid = true;
-          if (profile) ++profile_stats.first_pass_cache_misses;
-        }
+        cache_entry.score_reads = score_reads;
+        cache_entry.survivors = candidate_bits;
+        cache_entry.survivor_count = candidate_count;
+        cache_entry.valid = true;
+        if (profile) ++profile_stats.first_pass_cache_misses;
       }
     }
 
@@ -711,7 +715,7 @@ public:
       DoCohortSelection(parent_bits, score_cache, test_case_ids);
     } else {
       // Non-cohort lexicase uses up to two accelerators, both keyed to the set of orgs we winnow:
-      // (1) phenotype dedup (strict only) -- winnow one representative per identical-vector class,
+      // (1) phenotype dedup -- winnow one representative per identical-vector class,
       // expanding to a random member when a class wins; (2) global-best masks -- resolve a test by
       // bit-AND against best_on_masks (strict) or best_equiv_masks (epsilon) instead of a score scan.
       const bool strict = (epsilon == 0.0);
@@ -719,7 +723,7 @@ public:
       size_t winnow_count = parent_count;
       const PhenotypeClasses * classes = nullptr;
 
-      if (dedup_phenotypes && strict) {
+      if (dedup_phenotypes) {
         BuildPhenotypeClasses(parent_bits, score_cache);
         winnow_bits = &pheno_classes.representatives;
         winnow_count = pheno_classes.class_begin.size();
