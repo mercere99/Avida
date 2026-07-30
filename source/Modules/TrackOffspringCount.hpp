@@ -21,7 +21,7 @@ AVIDA_DEFINE_MODULE(TrackOffspringCount, "Analysis", "Monitor number of offsprin
   };
 
   void RegisterTraits() {
-    AVIDA_REGISTER_TRAIT(offspring_count, "Number of offspring in chain since inject");
+    AVIDA_REGISTER_TRAIT(offspring_count, "Number of direct offspring produced by this organism");
   }
 
   // === Signal Listeners ===
@@ -31,7 +31,15 @@ AVIDA_DEFINE_MODULE(TrackOffspringCount, "Analysis", "Monitor number of offsprin
   }
 
   template <concepts::Organism ORG_T>
-  void OnOffspringReady(ORG_T & /*offspring*/, ORG_T & parent) {
+  void OnInjectReady(ORG_T & org) {
+    org.GetPhenotype().offspring_count = 0;
+  }
+
+  template <concepts::Organism ORG_T>
+  void OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
+    // Organism storage is reused, and some representation modules copy the parent's full
+    // phenotype into unmutated offspring.  Always reset this organism-local counter explicitly.
+    offspring.GetPhenotype().offspring_count = 0;
     ++parent.GetPhenotype().offspring_count;
   }
 );
