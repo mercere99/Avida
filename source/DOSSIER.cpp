@@ -9,6 +9,7 @@
 #include "Modules/DriverLexicase.hpp"
 #include "Modules/DriverTournament.hpp"
 #include "Modules/OrgTypeDOSSIER.hpp"
+#include "Modules/TrackOffspringCount.hpp"
 #include "Modules/TrackPareto.hpp"
 
 // Which DRIVER to use?
@@ -18,7 +19,7 @@ DriverLexicase<T>;
 
 int main(int argc, char * argv[])
 {
-  using avida_t = Avida<OrgTypeDOSSIER, driver_t, TrackPareto>;
+  using avida_t = Avida<OrgTypeDOSSIER, driver_t, TrackOffspringCount, TrackPareto>;
   // using avida_t = Avida<OrgTypeDOSSIER, driver_t>;
 
   avida_t avida(emp::ArgsToStrings(argc, argv));
