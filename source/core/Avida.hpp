@@ -100,6 +100,7 @@ private:
   fs::path data_dir = "data/";   // Directory for all data files
   size_t update = 0;             // Times update was run on this population
   emp::Random random{0};         // Central random number generator
+  emp::Random analyze_random{random.GetUInt64()}; // RNG reserved for analysis modules
   biota_t biota{};               // Collection of all current organisms
 
   // EXITING = stop has been requested; finish the current update, then tear down.
@@ -118,7 +119,10 @@ public:
 
     AddSetting("base.random_seed",
       [this](){ return random.GetSeed(); },
-      [this](size_t new_seed){ random.ResetSeed(new_seed); },
+      [this](size_t new_seed){
+        random.ResetSeed(new_seed);
+        analyze_random.ResetSeed(random.GetUInt64());
+      },
       "Main random number seed", 's', "0");
     AddSetting("base.config_dir",
       [this](){ return settings.GetConfigDir().string(); },
@@ -180,6 +184,7 @@ public:
 
   [[nodiscard]] size_t GetUpdate() const { return update; }
   [[nodiscard]] emp::Random & GetRandom() { return random; }
+  [[nodiscard]] emp::Random & GetAnalyzeRandom() { return analyze_random; }
   [[nodiscard]] const fs::path & GetDataDir() { return data_dir; }  
   [[nodiscard]] auto & GetOrg(this auto & self, size_t id) { return self.biota[id]; }
   [[nodiscard]] auto & GetOrgs(this auto & self) { return self.biota.GetOrgs(); }
@@ -563,14 +568,14 @@ public:
 
   /// Finish setting up an isolated organism for tracing or other analyses.  Analysis setup has its
   /// own signal so modules can initialize organism-local state without placement, logging, or
-  /// population side effects.  A copy of the central RNG provides reproducible inputs without
-  /// advancing the live run's random-number stream.
+  /// population side effects.  A copy of the analysis RNG provides reproducible inputs without
+  /// advancing either live random-number stream.
   void SetupAnalysisOrganism(organism_t & analysis_org) {
     emp_always_assert(
       !analysis_org.HasLiveBiotaID(),
       "SetupAnalysisOrganism cannot be used on an organism in the live Biota."
     );
-    emp::Random analysis_random = random;
+    emp::Random analysis_random = analyze_random;
     AVIDA_SIGNAL(OnAnalysisOrganism(analysis_org, analysis_random));
   }
 
@@ -802,6 +807,7 @@ public:
         data_dir,
         update,
         random,
+        analyze_random,
         biota,
         run_state
        );
