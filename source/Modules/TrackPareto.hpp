@@ -470,8 +470,8 @@ public:
       output.SetFilepath(avida.GetDataDir());
       output.AddColumn("Update",             [this](){ return avida.GetUpdate(); });
       output.AddColumn("Current front size", [this](){ return pareto_front.GetCurrentSize(); });
-      output.AddColumn("Prev front size",    [this](){ return pareto_front.GetPrevSize(); });
-      output.AddColumn("Front members at risk",
+      output.AddColumn("Prev front size (U-1)",    [this](){ return pareto_front.GetPrevSize(); });
+      output.AddColumn("Front members at risk (U-2)",
         [this](){ return pareto_front.GetFrontMembersAtRisk(); });
       output.AddColumn("Lost this gen",      [this](){ return pareto_front.GetLostCount(); });
       output.AddColumn("Lost without offspring",
