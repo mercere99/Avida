@@ -12,11 +12,12 @@
  *    prev_front    - exact Pareto front from the previous generation
  *    archive       - sampled historical front entries that have been lost
  *
- *  OnPlacement feeds organisms into cur_front.
- *  UpdateGen (called each OnUpdateStart) identifies losses, samples into archive,
- *  checks for recoveries, evicts stale archive entries, then rotates the fronts.
+ *  OnUpdateStart rotates the completed current front into prev_front, and OnPlacement feeds the
+ *  new population into cur_front.  OnUpdateEnd then identifies losses, samples into the archive,
+ *  checks for recoveries, and evicts stale archive entries before reporting the aligned fronts.
  */
 
+#include <cmath>
 #include <print>
 #include <unordered_map>
 
@@ -45,8 +46,6 @@ private:
   int remove_count = 0;         // Num entries removed since last reset
   emp::Histogram persist_times; // How long were entries on this front?
 
-  double epsilon = 0.0;         // Amount to beat an existing solution by to remove it
-
   /// Remove an entry from the specified position; swap the last score_set into place.
   void Remove(size_t i, size_t cur_gen) {
     persist_times.Insert(cur_gen - front[i].insert_gen);
@@ -57,9 +56,10 @@ private:
 
   /// Does the test_entry cover the target?
   bool TestCover(const SCORES_T & test_entry, const SCORES_T & target) const {
+    emp_assert(test_entry.size() == target.size());
     // If test entry ever fails to cover, return false.
     for (size_t i = 0; i < target.size(); ++i) {
-      if (test_entry[i] + epsilon < target[i]) { return false; }
+      if (test_entry[i] < target[i]) { return false; }
     }
     return true;
   }
@@ -72,7 +72,7 @@ private:
 
 public:
   void Serialize(emp::SerialPod & pod) {
-    pod(front, add_count, remove_count, persist_times, epsilon);
+    pod(front, add_count, remove_count, persist_times);
   }
 
   [[nodiscard]] size_t GetSize() const { return front.size(); }
@@ -80,10 +80,6 @@ public:
   [[nodiscard]] size_t GetAddCount() const { return add_count; }
   [[nodiscard]] size_t GetRemoveCount() const { return remove_count; }
   [[nodiscard]] const emp::Histogram & GetPersistTimes() const { return persist_times; }
-  [[nodiscard]] double GetEpsilon() const { return epsilon; }
-
-  void SetEpsilon(double in) { epsilon = in; }
-
   // Reset the stats associated with this front.
   void ResetCounts() {
     add_count = 0;
@@ -108,7 +104,7 @@ public:
   // Count the number of entries in another front covered by this one.
   [[nodiscard]] size_t CountCovered(const ParetoFront & in) const {
     return std::ranges::count_if(in.front, [this](const auto & entry) {
-      return IsCovered(entry);
+      return IsCovered(entry.score_set);
     });
   }
 
@@ -208,7 +204,7 @@ private:
   emp::Histogram restore_times;  // Histogram of recovery durations (gen - loss_gen)
 
   // Config parameters
-  double epsilon = 0.0;
+  double resolution = 0.0;     // Width of fixed score bins (0 = exact scores)
   double sample_p = 0.1;        // Probability of archiving each lost entry (0 = disabled)
   size_t max_archive_size = 0;  // 0 = unlimited; oldest entries removed first when exceeded
   size_t max_archive_gen = 0;   // 0 = unlimited; entries older than this many gens are evicted
@@ -238,7 +234,7 @@ private:
 public:
   void Serialize(emp::SerialPod & pod ) {
     pod(cur_front, prev_front, cur_best_scores, prev_best_scores, archive, restore_times,
-        epsilon, sample_p, max_archive_size, max_archive_gen, lost_count, front_members_at_risk,
+        resolution, sample_p, max_archive_size, max_archive_gen, lost_count, front_members_at_risk,
         lost_without_offspring, lost_after_reproduction, sampled_losses,
         best_trait_scores_at_risk, best_trait_scores_lost, newly_recovered, newly_expired,
         newly_cap_evicted, total_front_member_opportunities, total_loss_events,
@@ -248,13 +244,24 @@ public:
   }
 
 // === Configuration ===
-  void SetEpsilon(double e)        { epsilon = e; cur_front.SetEpsilon(e); prev_front.SetEpsilon(e); }
+  void SetResolution(double r)     { resolution = r; }
   void SetSampleP(double p)        { sample_p = p; }
   void SetMaxArchiveSize(size_t s) { max_archive_size = s; }
   void SetMaxArchiveGen(size_t g)  { max_archive_gen = g; }
 
-  double GetEpsilon() const { return epsilon; }
+  double GetResolution() const { return resolution; }
   double GetSampleP() const { return sample_p; }
+
+  // Map scores onto a fixed grid so that approximate equality is transitive.  Store bin IDs
+  // rather than rounded floating-point values; exact Pareto comparisons are then performed on
+  // these IDs.  The grid is anchored at zero and floor() gives the expected behavior for both
+  // positive and negative scores.
+  [[nodiscard]] SCORES_T BinScores(const SCORES_T & score_set) const {
+    if (resolution == 0.0) return score_set;
+    SCORES_T result = score_set;
+    for (auto & score : result) score = std::floor(score / resolution);
+    return result;
+  }
 
   // === Statistics ===
   size_t GetCurrentSize()     const { return cur_front.GetSize(); }
@@ -297,19 +304,31 @@ public:
         if (score_set[i] > cur_best_scores[i]) cur_best_scores[i] = score_set[i];
       }
     }
-    return cur_front.AddEntry(score_set, gen_id);
+    return cur_front.AddEntry(BinScores(score_set), gen_id);
   }
 
-  // Rotate fronts between generations and update the archive.
+  // Preserve the completed population as the previous front and prepare to collect its offspring.
+  void BeginGen() {
+    prev_front = std::move(cur_front);
+    cur_front.Reset();
+    prev_best_scores = std::move(cur_best_scores);
+    cur_best_scores.clear();
+  }
+
+  // Compare the completed current population with its parent population and update the archive.
   template <typename REPRO_COUNTS_T>
-  void UpdateGen(size_t gen_id, emp::Random & random, const REPRO_COUNTS_T & reproduction_counts) {
+  void FinalizeGen(
+    size_t gen_id,
+    emp::Random & random,
+    const REPRO_COUNTS_T & reproduction_counts
+  ) {
     sampled_losses = 0;
     newly_recovered = 0;
     newly_expired = 0;
     newly_cap_evicted = 0;
 
     // A trait's best score is retained if the current population matches or improves upon the
-    // previous maximum.  This is exact and intentionally independent of Pareto epsilon.
+    // previous maximum.  This is exact and intentionally independent of Pareto score binning.
     best_trait_scores_at_risk = prev_best_scores.size();
     best_trait_scores_lost = 0;
     if (!prev_best_scores.empty()) {
@@ -341,19 +360,30 @@ public:
     }
     archive.resize(write_pos);
 
-    // Identify lost entries and classify them using reproduction by all carriers of the exact
-    // score vector.  Capture the denominator before pruning; prev_front is rotated below.
+    // Identify lost entries and classify them using reproduction by all carriers of the same
+    // score bin.  Keep prev_front intact so the reported previous-front size is the denominator
+    // associated with these losses.
     front_members_at_risk = prev_front.GetSize();
     total_front_member_opportunities += front_members_at_risk;
-    prev_front.PruneCovered(cur_front, gen_id);
-    lost_count = prev_front.GetSize();
+    lost_count = 0;
     lost_without_offspring = 0;
     lost_after_reproduction = 0;
-    total_loss_events += lost_count;
+
+    // Reproduction is recorded by exact phenotype while offspring are being generated.  Collapse
+    // those counts into the same score bins used by the front once per distinct parent phenotype,
+    // rather than re-binning a parent on every reproduction event.
+    std::unordered_map<SCORES_T, size_t, emp::ContainerHash<SCORES_T>> binned_reproduction_counts;
+    for (const auto & [score_set, count] : reproduction_counts) {
+      binned_reproduction_counts[BinScores(score_set)] += count;
+    }
 
     for (const auto & entry : prev_front.GetEntries()) {
-      const auto found = reproduction_counts.find(entry.score_set);
-      const bool reproduced = found != reproduction_counts.end() && found->second > 0;
+      if (cur_front.IsCovered(entry.score_set)) continue;
+
+      ++lost_count;
+      const auto found = binned_reproduction_counts.find(entry.score_set);
+      const bool reproduced =
+        found != binned_reproduction_counts.end() && found->second > 0;
       const LossCause cause = reproduced
         ? LossCause::AFTER_REPRODUCTION
         : LossCause::WITHOUT_OFFSPRING;
@@ -366,10 +396,13 @@ public:
         ++sampled_losses;
       }
     }
+    total_loss_events += lost_count;
     total_lost_without_offspring += lost_without_offspring;
     total_lost_after_reproduction += lost_after_reproduction;
     total_sampled_losses += sampled_losses;
 
+    emp_assert(front_members_at_risk == prev_front.GetSize());
+    emp_assert(lost_count <= front_members_at_risk);
     emp_assert(lost_without_offspring + lost_after_reproduction == lost_count);
     emp_assert(total_lost_without_offspring + total_lost_after_reproduction == total_loss_events);
 
@@ -385,11 +418,6 @@ public:
         == total_recovery_events + total_expiration_events + total_cap_evictions + archive.size()
     );
 
-    // Rotate fronts.
-    prev_front = std::move(cur_front);
-    cur_front.Reset();
-    prev_best_scores = std::move(cur_best_scores);
-    cur_best_scores.clear();
   }
 };
 
@@ -410,7 +438,7 @@ private:
 
   emp::DataOutput output;
   size_t output_frequency = 100;
-  double epsilon = 0.01;
+  double resolution = 0.01;
   double sample_p = 0.1;
   size_t max_archive_size = 10000;
   size_t max_archive_gen = 0;
@@ -448,8 +476,8 @@ public:
       "File to output Pareto data (placed in default data directory)");
     avida.AddSetting("TrackPareto.output_frequency", output_frequency,
       "Updates between Pareto front stat outputs");
-    avida.AddSetting("TrackPareto.epsilon", epsilon,
-      "Minimum per-score improvement to count as dominance");
+    avida.AddSetting("TrackPareto.resolution", resolution,
+      "Width of fixed score bins for Pareto comparisons (0 = exact scores)");
     avida.AddSetting("TrackPareto.sample_p", sample_p,
       "Probability of archiving each lost front entry (0 disables archive)");
     avida.AddSetting("TrackPareto.max_archive_size", max_archive_size,
@@ -460,8 +488,16 @@ public:
 
   // === Signal Listeners ===
 
+  void ValidateConfig() {
+    if (!std::isfinite(resolution) || resolution < 0.0) {
+      emp::notify::Error(
+        "TrackPareto.resolution must be finite and non-negative; received ", resolution, "."
+      );
+    }
+  }
+
   void BeforeStart() {
-    pareto_front.SetEpsilon(epsilon);
+    pareto_front.SetResolution(resolution);
     pareto_front.SetSampleP(sample_p);
     pareto_front.SetMaxArchiveSize(max_archive_size);
     pareto_front.SetMaxArchiveGen(max_archive_gen);
@@ -471,7 +507,7 @@ public:
       output.AddColumn("Update",             [this](){ return avida.GetUpdate(); });
       output.AddColumn("Current front size", [this](){ return pareto_front.GetCurrentSize(); });
       output.AddColumn("Prev front size (U-1)",    [this](){ return pareto_front.GetPrevSize(); });
-      output.AddColumn("Front members at risk (U-2)",
+      output.AddColumn("Front members at risk (U-1)",
         [this](){ return pareto_front.GetFrontMembersAtRisk(); });
       output.AddColumn("Lost this gen",      [this](){ return pareto_front.GetLostCount(); });
       output.AddColumn("Lost without offspring",
@@ -523,12 +559,14 @@ public:
     output.DoOutput();
   }
 
-  void OnUpdateStart(size_t update) {
-    pareto_front.UpdateGen(update, avida.GetAnalyzeRandom(), reproduction_counts);
-    reproduction_counts.clear();
+  void OnUpdateStart(size_t /* update */) {
+    emp_assert(reproduction_counts.empty());
+    pareto_front.BeginGen();
   }
 
   void OnUpdateEnd(size_t update) {
+    pareto_front.FinalizeGen(update, avida.GetAnalyzeRandom(), reproduction_counts);
+    reproduction_counts.clear();
     if (update % output_frequency == 0) {
       PrintStats();
       output.DoOutput();
