@@ -135,6 +135,11 @@ def main() -> int:
     parser.add_argument("--logx", action="store_true", help="Logarithmic x-axis.")
     parser.add_argument("--logy", action="store_true", help="Logarithmic y-axis.")
     parser.add_argument(
+        "--no-legend",
+        action="store_true",
+        help="Do not include a legend in the plot.",
+    )
+    parser.add_argument(
         "--show",
         action="store_true",
         help="Display interactively even when --output is used.",
@@ -198,22 +203,22 @@ def main() -> int:
     for x_arr, y_arr in all_series:
         plt.plot(x_arr, y_arr, color="gray", linewidth=0.8, alpha=0.4)
 
-    # Compute the pointwise average over the intersection of all x-ranges,
-    # using the first series' x-values as the interpolation grid.
-    x_ref = all_series[0][0]
-    x_min = max(x[0] for x, _ in all_series)
-    x_max = min(x[-1] for x, _ in all_series)
-    mask = (x_ref >= x_min) & (x_ref <= x_max)
-    x_grid = x_ref[mask]
-
-    y_interp = np.array([np.interp(x_grid, x_arr, y_arr) for x_arr, y_arr in all_series])
-    y_avg = y_interp.mean(axis=0)
+    # Compute the pointwise average using the longest run as the x-grid so the
+    # average persists as long as any run is still going. Series that have ended
+    # contribute NaN beyond their final x-value and are excluded from the mean.
+    x_grid = max(all_series, key=lambda pair: pair[0][-1])[0]
+    y_matrix = np.full((len(all_series), len(x_grid)), np.nan)
+    for i, (x_arr, y_arr) in enumerate(all_series):
+        valid = (x_grid >= x_arr[0]) & (x_grid <= x_arr[-1])
+        y_matrix[i, valid] = np.interp(x_grid[valid], x_arr, y_arr)
+    y_avg = np.nanmean(y_matrix, axis=0)
 
     plt.plot(x_grid, y_avg, color="black", linewidth=2, label="Average")
 
     plt.xlabel(x_axis_label if x_axis_label is not None else args.x)
     plt.ylabel(y_axis_label if y_axis_label is not None else "Value")
-    plt.legend()
+    if not args.no_legend:
+        plt.legend()
 
     if args.title:
         plt.title(args.title)

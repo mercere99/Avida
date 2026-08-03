@@ -152,6 +152,18 @@ def main() -> int:
     parser.add_argument("--logx", action="store_true", help="Logarithmic x-axis.")
     parser.add_argument("--logy", action="store_true", help="Logarithmic y-axis.")
     parser.add_argument(
+        "--ylim",
+        type=float,
+        nargs=2,
+        metavar=("MIN", "MAX"),
+        help="Set the y-axis range (for example, --ylim 0 1).",
+    )
+    parser.add_argument(
+        "--no-legend",
+        action="store_true",
+        help="Do not include a legend in the plot.",
+    )
+    parser.add_argument(
         "--show",
         action="store_true",
         help="Display interactively even when --output is used.",
@@ -249,7 +261,8 @@ def main() -> int:
 
     plt.xlabel(x_axis_label if x_axis_label is not None else args.x)
     plt.ylabel(f"Average {y_axis_label}" if y_axis_label is not None else "Average Ratio")
-    plt.legend()
+    if not args.no_legend:
+        plt.legend()
 
     if args.title:
         plt.title(args.title)
@@ -257,6 +270,8 @@ def main() -> int:
         plt.xscale("log")
     if args.logy:
         plt.yscale("log")
+    if args.ylim:
+        plt.ylim(args.ylim)
 
     plt.tight_layout()
 

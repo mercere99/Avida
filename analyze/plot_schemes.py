@@ -30,7 +30,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-SCHEMES = ["cohort", "downsample", "epsilon", "informed", "lexicase", "tournament"]
+SCHEMES = ["tournament", "lexicase", "downsample", "informed", "cohort", "epsilon"]
 
 
 def read_headers(csv_file: Path, delimiter: str) -> list[str]:
@@ -99,20 +99,17 @@ def read_selected_data(
 def average_series(
     series: list[tuple[np.ndarray, np.ndarray]],
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    """Average a list of (x, y) series over the intersection of their x-ranges."""
+    """Average a list of (x, y) series, persisting as long as any run continues.
+    Series that have ended contribute NaN beyond their final x-value and are
+    excluded from the mean at those points."""
     if not series:
         return None
-    x_ref = series[0][0]
-    x_min = max(x[0] for x, _ in series)
-    x_max = min(x[-1] for x, _ in series)
-    if x_min > x_max:
-        return None
-    mask = (x_ref >= x_min) & (x_ref <= x_max)
-    x_grid = x_ref[mask]
-    y_interp = np.array(
-        [np.interp(x_grid, x_arr, y_arr) for x_arr, y_arr in series]
-    )
-    return x_grid, y_interp.mean(axis=0)
+    x_grid = max(series, key=lambda pair: pair[0][-1])[0]
+    y_matrix = np.full((len(series), len(x_grid)), np.nan)
+    for i, (x_arr, y_arr) in enumerate(series):
+        valid = (x_grid >= x_arr[0]) & (x_grid <= x_arr[-1])
+        y_matrix[i, valid] = np.interp(x_grid[valid], x_arr, y_arr)
+    return x_grid, np.nanmean(y_matrix, axis=0)
 
 
 def main() -> int:
@@ -150,6 +147,11 @@ def main() -> int:
     parser.add_argument("--delimiter", default=",", help="CSV delimiter. Default: comma.")
     parser.add_argument("--logx", action="store_true", help="Logarithmic x-axis.")
     parser.add_argument("--logy", action="store_true", help="Logarithmic y-axis.")
+    parser.add_argument(
+        "--no-legend",
+        action="store_true",
+        help="Do not include a legend in the plot.",
+    )
     parser.add_argument(
         "--show",
         action="store_true",
@@ -255,7 +257,8 @@ def main() -> int:
     plt.xlabel(x_axis_label if x_axis_label is not None else args.x)
     raw_ylabel = y_axis_label if y_axis_label is not None else "Value"
     plt.ylabel(f"Average {raw_ylabel}")
-    plt.legend()
+    if not args.no_legend:
+        plt.legend()
 
     if args.title:
         plt.title(args.title)

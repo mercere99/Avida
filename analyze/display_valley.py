@@ -42,6 +42,11 @@ def main() -> int:
         action="store_true",
         help="Display interactively even when --output is used.",
     )
+    parser.add_argument(
+        "--no-legend",
+        action="store_true",
+        help="Do not include a legend in the plot.",
+    )
     args = parser.parse_args()
 
     gene = np.linspace(0, 100, 10001)
@@ -54,7 +59,8 @@ def main() -> int:
     plt.xlabel("Gene Value")
     plt.ylabel("Trait Value")
     plt.title("ApplyValley: Gene → Trait")
-    plt.legend()
+    if not args.no_legend:
+        plt.legend()
     plt.tight_layout()
 
     if args.output:

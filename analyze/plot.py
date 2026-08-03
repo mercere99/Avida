@@ -180,6 +180,11 @@ def main() -> int:
     parser.add_argument("--logx", action="store_true", help="Use a logarithmic x-axis.")
     parser.add_argument("--logy", action="store_true", help="Use a logarithmic y-axis.")
     parser.add_argument(
+        "--no-legend",
+        action="store_true",
+        help="Do not include a legend in the plot.",
+    )
+    parser.add_argument(
         "--label-mode",
         choices=["auto", "file", "column", "both"],
         default="auto",
@@ -261,7 +266,7 @@ def main() -> int:
     plt.xlabel(x_axis_label if x_axis_label is not None else args.x)
     plt.ylabel(y_axis_label if y_axis_label is not None else "Value")
 
-    if plotted_lines > 1:
+    if plotted_lines > 1 and not args.no_legend:
         plt.legend()
 
     if args.title:

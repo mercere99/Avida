@@ -81,9 +81,24 @@ Two behaviors must change *in analysis mode only*:
 - `trace <live org>` → keep today's copy-and-print behavior (must not disturb the live org).
 - `analyze <genome | org-query>` → build/reuse an analysis org, run to gestation, populate & keep its phenotype for inspection.
 
-**[OPEN]** Should `analyze` also support "run for N cycles then read partial phenotype" (no divide required), for genomes that never reproduce? Likely yes — report `fitness` as 0 / undefined but still expose task counts.
+**Termination & viability.** Evaluation runs until the first analysis divide **or a hard cap of N CPU cycles, whichever comes first** — the cap is mandatory, since an isolated genome may otherwise loop forever. If the cap is reached with no divide, the organism is flagged **non-viable** (`fitness = 0`), and we still record everything observed up to that point (tasks performed / `logic_counts`, `exe_count`, `error_count`, inputs). N comes from the shared cap in §4.3.
 
-### 4.3 Query / settings isolation ("all", NOT, set algebra)
+### 4.3 Gestation cycle cap (shared by active and analysis organisms)
+
+Give every organism a cap on how many CPU cycles it may execute without replicating; crossing it marks the organism **non-viable**. One mechanism, three payoffs:
+
+- **Active orgs:** culls pathological non-reproducers ("sitters") that would otherwise sit in a cell consuming cycles and never divide — this matches how older versions of Avida behaved.
+- **Analysis orgs:** supplies the mandatory stopping point N for §4.2 for free — analysis reuses the same cap instead of inventing its own.  Any organism marked as inviable for hitting the population cap really would be inviable.
+- **Consistency:** "non-viable" means the same thing (and yields `fitness = 0`) in both worlds.
+
+Design points:
+
+- **Genome-relative, not absolute:** cap = `k × genome.size()` (with `k = 20` as the default), not a fixed cycle count. Gestation legitimately scales with genome length, so a length-relative cap is proportionate — it won't unfairly kill large genomes or over-permit tiny ones — and it keeps `fitness = metabolic_rate / gestation_cost` sensible. `k` is a config setting.
+- **Measured on `exe_count` since the last reproduction** (which, for a first gestation, equals `gestation_cost`).
+- **Hot-path cost:** enforce the check once per update (not during processing) and when checking if a Divide should be successful. Overshooting by up to one slice is acceptable as long as no organisms replicate after crossing the maximum cycle cap.
+- **Config & fallback:** a single setting shared in OrgTypeAvida. If the population cap is disabled (`0` = unlimited), analysis must fall back to a large, finite N to avoid an infinite loop.
+
+### 4.4 Query / settings isolation ("all", NOT, set algebra)
 
 Isolation is **free** given §4.1. Analysis orgs are in a physically separate vector and never in `active_bits`, so `all`, `~`, and filters — all defined relative to `active_bits` — cannot reference them, and an `OrgSet` (which is tied to the population biota) literally cannot address a slot in the analysis pool. Expose analysis orgs only through a **separate, explicit handle** (an `analysis` accessor / an `analyze{...}` command that returns the analysis org directly).
 
@@ -102,8 +117,8 @@ Each phase should end **verified** (compiles warning-free via the appropriate `m
 ### Phase 1 — The evaluate primitive + inspectable results  ← next
 
 - Add the separate analysis pool (`analysis_orgs` + `analysis_bits`) with declare-count / free-when-done, and an accessor to reach an analysis org (§4.1). Phase 1 uses count = 1.
-- Run the analysis org's own hardware to first analysis-divide; add analysis Output-reward and analysis Divide-capture (§4.2) — writing **only** to the analysis org.
-- Harvest & expose: after evaluation, the analysis org's `fitness`, `gestation_cost`, `metabolic_mult`, `logic_counts`, inputs are readable.
+- Run the analysis org's own hardware to first analysis-divide **or the cycle cap** (§4.2/§4.3); add analysis Output-reward and analysis Divide-capture — writing **only** to the analysis org. Flag capped-without-divide orgs **non-viable** (`fitness = 0`) but keep their observed traits.
+- Harvest & expose: after evaluation, the analysis org's `fitness`, `gestation_cost`, `metabolic_mult`, `logic_counts`, inputs, and viability are readable.
 - Surface via a command: `analyze <genome-sequence>` and `analyze <org-query>`; print the trait table (and optionally keep the org for a follow-up query).
 - **Verify:** evaluate org 582's genome; confirm non-zero `gestation_cost`, a `metabolic_mult` reflecting its rewarded tasks, a sane `fitness`, and `logic_counts` matching the trace notes.
 - **[OPEN] input determinism:** decide the input policy for evaluation (see §6).
@@ -143,5 +158,6 @@ Each phase should end **verified** (compiles warning-free via the appropriate `m
 1. **Analysis orgs are real organisms in a separate pool** — their own `(analysis_orgs, analysis_bits)` pair, never merged with the population. Reach them through a dedicated accessor, never `active_bits`.
 2. **Declare count up front, free when done.** The pool is reserved before an analysis runs and released after, so no growth ever happens under a running org and the population's startup reservation is untouched. Phase 1 uses a single reusable org.
 3. **Add an `analyze`/evaluate primitive** that runs the org's own hardware to a captured analysis divide, rewarding tasks and recording gestation **only on that org**, so `fitness` and all traits become inspectable.
-4. **Query isolation is free** — the separate pool plus `active_bits`-relative semantics mean population sets can't see analysis orgs. Defer domain-tagged sets until interactive mode needs set algebra.
-5. **Nail the input policy** before DFE/lineage work — it's the difference between meaningful and noisy fitness effects.
+4. **A shared gestation cycle cap** (`k × genome length`, checked at the scheduling boundary) marks non-viable organisms — it gives analysis its mandatory stopping point *and* culls pathological non-reproducers in the live population, matching older Avida. Non-viable ⇒ `fitness = 0`, traits still recorded.
+5. **Query isolation is free** — the separate pool plus `active_bits`-relative semantics mean population sets can't see analysis orgs. Defer domain-tagged sets until interactive mode needs set algebra.
+6. **Nail the input policy** before DFE/lineage work — it's the difference between meaningful and noisy fitness effects.
