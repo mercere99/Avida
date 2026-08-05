@@ -1,310 +1,391 @@
 /*
  *  This file is part of the Avida Digital Evolution Research Platform, v5.0
- *  Copyright (C) 2025 Michigan State University & Dr. Charles Ofria
+ *  Copyright (C) 2026 Michigan State University & Dr. Charles Ofria
  *  Released under the MIT Public Licence.  See LICENSE.md for details.
  */
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
 #include <emscripten.h>
 
-#include "emp/geometry/Physics2D.hpp"
+#include "emp/base/vector.hpp"
 #include "emp/web/Animate.hpp"
-#include "emp/web/canvas_utils.hpp"
+#include "emp/web/Button.hpp"
+#include "emp/web/Canvas.hpp"
+#include "emp/web/Div.hpp"
 #include "emp/web/Document.hpp"
-#include "emp/web/KeypressManager.hpp"
-#include "emp/web/web.hpp"
+#include "emp/web/Image.hpp"
+#include "emp/web/Selector.hpp"
+#include "emp/web/Text.hpp"
+#include "emp/web/emfunctions.hpp"
 
-#include "Avida.hpp"
+#include "core/Avida.hpp"
+#include "core/PopulationViewOptions.hpp"
+
+#include "Modules/DriverBuffered.hpp"
+#include "Modules/EnvironmentLogic.hpp"
+#include "Modules/EventManager.hpp"
+#include "Modules/MutationsDivideSub.hpp"
+#include "Modules/OrgTypeAvidian.hpp"
+#include "Modules/PopGrid.hpp"
+#include "Modules/ReactionsManager.hpp"
+#include "Modules/TrackGeneration.hpp"
+#include "Modules/TrackGenotypes.hpp"
+#include "Modules/TrackMetabolism.hpp"
 
 namespace UI = emp::web;
 
-class WorldView {
-private:
-  enum class ViewMode { NONE=0, GENOTYPES, FITNESS };
-  ViewMode mode=ViewMode::GENOTYPES;
+using avida_t = Avida<
+  OrgTypeAvidian,
+  PopGrid,
+  DriverBuffered,
+  MutationsDivideSub,
+  TrackGeneration,
+  TrackGenotypes,
+  EventManager,
+  EnvironmentLogic,
+  ReactionsManager,
+  TrackMetabolism
+>;
 
-public:
-  void SetView_None() { mode = ViewMode::NONE; }
-  void SetView_Genotypes() { mode = ViewMode::GENOTYPES; }
-  void SetView_Fitness() { mode = ViewMode::FITNESS; }
-};
-
-class AvidaWeb {
-private:
-  Avida avida{};
-
-  emp::vector<emp::String> errors;
-
-  UI::Animate anim;
-  UI::Document doc{"emp_base"};
-  UI::KeypressManager keypress_manager;
-
-  // Set up the main window
-  emp::Size2D main_win_size{600, 600};
-  enum class ViewMain { NONE=0, WORLD, CONFIG, ORGANISM, GRAPH};
-  ViewMain view_main=ViewMain::WORLD;
-
-  WorldView world_view;
-
-  // Sections of web page
-  UI::Div intro_div{"intro_div"};      // Tabs along top
-  UI::Div main_div{"main_div"};        // Display of main canvas
-  UI::Div control_div{"control_div"};  // Pause / play / view / etc controllers (below main_div)
-  UI::Div stats_div{"stats_div"};      // Quick stat info (upper right of main_div)
-  UI::Div freezer_div{"freezer_div"};  // Save/Load organisms or populations (LR or main_div)
-
-  // UI::Div settings_div{"settings_div"}; // Configure the current run
-  // UI::Div graph_div{"graph_div"};       // Graph display of data
-  // UI::Div organism_div{"organism_div"}; // Info about active organism
-
-  // Styling
-  UI::Style button_style {
-    "padding", "10px 15px",
-    "background-color", "#000066",   // Dark Blue background
-    "color", "white",                // White text
-    "border", "1px solid white",     // Thin white border
-    "border-radius", "5px",          // Rounded corners
-    "cursor", "pointer",
-    "font-size", "16px",
-    "transition", "background-color 0.3s ease, transform 0.3s ease" // Smooth transition
-  }; 
-
-  UI::Style table_style {
-    "background-color", "white",
-    "color", "white",
-    "padding", "10px",
-    "border", "1px solid black",
-    "text_align", "center"
-  };
-
-  using key_event_t = emp::web::KeyboardEvent;
-
-  // =====================  HELPER FUNCTIONS  =====================
-
-  template <typename... Ts>
-  void Error(size_t line_num, Ts &&... args) {
-    errors.push_back(emp::MakeString("Error (line ", line_num, ") - ", args...));
-  }
-
-public:
-  AvidaWeb() : anim([this](){ AvidaWeb::Animate(anim); }) {
-    avida.Setup();
-
-    // Link keypresses to the proper handlers
-    keypress_manager.AddKeydownCallback([this](const key_event_t & evt){ return OnKeydown(evt); });
-
-    // Add in the buttons along the top.
-    doc << intro_div;
-
-    // Add them main canvas to the interface.
-    main_div << UI::Canvas(main_win_size, "view_main") << "<br>";
-    doc << main_div;
-
-    // Add grid control buttons.
-    auto control_set = doc.AddDiv("buttons");
-    // control_set.SetPosition(10, 260+world.height);
-    control_set << UI::Button([this](){ DoStart(); }, "Start", "start_but");
-    control_set << UI::Button([this](){ DoStep();  }, "Step", "step_but");
-    control_set << UI::Button([this](){ DoReset(); }, "Reset", "reset_but");
-
-    UI::Selector map_sel("map_sel");
-    map_sel.SetOption("Blank Map (fast!)", [this](){ world_view.SetView_Genotypes(); });
-    map_sel.SetOption("Genotype Map",      [this](){ world_view.SetView_Genotypes(); });
-    map_sel.SetOption("Fitness Map",       [this](){ world_view.SetView_Fitness(); });
-    map_sel.TriggerID(1);
-    control_set << map_sel;
-
-    // UI::Selector size_sel("size_sel");
-    // size_sel.SetOption("Cell Size 2",  [this](){world.org_radius=2.0;} );
-    // size_sel.SetOption("Cell Size 3",  [this](){world.org_radius=3.0;} );
-    // size_sel.SetOption("Cell Size 4",  [this](){world.org_radius=4.0;} );
-    // size_sel.SetOption("Cell Size 6",  [this](){world.org_radius=6.0;} );
-    // size_sel.SetOption("Cell Size 8",  [this](){world.org_radius=8.0;} );
-    // size_sel.SetOption("Cell Size 10", [this](){world.org_radius=10.0;} );
-    // size_sel.SetOption("Cell Size 15", [this](){world.org_radius=15.0;} );
-    // size_sel.TriggerID(2);
-    // control_set << size_sel;
-
-    // UI::Selector drift_sel("drift_sel");
-    // drift_sel.SetOption("Flow Off",    [this](){world.drift=0.0;} );
-    // drift_sel.SetOption("Flow Low",    [this](){world.drift=0.05;} );
-    // drift_sel.SetOption("Flow Medium", [this](){world.drift=0.1;} );
-    // drift_sel.SetOption("Flow High",   [this](){world.drift=0.15;} );
-    // drift_sel.TriggerID(0);
-    // control_set << drift_sel;
-
-
-    // And stats (next to canvas)
-    auto stats_set = doc.AddDiv("stats");
-    stats_set.SetPosition(main_win_size.X() + 40, 80);
-
-    stats_set << "Update: " << UI::Live( [this]() { return anim.GetFrameCount(); } ) << "<br>";
-    stats_set << "Org Count: " << UI::Live( [this](){ return avida.GetPopulation("main").GetNumOrgs(); } ) << "<br>";
-
-    // stats_set << "<br>"
-    //           << "Sample Org: " << UI::Live( [this](){
-    //                 return world.physics.NumBodies() ? world.physics.GetActiveBody().GetID() : 1000000;
-    //               } ) << "<br>"
-    //           << "Center: " << UI::Live( [this](){
-    //                 return world.physics.NumBodies() ? world.physics.GetActiveBody().GetCenter() : emp::Point{-1,-1};
-    //               } ) << "<br>"
-    //           << "Links: " << UI::Live( [this](){
-    //             return world.physics.NumBodies() ? world.physics.GetActiveBody().GetLinkIDs() : emp::vector<size_t>{};
-    //           } ) << "<br>";
-
-    stats_set << "<br>"
-      "Each circle represents a <b>single cell</b>.<br>"
-      "Cells are <b>attached</b> during gestation; in some setups, they may stay attached after birth.<br>"
-      "<b>Colors</b> are (mostly) meaningless, but have a 5% chance of changing at birth.<br>"
-      "<br>"
-      "Press <b>Start/Stop</b> to begin or pause a run; <b>Step</b> advances a run by a single update.<br>"
-      "Use <b>Reset</b> to restart a run from the beginning (using current settings).<br>"
-      "Freeze the <b>Map</b> to speed up processing by more than 10-fold.<br>"
-      "Cells can be <b>Individuals</b> or linked into clusters like <b>Snowflake</b> Yeast.<br>"
-      "<b>Cell Sizes</b> can be changed, but you need to <b>Reset</b> the run to see the results.<br>"
-      "<b>Flow</b> indicates the amount of Brownian motion in the run.<br>"
-      "<b>Copy</b> rate determines how quickly cells should be reproducing.<br>"
-      "<br>"
-      "<b>Keyboard Shortcuts</b>:<br>"
-      "&nbsp;&nbsp;<b>[SPACE]</b>: Start/Stop.<br>"
-      "&nbsp;&nbsp;<b>[ARROWS]</b>: Move a cell around (forward and turns).<br>"
-      "&nbsp;&nbsp;<b>[M]</b>: Toggle Map Mode (Basic vs. Blank).<br>"
-      "&nbsp;&nbsp;<b>[R]</b>: Reset Run.<br>"
-      "&nbsp;&nbsp;<b>[S]</b>: Step a single update.<br>"
-      ;
-
-
-    avida.Setup(); // Initialize the Avida population.
-
-    // Draw initial state of the world.
-    // UI::Draw( doc.Canvas("pop_view"), world.physics);
-  }
-
-  void Init() {
-    doc << "<h1>Avida Test</h1>";
-  }
-
-  ~AvidaWeb() {}
-
-  void Animate([[maybe_unused]] const UI::Animate & anim) {
-    DEBUG_STACK();
-    world.Update();
-
-    switch (map_mode) {
-    case MapMode::MAKE_BLANK:
-      doc.Canvas("pop_view").Clear();
-      map_mode = MapMode::BLANK;
-    case MapMode::BLANK:
-      break;
-    case MapMode::BASIC:
-      UI::Draw( doc.Canvas("pop_view"), world.physics);
-      break;
-    }
-
-    doc.Div("stats").Redraw();
-  }
-
-  void DoStart() {
-    DEBUG_STACK();
-    anim.ToggleActive();
-    auto start_but = doc.Button("start_but");
-    auto step_but = doc.Button("step_but");
-
-    if (anim.GetActive()) {
-      start_but.SetLabel("Stop");    // If animation is running, button should read "Stop"
-      step_but.SetDisabled(true);    // Cannot step animation already running.
-    }
-    else {
-      start_but.SetLabel("Start");     // If animation is stopped, button should read "Start"
-      step_but.SetDisabled(false);    // Can step stopped animation.
-    }
-  }
-
-  void DoStep() {
-    DEBUG_STACK();
-    emp_assert(anim.GetActive() == false); // Step is only meaningful if the run is stopped.
-    anim.Step();
-  }
-
-  void DoReset() {
-    DEBUG_STACK();
-    world.Reset();
-
-    // Redraw the world.
-    UI::Draw(doc.Canvas("pop_view"), world.physics);
-  }
-
-
-  bool OnKeydown(const emp::web::KeyboardEvent & evt_info) {
-    DEBUG_STACK();
-    // Reject most modified keypresses.
-    if (evt_info.altKey || evt_info.ctrlKey || evt_info.metaKey) return false;
-
-    const int key_code = evt_info.keyCode;
-    bool return_value = true;
-    auto & user_body = world.physics.GetActiveBody();
-
-    switch (key_code) {
-    case ' ':                                     // [SPACE] => Start / Stop a run
-      DoStart();
-      break;
-    case 'M':                                     // M => Map Mode
-      switch (map_mode) {
-      case MapMode::BLANK:
-      case MapMode::MAKE_BLANK:
-        map_mode = MapMode::BASIC;
-        break;
-      case MapMode::BASIC:
-        map_mode = MapMode::MAKE_BLANK;
-        break;
-      }
-      break;
-    case 'R':                                     // R => Reset population
-      DoReset();
-      break;
-    case 'S':                                     // S => Step
-      DoStep();
-      break;
-
-    // case 187:                                     // Plus  (grow)
-    //   if (user_body) user_body->SetTargetRadius(user_body->GetTargetRadius() + 1);
-    //   break;
-    // case 189:                                     // Minus (shrink)
-    //   if (user_body) {
-    //     int body_size = user_body->GetTargetRadius();
-    //     if (body_size > 1) user_body->SetTargetRadius(body_size - 1);
-    //   }
-    //   break;
-
-    case 37:                                      // LEFT ARROW (Turn Left)
-      if (user_body.IsActive()) user_body.RotateDegrees(45.0);
-      break;
-    case 38:                                      // UP ARROW (Accelerate)
-      if (user_body.IsActive()) user_body.IncSpeed();
-      break;
-    case 39:                                      // RIGHT ARROW (Turn Right)
-      if (user_body.IsActive()) user_body.RotateDegrees(-45.0);
-      break;
-    case 40:                                      // DOWN ARROW (Breaks)
-      if (user_body.IsActive()) user_body.DecSpeed();
-      break;
-
-    default:
-      return_value = false;
-    };
-
-    return return_value;
-  }
-};
-
-AvidaWeb avida_web;
-
-int emp_main() {
-  avida_web.Init();
+constexpr uint32_t PackRGBA(uint8_t red, uint8_t green, uint8_t blue) {
+  return static_cast<uint32_t>(red)
+    | (static_cast<uint32_t>(green) << 8)
+    | (static_cast<uint32_t>(blue) << 16)
+    | (static_cast<uint32_t>(255) << 24);
 }
 
-// int main(int argc, char * argv[])
-// {
-//   Avida avida(emp::ArgsToStrings(argc, argv));
-//   avida.Setup();
-//   avida.Run();
-// }
+EM_JS(void, RenderPopulationPixels,
+      (const uint32_t * pixels, int width, int height), {
+  const render = () => {
+    const canvas = document.getElementById('population_canvas');
+    if (!canvas) {
+      requestAnimationFrame(render);
+      return;
+    }
+
+    const byteLength = width * height * 4;
+    const wasmPixels = new Uint8ClampedArray(HEAPU8.buffer, pixels, byteLength);
+    const image = new ImageData(new Uint8ClampedArray(wasmPixels), width, height);
+    const context = canvas.getContext('2d');
+    context.imageSmoothingEnabled = false;
+    context.putImageData(image, 0, 0);
+  };
+  render();
+});
+
+class AvidaWebApp {
+private:
+  enum class RunMode { PAUSED, PLAY, FAST_FORWARD };
+
+  static constexpr double PLAY_INTERVAL_MS = 100.0;
+  static constexpr double FAST_FORWARD_FRAME_BUDGET_MS = 12.0;
+  static constexpr size_t FAST_FORWARD_REDRAW_UPDATES = 10;
+
+  static constexpr uint32_t EMPTY_COLOR = PackRGBA(12, 30, 46);
+  static constexpr uint32_t DEFAULT_ORG_COLOR = PackRGBA(110, 205, 224);
+  static constexpr std::array<uint32_t, 12> CATEGORY_COLORS{
+    PackRGBA(186, 84, 198),
+    PackRGBA(73, 210, 218),
+    PackRGBA(246, 211, 70),
+    PackRGBA(239, 115, 91),
+    PackRGBA(126, 105, 208),
+    PackRGBA(74, 176, 124),
+    PackRGBA(240, 153, 55),
+    PackRGBA(86, 139, 219),
+    PackRGBA(214, 91, 143),
+    PackRGBA(152, 199, 74),
+    PackRGBA(120, 215, 179),
+    PackRGBA(192, 139, 225)
+  };
+
+  avida_t avida;
+  PopulationViewOptions<avida_t> population_view_options;
+
+  UI::Document document{"emp_base"};
+  UI::Animate animation;
+  UI::Button step_button;
+  UI::Button play_button;
+  UI::Button fast_forward_button;
+  UI::Selector color_selector{"population_color_mode"};
+  UI::Text update_text{"update_value"};
+  UI::Text org_count_text{"organism_count_value"};
+  UI::Text run_mode_text{"run_mode_value"};
+
+  RunMode run_mode = RunMode::PAUSED;
+  size_t active_color_mode = PopulationViewOptions<avida_t>::NO_CATEGORY;
+  size_t last_grid_redraw_update = 0;
+  double play_elapsed_ms = 0.0;
+  emp::vector<uint32_t> population_pixels;
+
+  [[nodiscard]] auto & Grid() { return avida.GetPlugIn<PopGrid>(); }
+
+  void CollectPopulationViewOptions() {
+    avida.TriggerSignal([this](auto & module) {
+      if constexpr (requires { module.SetupPopulationView(population_view_options); }) {
+        module.SetupPopulationView(population_view_options);
+      }
+    });
+  }
+
+  [[nodiscard]] emp::String GetRunModeLabel() const {
+    if (avida.IsComplete()) return "Complete";
+    switch (run_mode) {
+      case RunMode::PAUSED: return "Paused";
+      case RunMode::PLAY: return "Playing at up to 10 updates/second";
+      case RunMode::FAST_FORWARD: return "Fast-forwarding";
+    }
+    return "Paused";
+  }
+
+  void RefreshReadouts() {
+    update_text.Redraw();
+    org_count_text.Redraw();
+    run_mode_text.Redraw();
+  }
+
+  void UpdateControls() {
+    const bool complete = avida.IsComplete();
+    step_button.SetDisabled(complete || run_mode != RunMode::PAUSED);
+    play_button.SetDisabled(complete);
+    fast_forward_button.SetDisabled(complete);
+
+    play_button.SetLabel(run_mode == RunMode::PLAY ? "Pause" : "Play");
+    fast_forward_button.SetLabel(
+      run_mode == RunMode::FAST_FORWARD ? "Pause" : "Fast-forward"
+    );
+    play_button.SetAttr("aria-pressed", run_mode == RunMode::PLAY ? "true" : "false");
+    fast_forward_button.SetAttr(
+      "aria-pressed",
+      run_mode == RunMode::FAST_FORWARD ? "true" : "false"
+    );
+  }
+
+  void SetRunMode(RunMode new_mode) {
+    if (avida.IsComplete()) new_mode = RunMode::PAUSED;
+    run_mode = new_mode;
+    play_elapsed_ms = 0.0;
+
+    if (run_mode == RunMode::PAUSED) {
+      if (animation.GetActive()) animation.Stop();
+    } else if (!animation.GetActive()) {
+      animation.Start();
+    }
+
+    UpdateControls();
+    RefreshReadouts();
+  }
+
+  [[nodiscard]] uint32_t GetOrganismColor(const avida_t::organism_t & organism) const {
+    const auto & color_modes = population_view_options.GetCategoricalColorModes();
+    if (active_color_mode >= color_modes.size()) return DEFAULT_ORG_COLOR;
+
+    const size_t category = color_modes[active_color_mode].get_category(organism);
+    if (category == PopulationViewOptions<avida_t>::NO_CATEGORY) return DEFAULT_ORG_COLOR;
+    return CATEGORY_COLORS[category % CATEGORY_COLORS.size()];
+  }
+
+  void DrawPopulation() {
+    const std::span<const size_t> cells = Grid().GetCells();
+    population_pixels.resize(cells.size(), EMPTY_COLOR);
+
+    for (size_t cell_id = 0; cell_id < cells.size(); ++cell_id) {
+      const size_t org_id = cells[cell_id];
+      if (org_id != PopGrid<avida_t>::EMPTY_CELL && avida.IsOccupied(org_id)) {
+        population_pixels[cell_id] = GetOrganismColor(avida.GetOrg(org_id));
+      }
+    }
+
+    RenderPopulationPixels(
+      population_pixels.data(),
+      static_cast<int>(Grid().GetWidth()),
+      static_cast<int>(Grid().GetHeight())
+    );
+    last_grid_redraw_update = avida.GetUpdate();
+  }
+
+  void FinishUpdate(bool can_continue, bool redraw_population) {
+    if (redraw_population) DrawPopulation();
+    RefreshReadouts();
+    if (!can_continue) SetRunMode(RunMode::PAUSED);
+  }
+
+  void StepPopulation() {
+    emp_assert(run_mode == RunMode::PAUSED);
+    FinishUpdate(avida.AdvanceUpdate(), true);
+    UpdateControls();
+  }
+
+  void OnAnimationFrame(const UI::Animate & frame) {
+    if (run_mode == RunMode::PLAY) {
+      play_elapsed_ms += frame.GetStepTime();
+      if (play_elapsed_ms < PLAY_INTERVAL_MS) return;
+
+      play_elapsed_ms = 0.0;  // Do not catch up after a delayed or backgrounded frame.
+      FinishUpdate(avida.AdvanceUpdate(), true);
+      return;
+    }
+
+    if (run_mode != RunMode::FAST_FORWARD) return;
+
+    const double frame_start = emp::GetTime();
+    bool can_continue = true;
+    do {
+      can_continue = avida.AdvanceUpdate();
+    } while (can_continue && emp::GetTime() - frame_start < FAST_FORWARD_FRAME_BUDGET_MS);
+
+    const bool redraw_population = !can_continue
+      || avida.GetUpdate() - last_grid_redraw_update >= FAST_FORWARD_REDRAW_UPDATES;
+    FinishUpdate(can_continue, redraw_population);
+  }
+
+  void SetupColorSelector() {
+    color_selector.SetOption("Uniform", [this]() {
+      active_color_mode = PopulationViewOptions<avida_t>::NO_CATEGORY;
+      DrawPopulation();
+    });
+
+    const auto & color_modes = population_view_options.GetCategoricalColorModes();
+    for (size_t mode_id = 0; mode_id < color_modes.size(); ++mode_id) {
+      color_selector.SetOption(color_modes[mode_id].label, [this, mode_id]() {
+        active_color_mode = mode_id;
+        DrawPopulation();
+      });
+    }
+
+    if (color_modes.size()) {
+      active_color_mode = 0;
+      color_selector.SelectID(1);
+    }
+    color_selector.SetAttr("aria-label", "Population color mode");
+  }
+
+  void BuildInterface() {
+    UI::Div app{"avida_app"};
+    app.AddAttr("class", "avida-app");
+
+    UI::Div header{"app_header"};
+    header.AddAttr("class", "app-header");
+
+    UI::Div brand{"brand"};
+    brand.AddAttr("class", "brand");
+    UI::Image logo{"assets/icons/LOGO.png", "avida_logo"};
+    logo.Alt("Avida").AddAttr("class", "brand-logo");
+    brand << logo
+          << "<div><div class='brand-title'>Avida 5</div>"
+             "<div class='brand-subtitle'>Digital Evolution Research Platform</div></div>";
+
+    UI::Div tabs{"primary_tabs"};
+    tabs.AddAttr("class", "primary-tabs");
+    UI::Button population_tab{[](){}, "Population", "population_tab"};
+    population_tab.AddAttr("class", "primary-tab is-active");
+    population_tab.SetAttr("aria-current", "page");
+    tabs << population_tab;
+
+    UI::Div run_badge{"run_badge"};
+    run_badge.AddAttr("class", "run-badge");
+    run_badge << "<span class='run-dot'></span>" << run_mode_text;
+    run_mode_text << UI::Live([this](){ return GetRunModeLabel(); });
+
+    header << brand << tabs << run_badge;
+    app << header;
+
+    UI::Div workspace{"workspace"};
+    workspace.AddAttr("class", "workspace");
+    UI::Div population_card{"population_card"};
+    population_card.AddAttr("class", "population-card");
+
+    UI::Div population_header{"population_header"};
+    population_header.AddAttr("class", "population-header");
+    population_header
+      << "<div><h1>Population</h1>"
+         "<p>Each colored cell is one organism in the active grid.</p></div>";
+
+    UI::Div view_controls{"view_controls"};
+    view_controls.AddAttr("class", "view-controls");
+    view_controls << "<label for='population_color_mode'>Color by</label>" << color_selector;
+    population_header << view_controls;
+
+    UI::Div canvas_frame{"canvas_frame"};
+    canvas_frame.AddAttr("class", "canvas-frame");
+    UI::Canvas population_canvas{
+      static_cast<double>(Grid().GetWidth()),
+      static_cast<double>(Grid().GetHeight()),
+      "population_canvas"
+    };
+    population_canvas.AddAttr("class", "population-canvas");
+    population_canvas.SetAttr("role", "img");
+    population_canvas.SetAttr("aria-label", "Grid population of digital organisms");
+    canvas_frame << population_canvas;
+
+    population_card << population_header << canvas_frame;
+    workspace << population_card;
+    app << workspace;
+
+    UI::Div transport{"transport"};
+    transport.AddAttr("class", "transport");
+    UI::Div transport_buttons{"transport_buttons"};
+    transport_buttons.AddAttr("class", "transport-buttons");
+
+    step_button = UI::Button([this](){ StepPopulation(); }, "Step", "step_button");
+    play_button = UI::Button([this](){
+      SetRunMode(run_mode == RunMode::PLAY ? RunMode::PAUSED : RunMode::PLAY);
+    }, "Play", "play_button");
+    fast_forward_button = UI::Button([this](){
+      SetRunMode(
+        run_mode == RunMode::FAST_FORWARD ? RunMode::PAUSED : RunMode::FAST_FORWARD
+      );
+    }, "Fast-forward", "fast_forward_button");
+
+    step_button.AddAttr("class", "transport-button");
+    play_button.AddAttr("class", "transport-button is-primary");
+    fast_forward_button.AddAttr("class", "transport-button");
+    step_button.SetAttr("aria-label", "Advance one population update");
+    play_button.SetAttr("aria-label", "Play or pause at up to ten updates per second");
+    fast_forward_button.SetAttr("aria-label", "Run as fast as possible or pause");
+    transport_buttons << step_button << play_button << fast_forward_button;
+
+    UI::Div readouts{"readouts"};
+    readouts.AddAttr("class", "readouts");
+    UI::Div update_readout{"update_readout"};
+    update_readout.AddAttr("class", "readout");
+    update_readout << "<span>Update</span>" << update_text;
+    update_text << UI::Live([this](){ return avida.GetUpdate(); });
+
+    UI::Div organism_readout{"organism_readout"};
+    organism_readout.AddAttr("class", "readout");
+    organism_readout << "<span>Organisms</span>" << org_count_text;
+    org_count_text << UI::Live([this](){ return avida.GetNumOrgs(); });
+    readouts << update_readout << organism_readout;
+
+    transport << transport_buttons << readouts;
+    app << transport;
+    document << app;
+  }
+
+public:
+  AvidaWebApp()
+    : animation([this](const UI::Animate & frame){ OnAnimationFrame(frame); }) {
+    avida.GetSettings().Set("base.config_dir", std::string{"/config"});
+    avida.GetSettings().Set("base.data_dir", std::string{"/data"});
+    CollectPopulationViewOptions();
+  }
+
+  void Initialize() {
+    avida.InitializePaused();
+    SetupColorSelector();
+    BuildInterface();
+    UpdateControls();
+    DrawPopulation();
+    RefreshReadouts();
+  }
+};
+
+AvidaWebApp avida_web_app;
+
+int emp_main() {
+  avida_web_app.Initialize();
+}
