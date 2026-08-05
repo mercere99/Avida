@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 SCHEMES = ["tournament", "lexicase", "downsample", "informed", "cohort", "epsilon"]
+CI_Z_SCORE = 1.96
 
 
 def read_headers(csv_file: Path, delimiter: str) -> list[str]:
@@ -101,10 +102,10 @@ def read_ratio_data(
 
 def average_series(
     series: list[tuple[np.ndarray, np.ndarray]],
-) -> tuple[np.ndarray, np.ndarray] | None:
-    """Average a list of (x, y) series, persisting as long as any run continues.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Summarize (x, y) series, persisting as long as any run continues.
     Series that have ended contribute NaN beyond their final x-value and are
-    excluded from the mean at those points."""
+    excluded from the mean and confidence interval at those points."""
     if not series:
         return None
     x_grid = max(series, key=lambda pair: pair[0][-1])[0]
@@ -112,7 +113,35 @@ def average_series(
     for i, (x_arr, y_arr) in enumerate(series):
         valid = (x_grid >= x_arr[0]) & (x_grid <= x_arr[-1])
         y_matrix[i, valid] = np.interp(x_grid[valid], x_arr, y_arr)
-    return x_grid, np.nanmean(y_matrix, axis=0)
+
+    observed = ~np.isnan(y_matrix)
+    sample_counts = np.sum(observed, axis=0)
+    totals = np.sum(np.where(observed, y_matrix, 0.0), axis=0)
+    y_avg = np.divide(
+        totals,
+        sample_counts,
+        out=np.full(len(x_grid), np.nan),
+        where=sample_counts > 0,
+    )
+
+    deviations = np.zeros_like(y_matrix)
+    np.subtract(y_matrix, y_avg, out=deviations, where=observed)
+    sum_squared_deviations = np.sum(deviations**2, axis=0)
+    sample_variance = np.divide(
+        sum_squared_deviations,
+        sample_counts - 1,
+        out=np.full(len(x_grid), np.nan),
+        where=sample_counts > 1,
+    )
+    variance_of_mean = np.divide(
+        sample_variance,
+        sample_counts,
+        out=np.full(len(x_grid), np.nan),
+        where=sample_counts > 1,
+    )
+    margin = CI_Z_SCORE * np.sqrt(variance_of_mean)
+
+    return x_grid, y_avg, y_avg - margin, y_avg + margin
 
 
 def main() -> int:
@@ -151,6 +180,12 @@ def main() -> int:
     parser.add_argument("--delimiter", default=",", help="CSV delimiter. Default: comma.")
     parser.add_argument("--logx", action="store_true", help="Logarithmic x-axis.")
     parser.add_argument("--logy", action="store_true", help="Logarithmic y-axis.")
+    parser.add_argument(
+        "--confidence-interval",
+        "--ci",
+        action="store_true",
+        help="Shade pointwise 95%% confidence intervals around scheme averages.",
+    )
     parser.add_argument(
         "--ylim",
         type=float,
@@ -247,8 +282,17 @@ def main() -> int:
                 )
                 continue
 
-            x_avg, y_avg = result
-            plt.plot(x_avg, y_avg, label=scheme)
+            x_avg, y_avg, ci_lower, ci_upper = result
+            line, = plt.plot(x_avg, y_avg, label=scheme)
+            if args.confidence_interval:
+                plt.fill_between(
+                    x_avg,
+                    ci_lower,
+                    ci_upper,
+                    color=line.get_color(),
+                    alpha=0.2,
+                    linewidth=0,
+                )
             plotted_lines += 1
 
     except ValueError as error:

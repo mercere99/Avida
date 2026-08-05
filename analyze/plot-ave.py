@@ -19,6 +19,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+CI_Z_SCORE = 1.96
+
 
 def read_headers(csv_file: Path, delimiter: str) -> list[str]:
     """Read and return the header row from a CSV file."""
@@ -105,6 +107,46 @@ def read_selected_data(
     return x_values, y_values
 
 
+def summarize_series(
+    series: list[tuple[np.ndarray, np.ndarray]],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return the pointwise mean and 95% confidence bounds for the mean."""
+    x_grid = max(series, key=lambda pair: pair[0][-1])[0]
+    y_matrix = np.full((len(series), len(x_grid)), np.nan)
+    for i, (x_arr, y_arr) in enumerate(series):
+        valid = (x_grid >= x_arr[0]) & (x_grid <= x_arr[-1])
+        y_matrix[i, valid] = np.interp(x_grid[valid], x_arr, y_arr)
+
+    observed = ~np.isnan(y_matrix)
+    sample_counts = np.sum(observed, axis=0)
+    totals = np.sum(np.where(observed, y_matrix, 0.0), axis=0)
+    y_avg = np.divide(
+        totals,
+        sample_counts,
+        out=np.full(len(x_grid), np.nan),
+        where=sample_counts > 0,
+    )
+
+    deviations = np.zeros_like(y_matrix)
+    np.subtract(y_matrix, y_avg, out=deviations, where=observed)
+    sum_squared_deviations = np.sum(deviations**2, axis=0)
+    sample_variance = np.divide(
+        sum_squared_deviations,
+        sample_counts - 1,
+        out=np.full(len(x_grid), np.nan),
+        where=sample_counts > 1,
+    )
+    variance_of_mean = np.divide(
+        sample_variance,
+        sample_counts,
+        out=np.full(len(x_grid), np.nan),
+        where=sample_counts > 1,
+    )
+    margin = CI_Z_SCORE * np.sqrt(variance_of_mean)
+
+    return x_grid, y_avg, y_avg - margin, y_avg + margin
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -134,6 +176,12 @@ def main() -> int:
     parser.add_argument("--delimiter", default=",", help="CSV delimiter. Default: comma.")
     parser.add_argument("--logx", action="store_true", help="Logarithmic x-axis.")
     parser.add_argument("--logy", action="store_true", help="Logarithmic y-axis.")
+    parser.add_argument(
+        "--confidence-interval",
+        "--ci",
+        action="store_true",
+        help="Shade the pointwise 95%% confidence interval around the average.",
+    )
     parser.add_argument(
         "--no-legend",
         action="store_true",
@@ -206,14 +254,18 @@ def main() -> int:
     # Compute the pointwise average using the longest run as the x-grid so the
     # average persists as long as any run is still going. Series that have ended
     # contribute NaN beyond their final x-value and are excluded from the mean.
-    x_grid = max(all_series, key=lambda pair: pair[0][-1])[0]
-    y_matrix = np.full((len(all_series), len(x_grid)), np.nan)
-    for i, (x_arr, y_arr) in enumerate(all_series):
-        valid = (x_grid >= x_arr[0]) & (x_grid <= x_arr[-1])
-        y_matrix[i, valid] = np.interp(x_grid[valid], x_arr, y_arr)
-    y_avg = np.nanmean(y_matrix, axis=0)
+    x_grid, y_avg, ci_lower, ci_upper = summarize_series(all_series)
 
     plt.plot(x_grid, y_avg, color="black", linewidth=2, label="Average")
+    if args.confidence_interval:
+        plt.fill_between(
+            x_grid,
+            ci_lower,
+            ci_upper,
+            color="black",
+            alpha=0.2,
+            linewidth=0,
+        )
 
     plt.xlabel(x_axis_label if x_axis_label is not None else args.x)
     plt.ylabel(y_axis_label if y_axis_label is not None else "Value")
