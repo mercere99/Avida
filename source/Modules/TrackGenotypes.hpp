@@ -15,6 +15,7 @@
 #include "emp/datastructs/RobinHoodMap.hpp"
 
 #include "../core/Avida.hpp"
+#include "../core/PopulationViewOptions.hpp"
 
 class Genotype {
 private:
@@ -176,6 +177,20 @@ public:
   uint32_t GetMaxAbundance() {
     if (rank_ids[0] == 0) return 0;
     return GetRankedGenotype(0).GetCurCount();
+  }
+
+  void SetupPopulationView(PopulationViewOptions<AVIDA_T> & options) const {
+    options.AddCategoricalColorMode(
+      "genotype",
+      "Genotype",
+      "Color abundant organisms by identical genome.",
+      [this](const typename AVIDA_T::organism_t & org) {
+        const Genotype & genotype = GetGenotype(org.GetPhenotype().genotype_id);
+        return genotype.HasTag()
+          ? static_cast<size_t>(genotype.GetTag())
+          : PopulationViewOptions<AVIDA_T>::NO_CATEGORY;
+      }
+    );
   }
 
   template <concepts::Organism ORG_T>
