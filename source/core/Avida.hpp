@@ -183,6 +183,10 @@ public:
   // === Basic Accessors ===
 
   [[nodiscard]] size_t GetUpdate() const { return update; }
+  [[nodiscard]] bool IsInitialized() const { return run_state != RunState::INITIALIZING; }
+  [[nodiscard]] bool IsComplete() const {
+    return run_state == RunState::COMPLETE || run_state == RunState::ERROR;
+  }
   [[nodiscard]] emp::Random & GetRandom() { return random; }
   [[nodiscard]] emp::Random & GetAnalyzeRandom() { return analyze_random; }
   [[nodiscard]] const fs::path & GetDataDir() { return data_dir; }  
@@ -773,6 +777,28 @@ public:
 
     // Phase 3: the complete initial population is now available to all modules.
     AVIDA_SIGNAL(OnPopulationReady());
+  }
+
+  /// Initialize a run for an external, nonblocking driver such as a web interface.
+  void InitializePaused() {
+    emp_assert(run_state == RunState::INITIALIZING,
+      "InitializePaused() requires a new Avida run.");
+    Initialize();
+    if (run_state == RunState::INITIALIZING) run_state = RunState::PAUSED;
+    else if (run_state == RunState::EXITING) Shutdown();
+  }
+
+  /// Advance one complete update while leaving scheduling to an external driver.
+  /// @return true if another update may be run; false if the run has finished.
+  [[nodiscard]] bool AdvanceUpdate() {
+    if (run_state == RunState::INITIALIZING) InitializePaused();
+    if (run_state == RunState::EXITING) Shutdown();
+    if (IsComplete()) return false;
+
+    emp_assert(run_state == RunState::PAUSED || run_state == RunState::RUNNING);
+    DoUpdate();
+    if (run_state == RunState::EXITING) Shutdown();
+    return !IsComplete();
   }
 
   void Run() {
