@@ -17,13 +17,14 @@
 TARGET := Avida
 
 # Additional executables to build from source/<name>.cpp (each also gets a <name>-debug target)
-ALTERNATES := DOSSIER ROMEO
+ALTERNATES := DOSSIER DOSSIER-Tournament ROMEO
 
 # Identify all directory locations
 EMP_DIR      = ../Empirical
 BUILD_DIR    = build
 WEB_DIR      = web
 SETTINGS_DIR = settings
+CONFIG_DIR   = config
 SOURCE_DIR   = source
 
 # CXX = clang++
@@ -56,9 +57,10 @@ EMP_funs     := -s EXPORTED_FUNCTIONS="['_main', '_malloc', '_free', '_empCppCal
 EMP_js_lib   := --js-library $(EMP_DIR)/include/emp/web/library_emp.js
 EMP_limits   := -s NO_EXIT_RUNTIME=1  -s TOTAL_MEMORY=67108864
 EMP_warnings := -Wno-dollar-in-identifier-extension
-FLAGS_emp    := $(FLAGS_main) $(EMP_methods) $(EMP_js_lib) $(EMP_funs) $(EMP_limits) $(EMP_warnings)
+EMP_files    := --preload-file $(CONFIG_DIR)@/config
+FLAGS_emp    := $(FLAGS_main) $(EMP_methods) $(EMP_js_lib) $(EMP_funs) $(EMP_limits) $(EMP_warnings) $(EMP_files)
 
-FLAGS_WEB       := $(FLAGS_emp) -Oz -DNDEBUG -s DISABLE_EXCEPTION_CATCHING=1
+FLAGS_WEB       := $(FLAGS_emp) -O3 -DNDEBUG -fno-exceptions -s DISABLE_EXCEPTION_CATCHING=1
 FLAGS_WEB_DEBUG := $(FLAGS_emp) -gsource-map -pedantic -s ASSERTIONS=1
 FLAGS_WEB_QUICK := $(FLAGS_emp) -DNDEBUG
 
@@ -96,7 +98,9 @@ print-%: ; @echo '$(subst ','\'',$*=$($*))'
 
 CLEAN_BACKUP = *~ *.dSYM
 CLEAN_TEST = *.out	*.o	*.gcda	*.gcno	*.info	*.gcov	./Coverage* ./temp
-CLEAN_EXE = $(NATIVE_EXE) $(WEB_EXE) $(addprefix $(BUILD_DIR)/, $(ALTERNATES))
+WEB_ARTIFACTS = $(WEB_EXE) $(WEB_DIR)/$(TARGET).data $(WEB_DIR)/$(TARGET).wasm \
+                $(WEB_DIR)/$(TARGET).wasm.map $(WEB_DIR)/$(TARGET).worker.js
+CLEAN_EXE = $(NATIVE_EXE) $(WEB_ARTIFACTS) $(addprefix $(BUILD_DIR)/, $(ALTERNATES))
 
 CLEAN_FILES = $(CLEAN_BACKUP) $(CLEAN_TEST) $(CLEAN_EXE)
 
@@ -119,8 +123,6 @@ clean:
 # Make sure that the needed directories exists.
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
-$(WEB_DIR):
-	mkdir -p $(WEB_DIR)
 
 $(ALTERNATES): FLAGS := $(FLAGS_OPT)
 $(ALTERNATES): % : $(BUILD_DIR)/%
@@ -138,5 +140,7 @@ $(NATIVE_EXE): $(NATIVE_CODE) $(KEY_HEADERS) | $(BUILD_DIR)
 	@echo To build the web version use: make web
 
 # Compile the web version.
-$(WEB_EXE): $(WEB_CODE) $(KEY_HEADERS) | $(WEB_DIR)
+
+$(WEB_EXE): $(WEB_CODE) $(KEY_HEADERS) $(shell find $(CONFIG_DIR) -type f)
+	mkdir -p $(WEB_DIR)
 	$(CXX_web) $(FLAGS) $(WEB_CODE) -o $(WEB_EXE)
