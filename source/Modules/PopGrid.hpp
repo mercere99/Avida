@@ -15,6 +15,7 @@
 
 #include <cstddef>   // for size_t
 #include <iostream>
+#include <span>
 
 #include "../core/Avida.hpp"
 
@@ -26,7 +27,6 @@ private:
   size_t width = 100;
   size_t height = 100;
   size_t num_cells = width * height;
-  static constexpr size_t npos = static_cast<size_t>(-1);
 
   // emp::array<size_t, num_cells> org_grid{};
   emp::vector<size_t> org_grid;
@@ -38,6 +38,8 @@ private:
   }
 
 public:
+  static constexpr size_t EMPTY_CELL = static_cast<size_t>(-1);
+
   PopGrid(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>(avida, "PopGrid", "PopManager", "Manage a grid-based population")
   { }
@@ -50,7 +52,7 @@ public:
   // === Phenotypic Traits ===
 
   struct Phenotype {
-    size_t pop_pos = npos;
+    size_t pop_pos = EMPTY_CELL;
   };
 
   void RegisterTraits() {
@@ -64,10 +66,16 @@ public:
 
   size_t GetOrgReserveCount() const { return width * height; }
 
+  // === Population View Accessors ===
+
+  [[nodiscard]] size_t GetWidth() const { return width; }
+  [[nodiscard]] size_t GetHeight() const { return height; }
+  [[nodiscard]] std::span<const size_t> GetCells() const { return org_grid; }
+
   // === Signal Listeners ===
   void BeforeStart() {
     num_cells = width * height;
-    org_grid.resize(num_cells, npos);
+    org_grid.resize(num_cells, EMPTY_CELL);
   }
 
 
@@ -95,20 +103,20 @@ public:
     size_t & org_pos = org.GetPhenotype().pop_pos;
 
     // If placed organism does not have a position, it is being injected; pick a random position
-    if (org_pos == npos) org_pos = avida.GetRandom().GetUInt(num_cells);
+    if (org_pos == EMPTY_CELL) org_pos = avida.GetRandom().GetUInt(num_cells);
 
     // See if we must delete an organism to make room for the new one.
-    if (org_grid[org_pos] != npos) {
+    if (org_grid[org_pos] != EMPTY_CELL) {
       avida.DeleteOrg(org_grid[org_pos]);
-      org_grid[org_pos] = npos;
+      org_grid[org_pos] = EMPTY_CELL;
     }
   }
 
   template <concepts::Organism ORG_T>
   void OnPlacement([[maybe_unused]] ORG_T & org) {
     const size_t pop_pos = org.GetPhenotype().pop_pos;
-    emp_assert(pop_pos != npos, "Orgs must know where to be placed.");
-    emp_assert(org_grid[pop_pos] == npos, "Org must be placed into empty cells");
+    emp_assert(pop_pos != EMPTY_CELL, "Orgs must know where to be placed.");
+    emp_assert(org_grid[pop_pos] == EMPTY_CELL, "Org must be placed into empty cells");
 
     org_grid[pop_pos] = org.GetBiotaID();
   }
