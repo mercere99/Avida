@@ -9,8 +9,10 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <string>
+#include <utility>
 
 #include <emscripten.h>
 
@@ -41,6 +43,31 @@
 
 namespace UI = emp::web;
 
+template <typename AVIDA_T>
+class WebInterfaceBridge : public ModuleBase<AVIDA_T> {
+private:
+  std::function<void()> before_exit_callback;
+
+public:
+  WebInterfaceBridge(AVIDA_T & avida)
+    : ModuleBase<AVIDA_T>(
+        avida,
+        "WebInterfaceBridge",
+        "Interface",
+        "Connect Avida lifecycle signals to the web interface."
+      ) { }
+
+  void Serialize(emp::SerialPod & /* pod */) { }
+
+  void SetBeforeExitCallback(std::function<void()> callback) {
+    before_exit_callback = std::move(callback);
+  }
+
+  void BeforeExit() {
+    if (before_exit_callback) before_exit_callback();
+  }
+};
+
 using avida_t = Avida<
   OrgTypeAvidian,
   PopGrid,
@@ -51,7 +78,8 @@ using avida_t = Avida<
   EventManager,
   EnvironmentLogic,
   ReactionsManager,
-  TrackMetabolism
+  TrackMetabolism,
+  WebInterfaceBridge
 >;
 
 constexpr uint32_t PackRGBA(uint8_t red, uint8_t green, uint8_t blue) {
@@ -125,10 +153,10 @@ private:
   UI::Button restart_button;
   UI::Button step_button;
   UI::Button play_button;
+  UI::Button pause_button;
   UI::Button fast_forward_button;
   UI::Selector color_selector{"population_color_mode"};
-  UI::Text update_text{"update_value"};
-  UI::Text org_count_text{"organism_count_value"};
+  emp::vector<UI::Text> statistic_texts;
 
   RunMode run_mode = RunMode::PAUSED;
   ColorScale active_color_scale = ColorScale::UNIFORM;
@@ -137,10 +165,20 @@ private:
   double play_elapsed_ms = 0.0;
   emp::vector<uint32_t> population_pixels;
   emp::vector<double> continuous_values;
+  emp::vector<emp::String> final_statistic_values;
+  bool has_final_snapshot = false;
 
   [[nodiscard]] auto & Grid() { return avida.GetPlugIn<PopGrid>(); }
 
   void CollectPopulationViewOptions() {
+    population_view_options.AddStatistic(
+      "update", "Update", "Current population update.",
+      [this](){ return emp::MakeString(avida.GetUpdate()); }
+    );
+    population_view_options.AddStatistic(
+      "organisms", "Organisms", "Number of living organisms.",
+      [this](){ return emp::MakeString(avida.GetNumOrgs()); }
+    );
     avida.TriggerSignal([this](auto & module) {
       if constexpr (requires { module.SetupPopulationView(population_view_options); }) {
         module.SetupPopulationView(population_view_options);
@@ -149,19 +187,57 @@ private:
   }
 
   void RefreshReadouts() {
-    update_text.Redraw();
-    org_count_text.Redraw();
+    for (auto & text : statistic_texts) text.Redraw();
+  }
+
+  [[nodiscard]] emp::String GetStatisticValue(size_t statistic_id) const {
+    if (has_final_snapshot) {
+      emp_assert(statistic_id < final_statistic_values.size());
+      return final_statistic_values[statistic_id];
+    }
+    return population_view_options.GetStatistics()[statistic_id].get_value();
+  }
+
+  void CaptureFinalView() {
+    const auto & statistics = population_view_options.GetStatistics();
+    final_statistic_values.clear();
+    final_statistic_values.reserve(statistics.size());
+    for (const auto & statistic : statistics) {
+      final_statistic_values.push_back(statistic.get_value());
+    }
+
+    // Preserve the final colored population before Avida clears the biota and trait registry.
+    DrawPopulation();
+    has_final_snapshot = true;
   }
 
   void UpdateControls() {
     const bool complete = avida.IsComplete();
     step_button.SetDisabled(complete || run_mode != RunMode::PAUSED);
     play_button.SetDisabled(complete);
+    pause_button.SetDisabled(complete || run_mode == RunMode::PAUSED);
     fast_forward_button.SetDisabled(complete);
 
-    play_button.SetLabel(run_mode == RunMode::PLAY ? "&#x275A;&#x275A;" : "&#x25B6;");
-    play_button.SetTitle(run_mode == RunMode::PLAY ? "Pause" : "Play");
+    play_button.SetAttr(
+      "class",
+      run_mode == RunMode::PLAY
+        ? "transport-button icon-button is-active"
+        : "transport-button icon-button"
+    );
+    pause_button.SetAttr(
+      "class",
+      run_mode == RunMode::PAUSED
+        ? "transport-button icon-button is-active"
+        : "transport-button icon-button"
+    );
+    fast_forward_button.SetAttr(
+      "class",
+      run_mode == RunMode::FAST_FORWARD
+        ? "transport-button icon-button is-active"
+        : "transport-button icon-button"
+    );
     play_button.SetAttr("aria-pressed", run_mode == RunMode::PLAY ? "true" : "false");
+    pause_button.SetAttr("aria-pressed", run_mode == RunMode::PAUSED ? "true" : "false");
     fast_forward_button.SetAttr(
       "aria-pressed",
       run_mode == RunMode::FAST_FORWARD ? "true" : "false"
@@ -221,6 +297,15 @@ private:
   }
 
   void DrawPopulation() {
+    if (has_final_snapshot) {
+      RenderPopulationPixels(
+        population_pixels.data(),
+        static_cast<int>(Grid().GetWidth()),
+        static_cast<int>(Grid().GetHeight())
+      );
+      return;
+    }
+
     const std::span<const size_t> cells = Grid().GetCells();
     population_pixels.resize(cells.size(), EMPTY_COLOR);
     continuous_values.resize(cells.size(), std::numeric_limits<double>::quiet_NaN());
@@ -350,19 +435,39 @@ private:
 
     UI::Div brand{"brand"};
     brand.AddAttr("class", "brand");
-    UI::Image logo{"assets/icons/LOGO.png", "avida_logo"};
+    UI::Image logo{"assets/icons/LOGO-noBG.png", "avida_logo"};
     logo.Alt("Avida").AddAttr("class", "brand-logo");
     brand << logo;
 
-    UI::Div tabs{"primary_tabs"};
-    tabs.AddAttr("class", "primary-tabs");
-    UI::Button population_tab{[](){}, "Population", "population_tab"};
-    population_tab.AddAttr("class", "primary-tab is-active");
-    population_tab.SetAttr("aria-current", "page");
-    tabs << population_tab;
+    UI::Div modes{"mode_buttons"};
+    modes.AddAttr("class", "mode-buttons");
+    UI::Button population_mode{
+      [](){}, "<img src='assets/icons/PopGrid.png' alt=''>", "population_mode"
+    };
+    UI::Button organism_mode{
+      [](){}, "<img src='assets/icons/ModeOrganism.png' alt=''>", "organism_mode"
+    };
+    UI::Button analyze_mode{
+      [](){}, "<img src='assets/icons/ModeAnalyze.png' alt=''>", "analyze_mode"
+    };
+    population_mode.AddAttr("class", "mode-button is-active");
+    organism_mode.AddAttr("class", "mode-button");
+    analyze_mode.AddAttr("class", "mode-button");
+    population_mode.SetAttr("aria-label", "Population Mode");
+    organism_mode.SetAttr("aria-label", "Organism Mode");
+    analyze_mode.SetAttr("aria-label", "Analyze Mode");
+    population_mode.SetAttr("aria-pressed", "true");
+    organism_mode.SetAttr("aria-pressed", "false");
+    analyze_mode.SetAttr("aria-pressed", "false");
+    population_mode.SetTitle("Population Mode");
+    organism_mode.SetTitle("Organism Mode");
+    analyze_mode.SetTitle("Analyze Mode");
+    modes << population_mode;
+    modes << organism_mode;
+    modes << analyze_mode;
 
     header << brand;
-    header << tabs;
+    header << modes;
     app << header;
 
     UI::Div workspace{"workspace"};
@@ -380,7 +485,17 @@ private:
     population_canvas.AddAttr("class", "population-canvas");
     population_canvas.SetAttr("role", "img");
     population_canvas.SetAttr("aria-label", "Grid population of digital organisms");
-    canvas_frame << population_canvas;
+    UI::Div population_surface{"population_grid_surface"};
+    population_surface.AddAttr("class", "population-grid-surface");
+    population_surface.AddAttr(
+      "style",
+      emp::MakeString(
+        "--grid-cell-width: ", 100.0 / Grid().GetWidth(),
+        "%; --grid-cell-height: ", 100.0 / Grid().GetHeight(), "%;"
+      )
+    );
+    population_surface << population_canvas;
+    canvas_frame << population_surface;
 
     UI::Div transport{"transport"};
     transport.AddAttr("class", "transport");
@@ -397,31 +512,38 @@ private:
       "<span class='step-icon' aria-hidden='true'></span>",
       "step_button"
     );
-    play_button = UI::Button([this](){
-      SetRunMode(run_mode == RunMode::PLAY ? RunMode::PAUSED : RunMode::PLAY);
-    }, "&#x25B6;", "play_button");
-    fast_forward_button = UI::Button([this](){
-      SetRunMode(
-        run_mode == RunMode::FAST_FORWARD ? RunMode::PAUSED : RunMode::FAST_FORWARD
-      );
-    }, "&#x25B6;&#x25B6;", "fast_forward_button");
+    play_button = UI::Button(
+      [this](){ SetRunMode(RunMode::PLAY); }, "&#x25B6;", "play_button"
+    );
+    pause_button = UI::Button(
+      [this](){ SetRunMode(RunMode::PAUSED); }, "&#x275A;&#x275A;", "pause_button"
+    );
+    fast_forward_button = UI::Button(
+      [this](){ SetRunMode(RunMode::FAST_FORWARD); },
+      "&#x25B6;&#x25B6;",
+      "fast_forward_button"
+    );
 
     restart_button.AddAttr("class", "transport-button icon-button restart-button");
     step_button.AddAttr("class", "transport-button icon-button");
-    play_button.AddAttr("class", "transport-button icon-button is-primary");
+    play_button.AddAttr("class", "transport-button icon-button");
+    pause_button.AddAttr("class", "transport-button icon-button is-active");
     fast_forward_button.AddAttr("class", "transport-button icon-button");
     restart_button.SetAttr("aria-label", "Restart population");
     step_button.SetAttr("aria-label", "Advance one population update");
-    play_button.SetAttr("aria-label", "Play or pause at up to ten updates per second");
-    fast_forward_button.SetAttr("aria-label", "Run as fast as possible or pause");
+    play_button.SetAttr("aria-label", "Play at up to ten updates per second");
+    pause_button.SetAttr("aria-label", "Pause evolution");
+    fast_forward_button.SetAttr("aria-label", "Run as fast as possible");
     restart_button.SetTitle("Restart");
     step_button.SetTitle("Step");
     play_button.SetTitle("Play");
+    pause_button.SetTitle("Pause");
     fast_forward_button.SetTitle("Fast-forward");
     color_selector.AddAttr("class", "color-selector");
     transport_buttons << restart_button;
     transport_buttons << step_button;
     transport_buttons << play_button;
+    transport_buttons << pause_button;
     transport_buttons << fast_forward_button;
     transport_buttons << color_selector;
     transport << transport_buttons;
@@ -433,19 +555,23 @@ private:
     inspector << "<h2>Run</h2>";
     UI::Div readouts{"readouts"};
     readouts.AddAttr("class", "readouts");
-    UI::Div update_readout{"update_readout"};
-    update_readout.AddAttr("class", "readout");
-    update_readout << "<span>Update</span>";
-    update_readout << update_text;
-    update_text << UI::Live([this](){ return avida.GetUpdate(); });
+    const auto & statistics = population_view_options.GetStatistics();
+    statistic_texts.reserve(statistics.size());
+    for (size_t statistic_id = 0; statistic_id < statistics.size(); ++statistic_id) {
+      const auto & statistic = statistics[statistic_id];
+      UI::Div readout{emp::MakeString("statistic_", statistic_id)};
+      readout.AddAttr("class", "readout");
+      readout.SetTitle(statistic.description);
+      readout << emp::MakeString("<span>", emp::MakeWebSafe(statistic.label), "</span>");
 
-    UI::Div organism_readout{"organism_readout"};
-    organism_readout.AddAttr("class", "readout");
-    organism_readout << "<span>Organisms</span>";
-    organism_readout << org_count_text;
-    org_count_text << UI::Live([this](){ return avida.GetNumOrgs(); });
-    readouts << update_readout;
-    readouts << organism_readout;
+      UI::Text value_text{emp::MakeString("statistic_value_", statistic_id)};
+      value_text << UI::Live([this, statistic_id](){
+        return GetStatisticValue(statistic_id);
+      });
+      readout << value_text;
+      statistic_texts.push_back(value_text);
+      readouts << readout;
+    }
     inspector << readouts;
 
     workspace << population_card;
@@ -459,13 +585,20 @@ public:
     : animation([this](const UI::Animate & frame){ OnAnimationFrame(frame); }) {
     avida.GetSettings().Set("base.config_dir", std::string{"/config"});
     avida.GetSettings().Set("base.data_dir", std::string{"/data"});
-    CollectPopulationViewOptions();
+  }
+
+  ~AvidaWebApp() {
+    avida.GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback({});
   }
 
   void Initialize() {
     avida.InitializePaused();
+    CollectPopulationViewOptions();
     SetupColorSelector();
     BuildInterface();
+    avida.GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback(
+      [this](){ CaptureFinalView(); }
+    );
     UpdateControls();
     DrawPopulation();
     RefreshReadouts();
