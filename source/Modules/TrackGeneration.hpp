@@ -12,6 +12,7 @@
 #include <iostream>
 
 #include "../core/Avida.hpp"
+#include "../core/PopulationViewOptions.hpp"
 
 AVIDA_DEFINE_MODULE(TrackGeneration, "Analysis", "Monitor lineage length.",
   void Serialize(emp::SerialPod & /* pod */) { } // Nothing extra to serialize
@@ -22,6 +23,15 @@ AVIDA_DEFINE_MODULE(TrackGeneration, "Analysis", "Monitor lineage length.",
 
   void RegisterTraits() {
     AVIDA_REGISTER_TRAIT(generation, "Number of offspring in chain since inject");
+  }
+
+  void SetupPopulationView(PopulationViewOptions<AVIDA_T> & options) {
+    options.AddStatistic(
+      "generation",
+      "Generation",
+      "Average lineage generation of the active population.",
+      [this](){ return emp::MakeFormatted("{:.2f}", avida.CalcTraitAve("generation")); }
+    );
   }
 
   // === Signal Listeners ===
