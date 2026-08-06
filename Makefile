@@ -55,7 +55,7 @@ FLAGS_COVERAGE := $(FLAGS_main)  -O0 -DEMP_TRACK_MEM -ftemplate-backtrace-limit=
 EMP_methods  := -s EXPORTED_RUNTIME_METHODS="['ccall', 'cwrap', 'UTF8ToString', 'stringToUTF8', 'lengthBytesUTF8']"
 EMP_funs     := -s EXPORTED_FUNCTIONS="['_main', '_malloc', '_free', '_empCppCallback']"
 EMP_js_lib   := --js-library $(EMP_DIR)/include/emp/web/library_emp.js
-EMP_limits   := -s NO_EXIT_RUNTIME=1  -s TOTAL_MEMORY=67108864
+EMP_limits   := -s NO_EXIT_RUNTIME=1 -s INITIAL_MEMORY=134217728 -s ALLOW_MEMORY_GROWTH=1
 EMP_warnings := -Wno-dollar-in-identifier-extension
 EMP_files    := --preload-file $(CONFIG_DIR)@/config
 FLAGS_emp    := $(FLAGS_main) $(EMP_methods) $(EMP_js_lib) $(EMP_funs) $(EMP_limits) $(EMP_warnings) $(EMP_files)
