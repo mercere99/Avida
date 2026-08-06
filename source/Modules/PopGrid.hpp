@@ -32,9 +32,13 @@ private:
   emp::vector<size_t> org_grid;
 
   // === Helper Functions ===
+  [[nodiscard]] size_t ToID(size_t x, size_t y) const {
+    return (x % width) + (y % height) * width;
+  }
+
   template <concepts::Organism ORG_T>
   void SetPos(ORG_T & org, size_t x, size_t y) {
-    org.GetPhenotype().pop_pos = (x % width) + (y % height) * width;
+    org.GetPhenotype().pop_pos = ToID(x,y);
   }
 
 public:
@@ -102,8 +106,12 @@ public:
   void BeforePlacement(ORG_T & org) {
     size_t & org_pos = org.GetPhenotype().pop_pos;
 
-    // If placed organism does not have a position, it is being injected; pick a random position
-    if (org_pos == EMPTY_CELL) org_pos = avida.GetRandom().GetUInt(num_cells);
+    // If placed organism does not have a position, it is being injected; pick center or random position
+    if (org_pos == EMPTY_CELL) {
+      const size_t mid_id = ToID(width/2, height/2);
+      if (org_grid[mid_id] == EMPTY_CELL) org_pos = mid_id;
+      else org_pos = avida.GetRandom().GetUInt(num_cells);
+    }
 
     // See if we must delete an organism to make room for the new one.
     if (org_grid[org_pos] != EMPTY_CELL) {
