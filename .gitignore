@@ -7,6 +7,8 @@
 *.wasm
 *.wasm.map
 *.worker.js
+web/Avida.data
+web/Avida.js
 
 # Backup files
 bak/
