@@ -592,6 +592,11 @@ public:
   }
 
   void Initialize() {
+    avida.GetSettings().Load("/config/Avida-web.cfg");
+    std::println(
+      "Loaded /config/Avida-web.cfg (substitution probability = {}).",
+      avida.GetSettings().Get<double>("mutations.substitution_prob")
+    );
     avida.InitializePaused();
     CollectPopulationViewOptions();
     SetupColorSelector();
