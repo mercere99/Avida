@@ -18,6 +18,7 @@
 #include <iostream>
 
 #include "../core/Avida.hpp"
+#include "../core/PopulationViewOptions.hpp"
 
 template <typename AVIDA_T>
 class TrackMetabolism : public ModuleBase<AVIDA_T> {
@@ -52,6 +53,15 @@ public:
   [[nodiscard]] static double CalcFitness(const ORG_T & org) {
     const double metabolic_rate = org.GetPhenotype().MetabolicRate(org.GetGenome().size());
     return metabolic_rate / org.GetPhenotype().gestation_cost;
+  }
+
+  void SetupPopulationView(PopulationViewOptions<AVIDA_T> & options) const {
+    options.AddContinuousColorMode(
+      "fitness",
+      "Fitness",
+      "Color organisms by current metabolic rate divided by gestation cost.",
+      [](const typename AVIDA_T::organism_t & org) { return CalcFitness(org); }
+    );
   }
 
   void RegisterTraits() {
