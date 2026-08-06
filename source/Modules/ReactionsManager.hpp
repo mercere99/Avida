@@ -27,6 +27,7 @@
 #include "emp/tools/String.hpp"
 
 #include "../core/Avida.hpp"
+#include "../core/PopulationViewOptions.hpp"
 
 template <typename AVIDA_T>
 class ReactionsManager : public ModuleBase<AVIDA_T> {
@@ -145,6 +146,20 @@ public:
       react.trait_ptr = &avida.template GetTypedTrait<double>(react.trait_name);
 
       task_reactions[react.task_id].push_back(react_id);
+    }
+  }
+
+  void SetupPopulationView(PopulationViewOptions<AVIDA_T> & options) {
+    for (size_t reaction_id = 0; reaction_id < reactions.size(); ++reaction_id) {
+      const Reaction & reaction = reactions[reaction_id];
+      options.AddStatistic(
+        emp::MakeString("reaction_", reaction_id),
+        reaction.task_name,
+        emp::MakeString("Organisms whose parent performed ", reaction.task_name, "."),
+        [this, task_id=reaction.task_id](){
+          return emp::MakeString(CountParentPerformers(task_id));
+        }
+      );
     }
   }
 
