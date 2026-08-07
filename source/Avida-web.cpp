@@ -433,6 +433,9 @@ private:
     UI::Div header{"app_header"};
     header.AddAttr("class", "app-header");
 
+    UI::Div primary_header{"primary_header"};
+    primary_header.AddAttr("class", "primary-header");
+
     UI::Div brand{"brand"};
     brand.AddAttr("class", "brand");
     UI::Image logo{"assets/icons/LOGO-noBG.png", "avida_logo"};
@@ -472,8 +475,53 @@ private:
     modes << organism_mode;
     modes << analyze_mode;
 
-    header << brand;
-    header << modes;
+    UI::Div side_modes{"side_mode_buttons"};
+    side_modes.AddAttr("class", "mode-buttons side-mode-buttons");
+    UI::Button pop_stats_mode{
+      [](){},
+      "<img src='assets/icons/StatsPop.png' alt=''><span>POP STATS</span>",
+      "pop_stats_mode"
+    };
+    UI::Button org_stats_mode{
+      [](){},
+      "<img src='assets/icons/StatsOrg.png' alt=''><span>ORG STATS</span>",
+      "org_stats_mode"
+    };
+    UI::Button freezer_mode{
+      [](){},
+      "<img src='assets/icons/Freezer.png' alt=''><span>FREEZER</span>",
+      "freezer_mode"
+    };
+    UI::Button configure_mode{
+      [](){},
+      "<img src='assets/icons/Config.png' alt=''><span>CONFIGURE</span>",
+      "configure_mode"
+    };
+    pop_stats_mode.AddAttr("class", "mode-button side-mode-button is-active");
+    org_stats_mode.AddAttr("class", "mode-button side-mode-button");
+    freezer_mode.AddAttr("class", "mode-button side-mode-button");
+    configure_mode.AddAttr("class", "mode-button side-mode-button");
+    pop_stats_mode.SetAttr("aria-label", "Population Statistics");
+    org_stats_mode.SetAttr("aria-label", "Organism Statistics");
+    freezer_mode.SetAttr("aria-label", "Freezer");
+    configure_mode.SetAttr("aria-label", "Configure");
+    pop_stats_mode.SetAttr("aria-pressed", "true");
+    org_stats_mode.SetAttr("aria-pressed", "false");
+    freezer_mode.SetAttr("aria-pressed", "false");
+    configure_mode.SetAttr("aria-pressed", "false");
+    pop_stats_mode.SetTitle("Pop Stats");
+    org_stats_mode.SetTitle("Org Stats");
+    freezer_mode.SetTitle("Freezer");
+    configure_mode.SetTitle("Configure");
+    side_modes << pop_stats_mode;
+    side_modes << org_stats_mode;
+    side_modes << freezer_mode;
+    side_modes << configure_mode;
+
+    primary_header << brand;
+    primary_header << modes;
+    header << primary_header;
+    header << side_modes;
     app << header;
 
     UI::Div workspace{"workspace"};
