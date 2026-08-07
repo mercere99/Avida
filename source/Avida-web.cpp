@@ -442,13 +442,19 @@ private:
     UI::Div modes{"mode_buttons"};
     modes.AddAttr("class", "mode-buttons");
     UI::Button population_mode{
-      [](){}, "<img src='assets/icons/PopGrid.png' alt=''>", "population_mode"
+      [](){},
+      "<img src='assets/icons/PopGrid.png' alt=''><span>POPULATION</span>",
+      "population_mode"
     };
     UI::Button organism_mode{
-      [](){}, "<img src='assets/icons/ModeOrganism.png' alt=''>", "organism_mode"
+      [](){},
+      "<img src='assets/icons/ModeOrganism.png' alt=''><span>ORGANISMS</span>",
+      "organism_mode"
     };
     UI::Button analyze_mode{
-      [](){}, "<img src='assets/icons/ModeAnalyze.png' alt=''>", "analyze_mode"
+      [](){},
+      "<img src='assets/icons/ModeAnalyze.png' alt=''><span>ANALYZE</span>",
+      "analyze_mode"
     };
     population_mode.AddAttr("class", "mode-button is-active");
     organism_mode.AddAttr("class", "mode-button");
