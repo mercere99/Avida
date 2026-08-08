@@ -73,6 +73,14 @@ private:
   }
 
 public:
+  struct Config {
+    emp::String task_name;
+    emp::String trait_name;
+    emp::String operation;
+    double value = 0.0;
+    size_t max_triggers = 0;
+  };
+
   ReactionsManager(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>(avida, "ReactionsManager", "Reactions",
         "Reward tasks by modifying organism traits (classic-Avida merit model).") {}
@@ -121,12 +129,46 @@ public:
     reactions.push_back(std::move(react));
   }
 
+  [[nodiscard]] emp::vector<Config> GetConfigs() const {
+    emp::vector<Config> configs;
+    configs.reserve(reactions.size());
+    for (const Reaction & reaction : reactions) {
+      configs.push_back({
+        .task_name = reaction.task_name,
+        .trait_name = reaction.trait_name,
+        .operation = reaction.op == Op::ADD ? "add" : "mult",
+        .value = reaction.value,
+        .max_triggers = reaction.max_triggers
+      });
+    }
+    return configs;
+  }
+
+  void SetConfigs(const emp::vector<Config> & configs) {
+    emp_always_assert(!avida.IsInitialized(),
+      "Reactions can only be configured before a run starts.");
+    reactions.clear();
+    task_reactions.clear();
+    reactions.reserve(configs.size());
+    for (const Config & config : configs) {
+      reactions.push_back({
+        .task_name = config.task_name,
+        .trait_name = config.trait_name,
+        .op = ToOp(config.operation),
+        .value = config.value,
+        .max_triggers = config.max_triggers,
+        .task_id = 0,
+        .trait_ptr = nullptr
+      });
+    }
+  }
+
   // === Signal Listeners ===
 
   // Validate the configuration and resolve task IDs + trait accessors, now that every
   // module has registered its tasks and traits.
   void ValidateConfig() {
-    task_reactions.resize(avida.GetNumTasks());
+    task_reactions.assign(avida.GetNumTasks(), emp::vector<size_t>{});
 
     // Process each reaction...
     for (size_t react_id = 0; react_id < reactions.size(); ++react_id) {
