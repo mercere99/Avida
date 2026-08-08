@@ -34,11 +34,13 @@ body {
 }
 
 button,
+input,
 select {
   font: inherit;
 }
 
 button:focus-visible,
+input:focus-visible,
 select:focus-visible {
   outline: 3px solid rgba(89, 211, 224, 0.55);
   outline-offset: 2px;
@@ -153,11 +155,6 @@ select:focus-visible {
 .side-mode-button {
   width: 78px;
   padding-inline: 2px;
-}
-
-.side-mode-button span {
-  font-size: 0.46rem;
-  letter-spacing: 0;
 }
 
 .workspace {
@@ -349,7 +346,12 @@ select:focus-visible {
   color: #eef7fb;
 }
 
-.run-inspector {
+.side-panel {
+  min-width: 0;
+}
+
+.run-inspector,
+.configuration-inspector {
   min-height: 0;
   padding: 12px;
   border: 1px solid rgba(132, 180, 200, 0.16);
@@ -357,12 +359,156 @@ select:focus-visible {
   background: rgba(13, 35, 50, 0.76);
 }
 
-.run-inspector h2 {
-  margin: 0 0 10px;
+.run-inspector h2,
+.configuration-inspector h2 {
+  margin: 0;
   color: #8faab7;
   font-size: 0.68rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.run-inspector h2 {
+  margin-bottom: 10px;
+}
+
+.configuration-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.configuration-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.configuration-action-button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(130, 182, 202, 0.25);
+  border-radius: 7px;
+  background: #15384c;
+  color: #dcebf1;
+  cursor: pointer;
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.configuration-action-button:hover {
+  border-color: rgba(99, 213, 224, 0.48);
+  background: #1a455d;
+}
+
+.configuration-action-button[aria-pressed="true"] {
+  border-color: transparent;
+  background: linear-gradient(135deg, #b14ac0, #7848ae);
+  color: white;
+}
+
+.configuration-inspector {
+  max-height: min(calc(100dvh - 98px), 816px);
+  overflow-y: auto;
+  scrollbar-color: rgba(112, 200, 214, 0.42) transparent;
+}
+
+.configuration-intro {
+  margin: 4px 0 12px;
+  color: #819eab;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.configuration-scope {
+  margin-top: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(132, 180, 200, 0.14);
+  border-radius: 10px;
+  background: rgba(6, 20, 30, 0.42);
+}
+
+.configuration-scope:first-of-type {
+  margin-top: 0;
+}
+
+.configuration-scope h3 {
+  margin: 0;
+  color: #63d5e0;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.configuration-setting {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(92px, 0.8fr) minmax(118px, 1.2fr);
+  gap: 3px 10px;
+  align-items: center;
+}
+
+.configuration-setting.is-locked {
+  opacity: 0.5;
+}
+
+.configuration-setting.is-locked input,
+.configuration-setting.is-locked select {
+  cursor: not-allowed;
+}
+
+.configuration-label {
+  min-width: 0;
+  color: #dcebf1;
+  font-size: 0.72rem;
+  font-weight: 680;
+  line-height: 1.25;
+}
+
+.configuration-description {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  margin: 0;
+  color: #7894a1;
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.configuration-controls {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.configuration-input,
+.configuration-number,
+.configuration-select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid rgba(130, 182, 202, 0.25);
+  border-radius: 8px;
+  background: #102d40;
+  color: #eef7fb;
+}
+
+.configuration-slider {
+  min-width: 70px;
+  flex: 1 1 auto;
+  accent-color: #63d5e0;
+}
+
+.configuration-number {
+  width: 96px;
+  flex: 0 0 96px;
+  font-variant-numeric: tabular-nums;
 }
 
 .readouts {
@@ -416,6 +562,10 @@ select:focus-visible {
 
   .run-inspector {
     min-height: 0;
+  }
+
+  .configuration-inspector {
+    max-height: none;
   }
 
 }
@@ -473,6 +623,10 @@ select:focus-visible {
 
   .color-selector {
     min-width: 132px;
+  }
+
+  .configuration-setting {
+    grid-template-columns: minmax(104px, 0.7fr) minmax(130px, 1.3fr);
   }
 }
 
