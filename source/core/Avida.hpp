@@ -14,6 +14,7 @@
 #include <iostream>    // std::cout, std::ostream
 #include <sstream>     // std::istringstream
 #include <type_traits> // std::is_arithmetic_v, std::invoke_result_t
+#include <utility>     // std::exchange
 
 #include "emp/base/Ptr.hpp"
 #include "emp/base/vector.hpp"
@@ -107,6 +108,7 @@ private:
   // COMPLETE = end-of-run teardown has happened (organisms cleared); nothing left to run.
   enum class RunState { INITIALIZING, PAUSED, RUNNING, EXITING, COMPLETE, ERROR };
   RunState run_state = RunState::INITIALIZING;
+  bool pause_requested = false;
 
   query_manager_t query_man;
   PlugInManager<this_t, PLUG_IN_Ts<this_t>...> plug_ins;
@@ -146,7 +148,10 @@ public:
     AddKeyword("exit", [this](emp::vector<emp::String> /* no args*/){ Exit(); },
                "Trigger the run to exit.");
     AddKeyword("pause",
-               [this](emp::vector<emp::String> /* no args*/){ run_state = RunState::PAUSED; },
+               [this](emp::vector<emp::String> /* no args*/){
+                 pause_requested = true;
+                 run_state = RunState::PAUSED;
+               },
                "Pause the run until the interface unpauses it.");
 
     AddKeyword("help",
@@ -196,6 +201,7 @@ public:
   [[nodiscard]] bool IsComplete() const {
     return run_state == RunState::COMPLETE || run_state == RunState::ERROR;
   }
+  [[nodiscard]] bool ConsumePauseRequest() { return std::exchange(pause_requested, false); }
   [[nodiscard]] emp::Random & GetRandom() { return random; }
   [[nodiscard]] emp::Random & GetAnalyzeRandom() { return analyze_random; }
   [[nodiscard]] const fs::path & GetDataDir() { return data_dir; }  
@@ -301,6 +307,11 @@ public:
   }
 
   [[nodiscard]] bool HasTrait(const emp::String & name) const { return trait_man.Has(name); }
+
+  template <typename TRAIT_T>
+  [[nodiscard]] emp::vector<emp::String> GetTraitNames() const {
+    return trait_man.template GetNames<TRAIT_T>();
+  }
 
   // Typed trait lookup: returns a Trait<TRAIT_T> reference with direct organism-level accessors,
   // bypassing virtual dispatch. Use this in performance-sensitive loops.
@@ -844,7 +855,8 @@ public:
         random,
         analyze_random,
         biota,
-        run_state
+        run_state,
+        pause_requested
        );
 
     // Use trait manager to save/load phenotypes.
