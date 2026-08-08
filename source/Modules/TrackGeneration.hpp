@@ -30,7 +30,11 @@ AVIDA_DEFINE_MODULE(TrackGeneration, "Analysis", "Monitor lineage length.",
       "generation",
       "Generation",
       "Average lineage generation of the active population.",
-      [this](){ return emp::MakeFormatted("{:.2f}", avida.CalcTraitAve("generation")); }
+      [this](){
+        return avida.GetNumOrgs()
+          ? emp::MakeFormatted("{:.2f}", avida.CalcTraitAve("generation"))
+          : emp::String{"0.00"};
+      }
     );
   }
 
