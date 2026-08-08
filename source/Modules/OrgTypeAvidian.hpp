@@ -146,6 +146,10 @@ public:
       "AvidaGP.trace_cycles", trace_cycles,
       "Number of CPU cycles printed by the trace command."
     );
+    avida.GetSettings().Metadata("AvidaGP.offspring_size_range").AddTag("advanced");
+    avida.GetSettings().Metadata("AvidaGP.trace_cycles")
+      .AddTag("advanced")
+      .AddTag("local only");
     avida.AddOutputKeyword(
       "trace",
       [this](const emp::vector<emp::String> & args, std::ostream & os){ TraceQuery(args, os); },
