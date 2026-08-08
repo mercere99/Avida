@@ -6,11 +6,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <limits>
+#include <map>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -23,6 +27,7 @@
 #include "emp/web/Div.hpp"
 #include "emp/web/Document.hpp"
 #include "emp/web/Image.hpp"
+#include "emp/web/Input.hpp"
 #include "emp/web/Selector.hpp"
 #include "emp/web/Text.hpp"
 #include "emp/web/emfunctions.hpp"
@@ -112,8 +117,24 @@ EM_JS(bool, ConfirmPopulationRestart, (), {
   return window.confirm('Restart this population? All evolution so far will be lost.');
 });
 
-EM_JS(void, ReloadAvidaApplication, (), {
-  window.location.reload();
+EM_JS(void, SetConfigurationControlValue,
+      (const char * control_id, const char * value), {
+  const control = document.getElementById(UTF8ToString(control_id));
+  if (control) control.value = UTF8ToString(value);
+});
+
+EM_JS(void, ResizePopulationDisplay, (int width, int height), {
+  const canvas = document.getElementById('population_canvas');
+  if (canvas) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  const surface = document.getElementById('population_grid_surface');
+  if (surface) {
+    surface.style.setProperty('--grid-cell-width', `${100 / width}%`);
+    surface.style.setProperty('--grid-cell-height', `${100 / height}%`);
+  }
 });
 
 class AvidaWebApp {
@@ -145,8 +166,9 @@ private:
     PackRGBA(192, 139, 225)
   };
 
-  avida_t avida;
+  std::unique_ptr<avida_t> avida;
   PopulationViewOptions<avida_t> population_view_options;
+  std::map<emp::String, emp::String> default_setting_values;
 
   UI::Document document{"emp_base"};
   UI::Animate animation;
@@ -155,7 +177,15 @@ private:
   UI::Button play_button;
   UI::Button pause_button;
   UI::Button fast_forward_button;
+  UI::Button pop_stats_mode;
+  UI::Button configure_mode;
+  UI::Button advanced_toggle;
+  UI::Button reset_configuration_button;
   UI::Selector color_selector{"population_color_mode"};
+  UI::Div run_inspector;
+  UI::Div configuration_inspector;
+  emp::vector<UI::Input> configuration_inputs;
+  emp::vector<UI::Selector> configuration_selectors;
   emp::vector<UI::Text> statistic_texts;
 
   RunMode run_mode = RunMode::PAUSED;
@@ -167,19 +197,36 @@ private:
   emp::vector<double> continuous_values;
   emp::vector<emp::String> final_statistic_values;
   bool has_final_snapshot = false;
+  bool configuration_visible = false;
+  bool advanced_settings_visible = false;
+  bool run_started = false;
+  bool interface_rebuild_requested = false;
 
-  [[nodiscard]] auto & Grid() { return avida.GetPlugIn<PopGrid>(); }
+  [[nodiscard]] avida_t & Avida() { return *avida; }
+  [[nodiscard]] const avida_t & Avida() const { return *avida; }
+  [[nodiscard]] auto & Grid() { return Avida().GetPlugIn<PopGrid>(); }
+
+  void RequestInterfaceRebuild() {
+    if (interface_rebuild_requested) return;
+    interface_rebuild_requested = true;
+    emp::DelayCall([this](){
+      if (!interface_rebuild_requested) return;
+      interface_rebuild_requested = false;
+      RebuildInterface();
+    }, 0);
+  }
 
   void CollectPopulationViewOptions() {
+    population_view_options = PopulationViewOptions<avida_t>{};
     population_view_options.AddStatistic(
       "update", "Update", "Current population update.",
-      [this](){ return emp::MakeString(avida.GetUpdate()); }
+      [this](){ return emp::MakeString(Avida().GetUpdate()); }
     );
     population_view_options.AddStatistic(
       "organisms", "Organisms", "Number of living organisms.",
-      [this](){ return emp::MakeString(avida.GetNumOrgs()); }
+      [this](){ return emp::MakeString(Avida().GetNumOrgs()); }
     );
-    avida.TriggerSignal([this](auto & module) {
+    Avida().TriggerSignal([this](auto & module) {
       if constexpr (requires { module.SetupPopulationView(population_view_options); }) {
         module.SetupPopulationView(population_view_options);
       }
@@ -212,7 +259,8 @@ private:
   }
 
   void UpdateControls() {
-    const bool complete = avida.IsComplete();
+    const bool complete = Avida().IsComplete();
+    restart_button.SetDisabled(!run_started);
     step_button.SetDisabled(complete || run_mode != RunMode::PAUSED);
     play_button.SetDisabled(complete);
     pause_button.SetDisabled(complete || run_mode == RunMode::PAUSED);
@@ -245,7 +293,8 @@ private:
   }
 
   void SetRunMode(RunMode new_mode) {
-    if (avida.IsComplete()) new_mode = RunMode::PAUSED;
+    if (new_mode != RunMode::PAUSED && !run_started) StartRun();
+    if (Avida().IsComplete()) new_mode = RunMode::PAUSED;
     run_mode = new_mode;
     play_elapsed_ms = 0.0;
 
@@ -297,16 +346,30 @@ private:
   }
 
   void DrawPopulation() {
+    const size_t width = Grid().GetWidth();
+    const size_t height = Grid().GetHeight();
+    ResizePopulationDisplay(static_cast<int>(width), static_cast<int>(height));
+
     if (has_final_snapshot) {
       RenderPopulationPixels(
         population_pixels.data(),
-        static_cast<int>(Grid().GetWidth()),
-        static_cast<int>(Grid().GetHeight())
+        static_cast<int>(width),
+        static_cast<int>(height)
       );
       return;
     }
 
     const std::span<const size_t> cells = Grid().GetCells();
+    if (!run_started || cells.size() != width * height) {
+      population_pixels.assign(width * height, EMPTY_COLOR);
+      continuous_values.clear();
+      RenderPopulationPixels(
+        population_pixels.data(), static_cast<int>(width), static_cast<int>(height)
+      );
+      last_grid_redraw_update = 0;
+      return;
+    }
+
     population_pixels.resize(cells.size(), EMPTY_COLOR);
     continuous_values.resize(cells.size(), std::numeric_limits<double>::quiet_NaN());
 
@@ -317,9 +380,9 @@ private:
         && active_color_mode < continuous_modes.size()) {
       for (size_t cell_id = 0; cell_id < cells.size(); ++cell_id) {
         const size_t org_id = cells[cell_id];
-        if (org_id == PopGrid<avida_t>::EMPTY_CELL || !avida.IsOccupied(org_id)) continue;
+        if (org_id == PopGrid<avida_t>::EMPTY_CELL || !Avida().IsOccupied(org_id)) continue;
 
-        const double value = continuous_modes[active_color_mode].get_value(avida.GetOrg(org_id));
+        const double value = continuous_modes[active_color_mode].get_value(Avida().GetOrg(org_id));
         continuous_values[cell_id] = value;
         if (std::isfinite(value)) {
           minimum = std::min(minimum, value);
@@ -330,9 +393,9 @@ private:
 
     for (size_t cell_id = 0; cell_id < cells.size(); ++cell_id) {
       const size_t org_id = cells[cell_id];
-      if (org_id != PopGrid<avida_t>::EMPTY_CELL && avida.IsOccupied(org_id)) {
+      if (org_id != PopGrid<avida_t>::EMPTY_CELL && Avida().IsOccupied(org_id)) {
         if (active_color_scale == ColorScale::CATEGORICAL) {
-          population_pixels[cell_id] = GetCategoricalColor(avida.GetOrg(org_id));
+          population_pixels[cell_id] = GetCategoricalColor(Avida().GetOrg(org_id));
         } else if (active_color_scale == ColorScale::CONTINUOUS) {
           population_pixels[cell_id] = GetContinuousColor(
             continuous_values[cell_id], minimum, maximum
@@ -345,10 +408,10 @@ private:
 
     RenderPopulationPixels(
       population_pixels.data(),
-      static_cast<int>(Grid().GetWidth()),
-      static_cast<int>(Grid().GetHeight())
+      static_cast<int>(width),
+      static_cast<int>(height)
     );
-    last_grid_redraw_update = avida.GetUpdate();
+    last_grid_redraw_update = Avida().GetUpdate();
   }
 
   void FinishUpdate(bool can_continue, bool redraw_population) {
@@ -359,14 +422,339 @@ private:
 
   void StepPopulation() {
     emp_assert(run_mode == RunMode::PAUSED);
-    FinishUpdate(avida.AdvanceUpdate(), true);
+    if (!run_started) StartRun();
+    FinishUpdate(Avida().AdvanceUpdate(), true);
     UpdateControls();
+  }
+
+  [[nodiscard]] std::map<emp::String, emp::String> SnapshotSettingValues() const {
+    std::map<emp::String, emp::String> values;
+    const auto & settings = Avida().GetSettings();
+    for (const emp::String & name : settings.GetSettingNames()) {
+      values.emplace(name, settings.Get<emp::String>(name));
+    }
+    return values;
+  }
+
+  void CreateConfiguredAvida(const std::map<emp::String, emp::String> & values = {}) {
+    if (avida) {
+      Avida().GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback({});
+      avida.reset();
+    }
+
+    avida = std::make_unique<avida_t>();
+    auto & settings = Avida().GetSettings();
+    settings.Set("base.config_dir", std::string{"/config"});
+    settings.Set("base.data_dir", std::string{"/data"});
+    settings.Load("/config/Avida-web.cfg");
+    for (const auto & [name, value] : values) {
+      if (settings.HasSetting(name)) settings.Set(name, value);
+    }
+
+    run_mode = RunMode::PAUSED;
+    run_started = false;
+    has_final_snapshot = false;
+    last_grid_redraw_update = 0;
+    play_elapsed_ms = 0.0;
+    population_pixels.clear();
+    continuous_values.clear();
+    final_statistic_values.clear();
+    CollectPopulationViewOptions();
+  }
+
+  void StartRun() {
+    emp_assert(!run_started);
+    Avida().GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback(
+      [this](){ CaptureFinalView(); }
+    );
+    Avida().InitializePaused();
+    run_started = true;
+    CollectPopulationViewOptions();
+    RequestInterfaceRebuild();
   }
 
   void RestartPopulation() {
     if (!ConfirmPopulationRestart()) return;
+    const auto current_values = SnapshotSettingValues();
     SetRunMode(RunMode::PAUSED);
-    ReloadAvidaApplication();
+    CreateConfiguredAvida(current_values);
+    RequestInterfaceRebuild();
+  }
+
+  [[nodiscard]] static emp::String HumanizeSettingName(emp::String name) {
+    for (char & character : name) if (character == '_') character = ' ';
+    if (name.size()) name[0] = static_cast<char>(std::toupper(name[0]));
+    return name;
+  }
+
+  [[nodiscard]] static emp::String FormatFixedPoint(double value) {
+    if (!std::isfinite(value)) return emp::MakeString(value);
+    std::string formatted = std::format("{}", value);
+    const size_t exponent_pos = formatted.find_first_of("eE");
+    if (exponent_pos == std::string::npos) return formatted;
+
+    const int exponent = std::stoi(formatted.substr(exponent_pos + 1));
+    std::string mantissa = formatted.substr(0, exponent_pos);
+    std::string sign;
+    if (mantissa.size() && (mantissa[0] == '-' || mantissa[0] == '+')) {
+      if (mantissa[0] == '-') sign = "-";
+      mantissa.erase(0, 1);
+    }
+
+    const size_t point_pos = mantissa.find('.');
+    const int initial_point = point_pos == std::string::npos
+      ? static_cast<int>(mantissa.size())
+      : static_cast<int>(point_pos);
+    if (point_pos != std::string::npos) mantissa.erase(point_pos, 1);
+    const int final_point = initial_point + exponent;
+
+    if (final_point <= 0) {
+      return emp::String{sign + "0." + std::string(-final_point, '0') + mantissa};
+    }
+    if (final_point >= static_cast<int>(mantissa.size())) {
+      return emp::String{
+        sign + mantissa + std::string(final_point - static_cast<int>(mantissa.size()), '0')
+      };
+    }
+    mantissa.insert(static_cast<size_t>(final_point), ".");
+    return emp::String{sign + mantissa};
+  }
+
+  [[nodiscard]] emp::String GetDisplaySettingValue(const emp::String & setting_name) const {
+    const auto & settings = Avida().GetSettings();
+    if (settings.GetTypeName(setting_name) == "double") {
+      return FormatFixedPoint(settings.Get<double>(setting_name));
+    }
+    return settings.Get<emp::String>(setting_name);
+  }
+
+  [[nodiscard]] bool ShouldShowSetting(const emp::String & setting_name) const {
+    const auto & metadata = Avida().GetSettings().Metadata(setting_name);
+    if (metadata.HasTag("local only")) return false;
+    if (metadata.HasTag("advanced") && !advanced_settings_visible) return false;
+    return true;
+  }
+
+  void ToggleAdvancedSettings() {
+    advanced_settings_visible = !advanced_settings_visible;
+    RequestInterfaceRebuild();
+  }
+
+  void ResetConfiguration() {
+    auto & settings = Avida().GetSettings();
+    for (const auto & [name, value] : default_setting_values) {
+      if (!settings.HasSetting(name)) continue;
+      if (run_started && settings.Metadata(name).HasTag("startup only")) continue;
+      settings.Set(name, value);
+    }
+    RequestInterfaceRebuild();
+  }
+
+  void SetConfigurationValue(const emp::String & setting_name,
+                             const std::string & value,
+                             const emp::String & linked_control_id = "") {
+    if (value.empty()) return;
+    Avida().GetSettings().Set(setting_name, emp::String{value});
+
+    if (linked_control_id.size()) {
+      const emp::String current_value = GetDisplaySettingValue(setting_name);
+      SetConfigurationControlValue(linked_control_id.c_str(), current_value.c_str());
+    }
+
+    if (!run_started && (setting_name == "grid.width" || setting_name == "grid.height")) {
+      DrawPopulation();
+    }
+  }
+
+  void SetConfigurationVisible(bool visible) {
+    configuration_visible = visible;
+    run_inspector.SetCSS("display", visible ? "none" : "block");
+    configuration_inspector.SetCSS("display", visible ? "block" : "none");
+    pop_stats_mode.SetAttr(
+      "class",
+      visible ? "mode-button side-mode-button" : "mode-button side-mode-button is-active"
+    );
+    configure_mode.SetAttr(
+      "class",
+      visible ? "mode-button side-mode-button is-active" : "mode-button side-mode-button"
+    );
+    pop_stats_mode.SetAttr("aria-pressed", visible ? "false" : "true");
+    configure_mode.SetAttr("aria-pressed", visible ? "true" : "false");
+  }
+
+  void AddConfigurationSetting(UI::Div & scope_panel,
+                               const emp::String & setting_name,
+                               const emp::String & local_name,
+                               size_t setting_id) {
+    const auto & settings = Avida().GetSettings();
+    const auto & metadata = settings.Metadata(setting_name);
+    const emp::String current_value = GetDisplaySettingValue(setting_name);
+    const emp::String raw_value = settings.Get<emp::String>(setting_name);
+    const std::string type_name = settings.GetTypeName(setting_name);
+    const bool is_integer = type_name == "int64_t" || type_name == "uint64_t";
+    const bool is_numeric = is_integer || type_name == "double";
+    const bool is_locked = run_started && metadata.HasTag("startup only");
+    const emp::String control_id = emp::MakeString("configuration_control_", setting_id);
+
+    UI::Div setting_panel{emp::MakeString("configuration_setting_", setting_id)};
+    setting_panel.AddAttr(
+      "class", is_locked ? "configuration-setting is-locked" : "configuration-setting"
+    );
+    if (is_locked) setting_panel.SetTitle("This setting is locked after a run starts.");
+    setting_panel << emp::MakeString(
+      "<label class='configuration-label' for='", control_id, "'>",
+      emp::MakeWebSafe(HumanizeSettingName(local_name)), "</label>"
+    );
+    if (settings.GetDesc(setting_name).size()) {
+      setting_panel << emp::MakeString(
+        "<p class='configuration-description'>",
+        emp::MakeWebSafe(settings.GetDesc(setting_name)), "</p>"
+      );
+    }
+
+    UI::Div controls{emp::MakeString("configuration_controls_", setting_id)};
+    controls.AddAttr("class", "configuration-controls");
+
+    const auto & options = metadata.GetOptions();
+    if (options.size() && !metadata.AllowsOtherOptions()) {
+      UI::Selector selector{control_id};
+      size_t selected_id = 0;
+      for (size_t option_id = 0; option_id < options.size(); ++option_id) {
+        const emp::String option = options[option_id];
+        if (option == raw_value) selected_id = option_id;
+        selector.SetOption(emp::MakeWebSafe(option), [this, setting_name, option]() {
+          SetConfigurationValue(setting_name, option);
+        });
+      }
+      selector.SelectID(selected_id);
+      selector.Disabled(is_locked);
+      selector.AddAttr("class", "configuration-select");
+      selector.SetAttr("aria-label", HumanizeSettingName(local_name));
+      configuration_selectors.push_back(selector);
+      controls << configuration_selectors.back();
+    } else if (is_numeric && metadata.HasMinimum() && metadata.HasMaximum()) {
+      const emp::String number_id = emp::MakeString(control_id, "_number");
+      UI::Input slider{
+        [this, setting_name, number_id](std::string value) {
+          SetConfigurationValue(setting_name, value, number_id);
+        },
+        "range", "", control_id
+      };
+      slider.Min(metadata.GetMinimum());
+      slider.Max(metadata.GetMaximum());
+      slider.Step(is_integer ? "1" : "any");
+      slider.Value(current_value);
+      slider.Disabled(is_locked);
+      slider.AddAttr("class", "configuration-slider");
+      slider.SetAttr("aria-label", HumanizeSettingName(local_name));
+
+      UI::Input number{
+        [this, setting_name, control_id](std::string value) {
+          SetConfigurationValue(setting_name, value, control_id);
+        },
+        "number", "", number_id
+      };
+      number.Min(metadata.GetMinimum());
+      number.Max(metadata.GetMaximum());
+      number.Step(is_integer ? "1" : "any");
+      number.Value(current_value);
+      number.Disabled(is_locked);
+      number.AddAttr("class", "configuration-number");
+      number.SetAttr(
+        "aria-label", emp::MakeString("Type value for ", HumanizeSettingName(local_name))
+      );
+
+      configuration_inputs.push_back(slider);
+      controls << configuration_inputs.back();
+      configuration_inputs.push_back(number);
+      controls << configuration_inputs.back();
+    } else {
+      UI::Input input{
+        [this, setting_name](std::string value) {
+          SetConfigurationValue(setting_name, value);
+        },
+        is_numeric ? "number" : "text", "", control_id
+      };
+      if (is_numeric) input.Step(is_integer ? "1" : "any");
+      if (metadata.HasMinimum()) input.Min(metadata.GetMinimum());
+      if (metadata.HasMaximum()) input.Max(metadata.GetMaximum());
+      input.Value(current_value);
+      input.Disabled(is_locked);
+      input.AddAttr("class", "configuration-input");
+      input.SetAttr("aria-label", HumanizeSettingName(local_name));
+      configuration_inputs.push_back(input);
+      controls << configuration_inputs.back();
+    }
+
+    setting_panel << controls;
+    scope_panel << setting_panel;
+  }
+
+  void BuildConfigurationPanel() {
+    configuration_inspector = UI::Div{"configuration_inspector"};
+    configuration_inspector.AddAttr("class", "configuration-inspector");
+    configuration_inspector.SetCSS("display", "none");
+
+    UI::Div configuration_header{"configuration_header"};
+    configuration_header.AddAttr("class", "configuration-header");
+    configuration_header << "<h2>Configuration</h2>";
+    UI::Div configuration_actions{"configuration_actions"};
+    configuration_actions.AddAttr("class", "configuration-actions");
+    advanced_toggle = UI::Button(
+      [this](){ ToggleAdvancedSettings(); },
+      advanced_settings_visible ? "Advanced: On" : "Advanced: Off",
+      "advanced_settings_toggle"
+    );
+    advanced_toggle.AddAttr("class", "configuration-action-button");
+    advanced_toggle.SetAttr("aria-pressed", advanced_settings_visible ? "true" : "false");
+    advanced_toggle.SetTitle("Show or hide advanced settings");
+    reset_configuration_button = UI::Button(
+      [this](){ ResetConfiguration(); }, "Reset", "reset_configuration_button"
+    );
+    reset_configuration_button.AddAttr("class", "configuration-action-button");
+    reset_configuration_button.SetTitle("Reset editable settings to the web defaults");
+    configuration_actions << advanced_toggle;
+    configuration_actions << reset_configuration_button;
+    configuration_header << configuration_actions;
+    configuration_inspector << configuration_header;
+    configuration_inspector <<
+      "<p class='configuration-intro'>Settings for the current population.</p>";
+
+    const auto setting_names = Avida().GetSettings().GetSettingNames();
+    std::map<emp::String, emp::vector<emp::String>> settings_by_scope;
+    for (const emp::String & setting_name : setting_names) {
+      if (!ShouldShowSetting(setting_name)) continue;
+      const size_t separator = setting_name.find('.');
+      const emp::String scope = separator == emp::String::npos
+        ? emp::String{"General"}
+        : setting_name.substr(0, separator);
+      settings_by_scope[scope].push_back(setting_name);
+    }
+
+    configuration_inputs.clear();
+    configuration_selectors.clear();
+    configuration_inputs.reserve(setting_names.size() * 2);
+    configuration_selectors.reserve(setting_names.size());
+    size_t setting_id = 0;
+    for (const auto & [scope_name, scoped_settings] : settings_by_scope) {
+      UI::Div scope_panel{emp::MakeString("configuration_scope_", setting_id)};
+      scope_panel.AddAttr("class", "configuration-scope");
+      const emp::String heading_id = emp::MakeString("configuration_scope_heading_", setting_id);
+      scope_panel.SetAttr("role", "group");
+      scope_panel.SetAttr("aria-labelledby", heading_id);
+      scope_panel << emp::MakeString(
+        "<h3 id='", heading_id, "'>", emp::MakeWebSafe(HumanizeSettingName(scope_name)), "</h3>"
+      );
+
+      for (const emp::String & setting_name : scoped_settings) {
+        const size_t separator = setting_name.find('.');
+        const emp::String local_name = separator == emp::String::npos
+          ? setting_name
+          : setting_name.substr(separator + 1);
+        AddConfigurationSetting(scope_panel, setting_name, local_name, setting_id++);
+      }
+      configuration_inspector << scope_panel;
+    }
   }
 
   void OnAnimationFrame(const UI::Animate & frame) {
@@ -375,7 +763,7 @@ private:
       if (play_elapsed_ms < PLAY_INTERVAL_MS) return;
 
       play_elapsed_ms = 0.0;  // Do not catch up after a delayed or backgrounded frame.
-      FinishUpdate(avida.AdvanceUpdate(), true);
+      FinishUpdate(Avida().AdvanceUpdate(), true);
       return;
     }
 
@@ -384,15 +772,18 @@ private:
     const double frame_start = emp::GetTime();
     bool can_continue = true;
     do {
-      can_continue = avida.AdvanceUpdate();
+      can_continue = Avida().AdvanceUpdate();
     } while (can_continue && emp::GetTime() - frame_start < FAST_FORWARD_FRAME_BUDGET_MS);
 
     const bool redraw_population = !can_continue
-      || avida.GetUpdate() - last_grid_redraw_update >= FAST_FORWARD_REDRAW_UPDATES;
+      || Avida().GetUpdate() - last_grid_redraw_update >= FAST_FORWARD_REDRAW_UPDATES;
     FinishUpdate(can_continue, redraw_population);
   }
 
   void SetupColorSelector() {
+    color_selector = UI::Selector{"population_color_mode"};
+    active_color_scale = ColorScale::UNIFORM;
+    active_color_mode = 0;
     color_selector.SetOption("Uniform", [this]() {
       active_color_scale = ColorScale::UNIFORM;
       active_color_mode = 0;
@@ -477,8 +868,8 @@ private:
 
     UI::Div side_modes{"side_mode_buttons"};
     side_modes.AddAttr("class", "mode-buttons side-mode-buttons");
-    UI::Button pop_stats_mode{
-      [](){},
+    pop_stats_mode = UI::Button{
+      [this](){ SetConfigurationVisible(false); },
       "<img src='assets/icons/StatsPop.png' alt=''><span>POP STATS</span>",
       "pop_stats_mode"
     };
@@ -492,8 +883,8 @@ private:
       "<img src='assets/icons/Freezer.png' alt=''><span>FREEZER</span>",
       "freezer_mode"
     };
-    UI::Button configure_mode{
-      [](){},
+    configure_mode = UI::Button{
+      [this](){ SetConfigurationVisible(!configuration_visible); },
       "<img src='assets/icons/Config.png' alt=''><span>CONFIGURE</span>",
       "configure_mode"
     };
@@ -505,6 +896,8 @@ private:
     org_stats_mode.SetAttr("aria-label", "Organism Statistics");
     freezer_mode.SetAttr("aria-label", "Freezer");
     configure_mode.SetAttr("aria-label", "Configure");
+    pop_stats_mode.SetAttr("aria-controls", "run_inspector");
+    configure_mode.SetAttr("aria-controls", "configuration_inspector");
     pop_stats_mode.SetAttr("aria-pressed", "true");
     org_stats_mode.SetAttr("aria-pressed", "false");
     freezer_mode.SetAttr("aria-pressed", "false");
@@ -604,9 +997,9 @@ private:
     population_card << canvas_frame;
     population_card << transport;
 
-    UI::Div inspector{"run_inspector"};
-    inspector.AddAttr("class", "run-inspector");
-    inspector << "<h2>Run</h2>";
+    run_inspector = UI::Div{"run_inspector"};
+    run_inspector.AddAttr("class", "run-inspector");
+    run_inspector << "<h2>Run</h2>";
     UI::Div readouts{"readouts"};
     readouts.AddAttr("class", "readouts");
     const auto & statistics = population_view_options.GetStatistics();
@@ -626,41 +1019,50 @@ private:
       statistic_texts.push_back(value_text);
       readouts << readout;
     }
-    inspector << readouts;
+    run_inspector << readouts;
+
+    BuildConfigurationPanel();
 
     workspace << population_card;
-    workspace << inspector;
+    UI::Div side_panel{"side_panel"};
+    side_panel.AddAttr("class", "side-panel");
+    side_panel << run_inspector;
+    side_panel << configuration_inspector;
+    workspace << side_panel;
     app << workspace;
     document << app;
   }
 
-public:
-  AvidaWebApp()
-    : animation([this](const UI::Animate & frame){ OnAnimationFrame(frame); }) {
-    avida.GetSettings().Set("base.config_dir", std::string{"/config"});
-    avida.GetSettings().Set("base.data_dir", std::string{"/data"});
-  }
-
-  ~AvidaWebApp() {
-    avida.GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback({});
-  }
-
-  void Initialize() {
-    avida.GetSettings().Load("/config/Avida-web.cfg");
-    std::println(
-      "Loaded /config/Avida-web.cfg (substitution probability = {}).",
-      avida.GetSettings().Get<double>("mutations.substitution_prob")
-    );
-    avida.InitializePaused();
-    CollectPopulationViewOptions();
+  void RebuildInterface() {
+    const bool restore_configuration = configuration_visible;
+    document.ClearChildren();
+    configuration_inputs.clear();
+    configuration_selectors.clear();
+    statistic_texts.clear();
     SetupColorSelector();
     BuildInterface();
-    avida.GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback(
-      [this](){ CaptureFinalView(); }
-    );
+    SetConfigurationVisible(restore_configuration);
     UpdateControls();
     DrawPopulation();
     RefreshReadouts();
+  }
+
+public:
+  AvidaWebApp()
+    : animation([this](const UI::Animate & frame){ OnAnimationFrame(frame); }) { }
+
+  ~AvidaWebApp() {
+    if (avida) Avida().GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback({});
+  }
+
+  void Initialize() {
+    CreateConfiguredAvida();
+    default_setting_values = SnapshotSettingValues();
+    std::println(
+      "Loaded /config/Avida-web.cfg (substitution probability = {}).",
+      Avida().GetSettings().Get<double>("mutations.substitution_prob")
+    );
+    RebuildInterface();
   }
 };
 
