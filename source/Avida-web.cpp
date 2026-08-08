@@ -86,6 +86,8 @@ using avida_t = Avida<
   TrackMetabolism,
   WebInterfaceBridge
 >;
+using reaction_config_t = typename ReactionsManager<avida_t>::Config;
+using event_config_t = typename EventManager<avida_t>::Config;
 
 constexpr uint32_t PackRGBA(uint8_t red, uint8_t green, uint8_t blue) {
   return static_cast<uint32_t>(red)
@@ -141,6 +143,7 @@ class AvidaWebApp {
 private:
   enum class RunMode { PAUSED, PLAY, FAST_FORWARD };
   enum class ColorScale { UNIFORM, CATEGORICAL, CONTINUOUS };
+  enum class ConfigurationTab { SETTINGS, ENVIRONMENT, EVENTS };
 
   static constexpr double PLAY_INTERVAL_MS = 100.0;
   static constexpr double FAST_FORWARD_FRAME_BUDGET_MS = 12.0;
@@ -169,6 +172,10 @@ private:
   std::unique_ptr<avida_t> avida;
   PopulationViewOptions<avida_t> population_view_options;
   std::map<emp::String, emp::String> default_setting_values;
+  emp::vector<reaction_config_t> reaction_configs;
+  emp::vector<reaction_config_t> default_reaction_configs;
+  emp::vector<event_config_t> event_configs;
+  emp::vector<event_config_t> default_event_configs;
 
   UI::Document document{"emp_base"};
   UI::Animate animation;
@@ -201,10 +208,14 @@ private:
   bool advanced_settings_visible = false;
   bool run_started = false;
   bool interface_rebuild_requested = false;
+  bool structured_config_initialized = false;
+  ConfigurationTab active_configuration_tab = ConfigurationTab::SETTINGS;
 
   [[nodiscard]] avida_t & Avida() { return *avida; }
   [[nodiscard]] const avida_t & Avida() const { return *avida; }
   [[nodiscard]] auto & Grid() { return Avida().GetPlugIn<PopGrid>(); }
+  [[nodiscard]] auto & Reactions() { return Avida().GetPlugIn<ReactionsManager>(); }
+  [[nodiscard]] auto & Events() { return Avida().GetPlugIn<EventManager>(); }
 
   void RequestInterfaceRebuild() {
     if (interface_rebuild_requested) return;
@@ -231,6 +242,21 @@ private:
         module.SetupPopulationView(population_view_options);
       }
     });
+  }
+
+  void ApplyReactionConfiguration() {
+    emp_assert(!run_started);
+    Reactions().SetConfigs(reaction_configs);
+    CollectPopulationViewOptions();
+  }
+
+  void ApplyEventConfiguration() {
+    Events().SetConfigs(event_configs);
+  }
+
+  void ApplyStructuredConfiguration() {
+    ApplyReactionConfiguration();
+    ApplyEventConfiguration();
   }
 
   void RefreshReadouts() {
@@ -294,6 +320,9 @@ private:
 
   void SetRunMode(RunMode new_mode) {
     if (new_mode != RunMode::PAUSED && !run_started) StartRun();
+    if (new_mode != RunMode::PAUSED && Avida().ConsumePauseRequest()) {
+      new_mode = RunMode::PAUSED;
+    }
     if (Avida().IsComplete()) new_mode = RunMode::PAUSED;
     run_mode = new_mode;
     play_elapsed_ms = 0.0;
@@ -414,15 +443,19 @@ private:
     last_grid_redraw_update = Avida().GetUpdate();
   }
 
-  void FinishUpdate(bool can_continue, bool redraw_population) {
+  void FinishUpdate(bool can_continue,
+                    bool redraw_population,
+                    bool pause_requested = false) {
     if (redraw_population) DrawPopulation();
     RefreshReadouts();
-    if (!can_continue) SetRunMode(RunMode::PAUSED);
+    pause_requested = Avida().ConsumePauseRequest() || pause_requested;
+    if (!can_continue || pause_requested) SetRunMode(RunMode::PAUSED);
   }
 
   void StepPopulation() {
     emp_assert(run_mode == RunMode::PAUSED);
     if (!run_started) StartRun();
+    (void) Avida().ConsumePauseRequest();  // An explicit step advances past a start-time pause.
     FinishUpdate(Avida().AdvanceUpdate(), true);
     UpdateControls();
   }
@@ -447,6 +480,16 @@ private:
     settings.Set("base.config_dir", std::string{"/config"});
     settings.Set("base.data_dir", std::string{"/data"});
     settings.Load("/config/Avida-web.cfg");
+    if (structured_config_initialized) {
+      Reactions().SetConfigs(reaction_configs);
+      Events().SetConfigs(event_configs);
+    } else {
+      reaction_configs = Reactions().GetConfigs();
+      default_reaction_configs = reaction_configs;
+      event_configs = Events().GetConfigs();
+      default_event_configs = event_configs;
+      structured_config_initialized = true;
+    }
     for (const auto & [name, value] : values) {
       if (settings.HasSetting(name)) settings.Set(name, value);
     }
@@ -464,6 +507,7 @@ private:
 
   void StartRun() {
     emp_assert(!run_started);
+    ApplyStructuredConfiguration();
     Avida().GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback(
       [this](){ CaptureFinalView(); }
     );
@@ -540,13 +584,86 @@ private:
     RequestInterfaceRebuild();
   }
 
+  void SetConfigurationTab(ConfigurationTab tab) {
+    if (active_configuration_tab == tab) return;
+    active_configuration_tab = tab;
+    RequestInterfaceRebuild();
+  }
+
   void ResetConfiguration() {
-    auto & settings = Avida().GetSettings();
-    for (const auto & [name, value] : default_setting_values) {
-      if (!settings.HasSetting(name)) continue;
-      if (run_started && settings.Metadata(name).HasTag("startup only")) continue;
-      settings.Set(name, value);
+    if (active_configuration_tab == ConfigurationTab::SETTINGS) {
+      auto & settings = Avida().GetSettings();
+      for (const auto & [name, value] : default_setting_values) {
+        if (!settings.HasSetting(name)) continue;
+        if (run_started && settings.Metadata(name).HasTag("startup only")) continue;
+        settings.Set(name, value);
+      }
+    } else if (!run_started && active_configuration_tab == ConfigurationTab::ENVIRONMENT) {
+      reaction_configs = default_reaction_configs;
+      ApplyReactionConfiguration();
+    } else if (active_configuration_tab == ConfigurationTab::EVENTS) {
+      event_configs = default_event_configs;
+      ApplyEventConfiguration();
     }
+    RequestInterfaceRebuild();
+  }
+
+  void UpdateReaction(size_t reaction_id, auto update_fun) {
+    if (run_started || reaction_id >= reaction_configs.size()) return;
+    update_fun(reaction_configs[reaction_id]);
+    ApplyReactionConfiguration();
+  }
+
+  void AddReaction() {
+    if (run_started) return;
+    const emp::String task = Avida().GetNumTasks() ? Avida().GetTaskName(0) : "";
+    const auto trait_names = Avida().GetTraitNames<double>();
+    const emp::String trait = std::find(trait_names.begin(), trait_names.end(), "metabolic_mult")
+        != trait_names.end()
+      ? emp::String{"metabolic_mult"}
+      : (trait_names.size() ? trait_names[0] : emp::String{});
+    reaction_configs.push_back({
+      .task_name = task,
+      .trait_name = trait,
+      .operation = "mult",
+      .value = 2.0,
+      .max_triggers = 1
+    });
+    ApplyReactionConfiguration();
+    RequestInterfaceRebuild();
+  }
+
+  void RemoveReaction(size_t reaction_id) {
+    if (run_started || reaction_id >= reaction_configs.size()) return;
+    reaction_configs.erase(reaction_configs.begin() + reaction_id);
+    ApplyReactionConfiguration();
+    RequestInterfaceRebuild();
+  }
+
+  void UpdateEvent(size_t event_id, auto update_fun, bool rebuild_interface = false) {
+    if (event_id >= event_configs.size()) return;
+    update_fun(event_configs[event_id]);
+    ApplyEventConfiguration();
+    if (rebuild_interface) RequestInterfaceRebuild();
+  }
+
+  void AddEvent() {
+    const size_t pause_update = Avida().GetUpdate() + (run_started ? 1000 : 10000);
+    event_configs.push_back({
+      .timing = EventManager<avida_t>::Timing::UPDATE,
+      .start = pause_update,
+      .interval = 1,
+      .stop = 0,
+      .command = "pause"
+    });
+    ApplyEventConfiguration();
+    RequestInterfaceRebuild();
+  }
+
+  void RemoveEvent(size_t event_id) {
+    if (event_id >= event_configs.size()) return;
+    event_configs.erase(event_configs.begin() + event_id);
+    ApplyEventConfiguration();
     RequestInterfaceRebuild();
   }
 
@@ -660,6 +777,7 @@ private:
       number.Value(current_value);
       number.Disabled(is_locked);
       number.AddAttr("class", "configuration-number");
+      number.SetAttr("onwheel", "this.blur()");
       number.SetAttr(
         "aria-label", emp::MakeString("Type value for ", HumanizeSettingName(local_name))
       );
@@ -681,6 +799,7 @@ private:
       input.Value(current_value);
       input.Disabled(is_locked);
       input.AddAttr("class", "configuration-input");
+      if (is_numeric) input.SetAttr("onwheel", "this.blur()");
       input.SetAttr("aria-label", HumanizeSettingName(local_name));
       configuration_inputs.push_back(input);
       controls << configuration_inputs.back();
@@ -690,36 +809,8 @@ private:
     scope_panel << setting_panel;
   }
 
-  void BuildConfigurationPanel() {
-    configuration_inspector = UI::Div{"configuration_inspector"};
-    configuration_inspector.AddAttr("class", "configuration-inspector");
-    configuration_inspector.SetCSS("display", "none");
-
-    UI::Div configuration_header{"configuration_header"};
-    configuration_header.AddAttr("class", "configuration-header");
-    configuration_header << "<h2>Configuration</h2>";
-    UI::Div configuration_actions{"configuration_actions"};
-    configuration_actions.AddAttr("class", "configuration-actions");
-    advanced_toggle = UI::Button(
-      [this](){ ToggleAdvancedSettings(); },
-      advanced_settings_visible ? "Advanced: On" : "Advanced: Off",
-      "advanced_settings_toggle"
-    );
-    advanced_toggle.AddAttr("class", "configuration-action-button");
-    advanced_toggle.SetAttr("aria-pressed", advanced_settings_visible ? "true" : "false");
-    advanced_toggle.SetTitle("Show or hide advanced settings");
-    reset_configuration_button = UI::Button(
-      [this](){ ResetConfiguration(); }, "Reset", "reset_configuration_button"
-    );
-    reset_configuration_button.AddAttr("class", "configuration-action-button");
-    reset_configuration_button.SetTitle("Reset editable settings to the web defaults");
-    configuration_actions << advanced_toggle;
-    configuration_actions << reset_configuration_button;
-    configuration_header << configuration_actions;
-    configuration_inspector << configuration_header;
-    configuration_inspector <<
-      "<p class='configuration-intro'>Settings for the current population.</p>";
-
+  void BuildSettingsConfiguration(UI::Div & content) {
+    content << "<p class='configuration-intro'>Settings for the current population.</p>";
     const auto setting_names = Avida().GetSettings().GetSettingNames();
     std::map<emp::String, emp::vector<emp::String>> settings_by_scope;
     for (const emp::String & setting_name : setting_names) {
@@ -731,10 +822,6 @@ private:
       settings_by_scope[scope].push_back(setting_name);
     }
 
-    configuration_inputs.clear();
-    configuration_selectors.clear();
-    configuration_inputs.reserve(setting_names.size() * 2);
-    configuration_selectors.reserve(setting_names.size());
     size_t setting_id = 0;
     for (const auto & [scope_name, scoped_settings] : settings_by_scope) {
       UI::Div scope_panel{emp::MakeString("configuration_scope_", setting_id)};
@@ -753,8 +840,340 @@ private:
           : setting_name.substr(separator + 1);
         AddConfigurationSetting(scope_panel, setting_name, local_name, setting_id++);
       }
-      configuration_inspector << scope_panel;
+      content << scope_panel;
     }
+  }
+
+  void BuildEnvironmentConfiguration(UI::Div & content) {
+    content << emp::MakeString(
+      "<p class='configuration-intro'>Reactions connect completed tasks to phenotype changes.",
+      run_started ? " Reactions are locked after a run starts." : "", "</p>"
+    );
+
+    UI::Button add_button{[this](){ AddReaction(); }, "+ Add reaction", "add_reaction_button"};
+    add_button.AddAttr("class", "configuration-add-button");
+    add_button.SetDisabled(run_started);
+    content << add_button;
+
+    UI::Div reaction_list{"reaction_configuration_list"};
+    reaction_list.AddAttr("class", "structured-configuration-list");
+    for (size_t reaction_id = 0; reaction_id < reaction_configs.size(); ++reaction_id) {
+      const reaction_config_t & reaction = reaction_configs[reaction_id];
+      UI::Div card{emp::MakeString("reaction_configuration_", reaction_id)};
+      card.AddAttr(
+        "class",
+        run_started ? "structured-configuration-card is-locked" : "structured-configuration-card"
+      );
+
+      UI::Div card_header{emp::MakeString("reaction_header_", reaction_id)};
+      card_header.AddAttr("class", "structured-configuration-header");
+      card_header << emp::MakeString("<h3>Reaction ", reaction_id + 1, "</h3>");
+      UI::Button remove_button{
+        [this, reaction_id](){ RemoveReaction(reaction_id); },
+        "Remove",
+        emp::MakeString("remove_reaction_", reaction_id)
+      };
+      remove_button.AddAttr("class", "configuration-remove-button");
+      remove_button.SetDisabled(run_started);
+      card_header << remove_button;
+      card << card_header;
+
+      UI::Div fields{emp::MakeString("reaction_fields_", reaction_id)};
+      fields.AddAttr("class", "structured-configuration-fields");
+
+      const emp::String task_id = emp::MakeString("reaction_task_", reaction_id);
+      UI::Div task_field{emp::MakeString(task_id, "_field")};
+      task_field.AddAttr("class", "structured-configuration-field");
+      task_field << emp::MakeString("<label for='", task_id, "'>Task</label>");
+      UI::Selector task_selector{task_id};
+      size_t selected_task = 0;
+      for (size_t id = 0; id < Avida().GetNumTasks(); ++id) {
+        const emp::String task_name = Avida().GetTaskName(id);
+        if (task_name == reaction.task_name) selected_task = id;
+        task_selector.SetOption(task_name, [this, reaction_id, task_name](){
+          UpdateReaction(reaction_id, [task_name](auto & config){ config.task_name = task_name; });
+        });
+      }
+      task_selector.SelectID(selected_task);
+      task_selector.Disabled(run_started);
+      task_selector.AddAttr("class", "configuration-select");
+      configuration_selectors.push_back(task_selector);
+      task_field << configuration_selectors.back();
+      fields << task_field;
+
+      const emp::String triggers_id = emp::MakeString("reaction_max_triggers_", reaction_id);
+      UI::Div triggers_field{emp::MakeString(triggers_id, "_field")};
+      triggers_field.AddAttr("class", "structured-configuration-field");
+      triggers_field << emp::MakeString("<label for='", triggers_id, "'>Max triggers</label>");
+      UI::Input triggers_input{
+        [this, reaction_id](std::string value){
+          if (value.empty()) return;
+          UpdateReaction(reaction_id, [value](auto & config){
+            config.max_triggers = emp::String{value}.As<size_t>(config.max_triggers);
+          });
+        },
+        "number", "", triggers_id
+      };
+      triggers_input.Min("0");
+      triggers_input.Step("1");
+      triggers_input.Value(emp::MakeString(reaction.max_triggers));
+      triggers_input.Disabled(run_started);
+      triggers_input.AddAttr("class", "configuration-input");
+      triggers_input.SetAttr("onwheel", "this.blur()");
+      triggers_input.SetTitle("Zero allows unlimited triggers per gestation.");
+      configuration_inputs.push_back(triggers_input);
+      triggers_field << configuration_inputs.back();
+      fields << triggers_field;
+
+      const emp::String operation_id = emp::MakeString("reaction_operation_", reaction_id);
+      UI::Div operation_field{emp::MakeString(operation_id, "_field")};
+      operation_field.AddAttr("class", "structured-configuration-field");
+      operation_field << emp::MakeString("<label for='", operation_id, "'>Operation</label>");
+      UI::Selector operation_selector{operation_id};
+      operation_selector.SetOption("Multiply", [this, reaction_id](){
+        UpdateReaction(reaction_id, [](auto & config){ config.operation = "mult"; });
+      });
+      operation_selector.SetOption("Add", [this, reaction_id](){
+        UpdateReaction(reaction_id, [](auto & config){ config.operation = "add"; });
+      });
+      operation_selector.SelectID(reaction.operation == "add" ? 1 : 0);
+      operation_selector.Disabled(run_started);
+      operation_selector.AddAttr("class", "configuration-select");
+      configuration_selectors.push_back(operation_selector);
+      operation_field << configuration_selectors.back();
+      fields << operation_field;
+
+      const emp::String value_id = emp::MakeString("reaction_value_", reaction_id);
+      UI::Div value_field{emp::MakeString(value_id, "_field")};
+      value_field.AddAttr("class", "structured-configuration-field");
+      value_field << emp::MakeString("<label for='", value_id, "'>Value</label>");
+      UI::Input value_input{
+        [this, reaction_id](std::string value){
+          if (value.empty()) return;
+          UpdateReaction(reaction_id, [value](auto & config){
+            config.value = emp::String{value}.As<double>(config.value);
+          });
+        },
+        "number", "", value_id
+      };
+      value_input.Step("any");
+      value_input.Value(FormatFixedPoint(reaction.value));
+      value_input.Disabled(run_started);
+      value_input.AddAttr("class", "configuration-input");
+      value_input.SetAttr("onwheel", "this.blur()");
+      configuration_inputs.push_back(value_input);
+      value_field << configuration_inputs.back();
+      fields << value_field;
+
+      card << fields;
+      reaction_list << card;
+    }
+
+    if (reaction_configs.empty()) {
+      reaction_list << "<p class='configuration-empty'>No reactions configured.</p>";
+    }
+    content << reaction_list;
+  }
+
+  void AddEventNumberField(UI::Div & fields,
+                           size_t event_id,
+                           const emp::String & field_name,
+                           const emp::String & label,
+                           size_t value,
+                           auto update_fun) {
+    const emp::String control_id = emp::MakeString("event_", field_name, "_", event_id);
+    UI::Div field{emp::MakeString(control_id, "_field")};
+    field.AddAttr("class", "structured-configuration-field");
+    field << emp::MakeString("<label for='", control_id, "'>", label, "</label>");
+    UI::Input input{
+      [this, event_id, update_fun](std::string new_value){
+        if (new_value.empty()) return;
+        UpdateEvent(event_id, [new_value, update_fun](auto & config){
+          update_fun(config, emp::String{new_value}.As<size_t>());
+        });
+      },
+      "number", "", control_id
+    };
+    input.Min(field_name == "stop" ? "0" : "1");
+    input.Step("1");
+    input.Value(emp::MakeString(value));
+    input.AddAttr("class", "configuration-input");
+    input.SetAttr("onwheel", "this.blur()");
+    configuration_inputs.push_back(input);
+    field << configuration_inputs.back();
+    fields << field;
+  }
+
+  void BuildEventsConfiguration(UI::Div & content) {
+    content << emp::MakeString(
+      "<p class='configuration-intro'>Schedule interface events at run start, run end, or selected updates.",
+      run_started ? " New events default to pausing 1,000 updates from now." : "", "</p>"
+    );
+
+    UI::Button add_button{[this](){ AddEvent(); }, "+ Add event", "add_event_button"};
+    add_button.AddAttr("class", "configuration-add-button");
+    content << add_button;
+
+    UI::Div event_list{"event_configuration_list"};
+    event_list.AddAttr("class", "structured-configuration-list");
+    for (size_t event_id = 0; event_id < event_configs.size(); ++event_id) {
+      const event_config_t & event = event_configs[event_id];
+      UI::Div card{emp::MakeString("event_configuration_", event_id)};
+      card.AddAttr("class", "structured-configuration-card");
+
+      UI::Div card_header{emp::MakeString("event_header_", event_id)};
+      card_header.AddAttr("class", "structured-configuration-header");
+      card_header << emp::MakeString("<h3>Event ", event_id + 1, "</h3>");
+      UI::Button remove_button{
+        [this, event_id](){ RemoveEvent(event_id); },
+        "Remove",
+        emp::MakeString("remove_event_", event_id)
+      };
+      remove_button.AddAttr("class", "configuration-remove-button");
+      card_header << remove_button;
+      card << card_header;
+
+      UI::Div fields{emp::MakeString("event_fields_", event_id)};
+      fields.AddAttr("class", "structured-configuration-fields");
+
+      const emp::String timing_id = emp::MakeString("event_timing_", event_id);
+      UI::Div timing_field{emp::MakeString(timing_id, "_field")};
+      timing_field.AddAttr("class", "structured-configuration-field");
+      timing_field << emp::MakeString("<label for='", timing_id, "'>When</label>");
+      UI::Selector timing_selector{timing_id};
+      using Timing = EventManager<avida_t>::Timing;
+      const std::array<std::pair<emp::String, Timing>, 4> timing_options{{
+        {"At start", Timing::START},
+        {"At update", Timing::UPDATE},
+        {"At intervals", Timing::INTERVAL},
+        {"At end", Timing::END}
+      }};
+      size_t selected_timing = 0;
+      for (size_t id = 0; id < timing_options.size(); ++id) {
+        const auto [label, timing] = timing_options[id];
+        if (timing == event.timing) selected_timing = id;
+        timing_selector.SetOption(label, [this, event_id, timing](){
+          UpdateEvent(
+            event_id,
+            [timing](auto & config){ config.timing = timing; },
+            true
+          );
+        });
+      }
+      timing_selector.SelectID(selected_timing);
+      timing_selector.AddAttr("class", "configuration-select");
+      configuration_selectors.push_back(timing_selector);
+      timing_field << configuration_selectors.back();
+      fields << timing_field;
+
+      const emp::String action_id = emp::MakeString("event_action_", event_id);
+      UI::Div action_field{emp::MakeString(action_id, "_field")};
+      action_field.AddAttr("class", "structured-configuration-field");
+      action_field << emp::MakeString("<label for='", action_id, "'>Action</label>");
+      UI::Selector action_selector{action_id};
+      action_selector.SetOption("Pause", [this, event_id](){
+        UpdateEvent(event_id, [](auto & config){ config.command = "pause"; });
+      });
+      action_selector.SelectID(0);
+      action_selector.AddAttr("class", "configuration-select");
+      configuration_selectors.push_back(action_selector);
+      action_field << configuration_selectors.back();
+      fields << action_field;
+
+      if (event.timing == Timing::UPDATE || event.timing == Timing::INTERVAL) {
+        AddEventNumberField(
+          fields, event_id, "start", event.timing == Timing::UPDATE ? "Update" : "Start",
+          event.start, [](auto & config, size_t value){ config.start = value; }
+        );
+      }
+      if (event.timing == Timing::INTERVAL) {
+        AddEventNumberField(
+          fields, event_id, "interval", "Every", event.interval,
+          [](auto & config, size_t value){ config.interval = std::max<size_t>(1, value); }
+        );
+        AddEventNumberField(
+          fields, event_id, "stop", "Through (0 = forever)", event.stop,
+          [](auto & config, size_t value){ config.stop = value; }
+        );
+      }
+
+      card << fields;
+      event_list << card;
+    }
+
+    if (event_configs.empty()) {
+      event_list << "<p class='configuration-empty'>No events configured.</p>";
+    }
+    content << event_list;
+  }
+
+  void BuildConfigurationPanel() {
+    configuration_inspector = UI::Div{"configuration_inspector"};
+    configuration_inspector.AddAttr("class", "configuration-inspector");
+    configuration_inspector.SetCSS("display", "none");
+
+    configuration_inputs.clear();
+    configuration_selectors.clear();
+    configuration_inputs.reserve(64);
+    configuration_selectors.reserve(64);
+
+    UI::Div configuration_header{"configuration_header"};
+    configuration_header.AddAttr("class", "configuration-header");
+    configuration_header << "<h2>Configuration</h2>";
+    UI::Div configuration_actions{"configuration_actions"};
+    configuration_actions.AddAttr("class", "configuration-actions");
+    if (active_configuration_tab == ConfigurationTab::SETTINGS) {
+      advanced_toggle = UI::Button(
+        [this](){ ToggleAdvancedSettings(); },
+        advanced_settings_visible ? "Advanced: On" : "Advanced: Off",
+        "advanced_settings_toggle"
+      );
+      advanced_toggle.AddAttr("class", "configuration-action-button");
+      advanced_toggle.SetAttr("aria-pressed", advanced_settings_visible ? "true" : "false");
+      advanced_toggle.SetTitle("Show or hide advanced settings");
+      configuration_actions << advanced_toggle;
+    }
+    reset_configuration_button = UI::Button(
+      [this](){ ResetConfiguration(); }, "Reset", "reset_configuration_button"
+    );
+    reset_configuration_button.AddAttr("class", "configuration-action-button");
+    reset_configuration_button.SetTitle("Reset this configuration tab to its web defaults");
+    reset_configuration_button.SetDisabled(
+      run_started && active_configuration_tab == ConfigurationTab::ENVIRONMENT
+    );
+    configuration_actions << reset_configuration_button;
+    configuration_header << configuration_actions;
+    configuration_inspector << configuration_header;
+
+    UI::Div tabs{"configuration_tabs"};
+    tabs.AddAttr("class", "configuration-tabs");
+    tabs.SetAttr("role", "tablist");
+    const auto add_tab = [this, &tabs](ConfigurationTab tab,
+                                       const emp::String & label,
+                                       const emp::String & id) {
+      UI::Button button{[this, tab](){ SetConfigurationTab(tab); }, label, id};
+      button.AddAttr(
+        "class",
+        active_configuration_tab == tab ? "configuration-tab is-active" : "configuration-tab"
+      );
+      button.SetAttr("role", "tab");
+      button.SetAttr("aria-selected", active_configuration_tab == tab ? "true" : "false");
+      tabs << button;
+    };
+    add_tab(ConfigurationTab::SETTINGS, "Settings", "configuration_tab_settings");
+    add_tab(ConfigurationTab::ENVIRONMENT, "Environment", "configuration_tab_environment");
+    add_tab(ConfigurationTab::EVENTS, "Events", "configuration_tab_events");
+    configuration_inspector << tabs;
+
+    UI::Div content{"configuration_content"};
+    content.AddAttr("class", "configuration-content");
+    content.SetAttr("role", "tabpanel");
+    switch (active_configuration_tab) {
+    case ConfigurationTab::SETTINGS: BuildSettingsConfiguration(content); break;
+    case ConfigurationTab::ENVIRONMENT: BuildEnvironmentConfiguration(content); break;
+    case ConfigurationTab::EVENTS: BuildEventsConfiguration(content); break;
+    }
+    configuration_inspector << content;
   }
 
   void OnAnimationFrame(const UI::Animate & frame) {
@@ -771,13 +1190,18 @@ private:
 
     const double frame_start = emp::GetTime();
     bool can_continue = true;
+    bool pause_requested = false;
     do {
       can_continue = Avida().AdvanceUpdate();
-    } while (can_continue && emp::GetTime() - frame_start < FAST_FORWARD_FRAME_BUDGET_MS);
+      pause_requested = Avida().ConsumePauseRequest();
+    } while (can_continue
+             && !pause_requested
+             && emp::GetTime() - frame_start < FAST_FORWARD_FRAME_BUDGET_MS);
 
-    const bool redraw_population = !can_continue
+    const bool redraw_population = pause_requested
+      || !can_continue
       || Avida().GetUpdate() - last_grid_redraw_update >= FAST_FORWARD_REDRAW_UPDATES;
-    FinishUpdate(can_continue, redraw_population);
+    FinishUpdate(can_continue, redraw_population, pause_requested);
   }
 
   void SetupColorSelector() {
@@ -1035,6 +1459,7 @@ private:
 
   void RebuildInterface() {
     const bool restore_configuration = configuration_visible;
+    document.Freeze();
     document.ClearChildren();
     configuration_inputs.clear();
     configuration_selectors.clear();
@@ -1043,6 +1468,7 @@ private:
     BuildInterface();
     SetConfigurationVisible(restore_configuration);
     UpdateControls();
+    document.Activate();
     DrawPopulation();
     RefreshReadouts();
   }
