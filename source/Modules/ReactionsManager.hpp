@@ -156,8 +156,8 @@ public:
         emp::MakeString("reaction_", reaction_id),
         reaction.task_name,
         emp::MakeString("Organisms whose parent performed ", reaction.task_name, "."),
-        [this, task_id=reaction.task_id](){
-          return emp::MakeString(CountParentPerformers(task_id));
+        [this, reaction_id](){
+          return emp::MakeString(CountParentPerformers(reactions[reaction_id].task_id));
         }
       );
     }
