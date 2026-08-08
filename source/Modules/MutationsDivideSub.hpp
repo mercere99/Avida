@@ -53,6 +53,7 @@ public:
       [this](){ return substitution_prob; },
       [this](double p){ SetSubstitutionProb(p); },
       "Per-site substitution probability", 'p');
+    avida.GetSettings().Metadata("mutations.substitution_prob").SetRange(0.0, 1.0);
   }
 
   // === Signal Listeners ===
