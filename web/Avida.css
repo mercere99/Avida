@@ -56,12 +56,22 @@ select:focus-visible {
 }
 
 .app-header {
-  width: clamp(516px, calc(100dvh - 170px), min(65vw, 746px));
+  width: 100%;
+  min-height: 80px;
+  display: grid;
+  grid-template-columns:
+    clamp(516px, calc(100dvh - 170px), min(65vw, 746px))
+    minmax(240px, 1fr);
+  align-items: end;
+  justify-content: start;
+  gap: 12px;
+}
+
+.primary-header {
   min-height: 80px;
   display: grid;
   grid-template-columns: 80px 1fr;
   align-items: end;
-  justify-content: start;
   gap: 14px;
 }
 
@@ -121,15 +131,33 @@ select:focus-visible {
 }
 
 .mode-button:hover {
-  border-color: rgba(99, 213, 224, 0.42);
-  background: rgba(27, 68, 91, 0.78);
-}
-
-.mode-button.is-active {
   border-color: transparent;
   background: linear-gradient(135deg, #a743b9, #6f45a8);
   color: white;
   box-shadow: 0 5px 16px rgba(101, 42, 120, 0.35);
+}
+
+.mode-button.is-active {
+  border-color: rgba(99, 213, 224, 0.42);
+  background: rgba(27, 68, 91, 0.78);
+  color: #9db4bf;
+  box-shadow: none;
+}
+
+.side-mode-buttons {
+  justify-self: end;
+  gap: 4px;
+  margin-right: 0;
+}
+
+.side-mode-button {
+  width: 78px;
+  padding-inline: 2px;
+}
+
+.side-mode-button span {
+  font-size: 0.46rem;
+  letter-spacing: 0;
 }
 
 .workspace {
@@ -366,10 +394,16 @@ select:focus-visible {
   font-weight: 760;
 }
 
-@media (max-width: 840px) {
+@media (max-width: 995px) {
   .app-header {
     width: min(100%, max(516px, calc(100dvh - 170px)));
-    grid-template-columns: 80px 1fr;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .side-mode-buttons {
+    justify-self: end;
+    margin-right: 8px;
   }
 
   .workspace {
@@ -392,7 +426,7 @@ select:focus-visible {
     gap: 6px;
   }
 
-  .app-header {
+  .primary-header {
     min-height: 69px;
     grid-template-columns: 69px 1fr;
     gap: 8px;
