@@ -124,14 +124,17 @@ public:
         analyze_random.ResetSeed(random.GetUInt64());
       },
       "Main random number seed", 's', "0");
+    settings.Metadata("base.random_seed").AddTag("startup only").AddTag("advanced");
     AddSetting("base.config_dir",
       [this](){ return settings.GetConfigDir().string(); },
       [this](const emp::String & s){ settings.SetConfigDir(s); },
       "Default directory to find configuration files.");
+    settings.Metadata("base.config_dir").AddTag("local only");
     AddSetting("base.data_dir",
       [this](){ return data_dir.string(); },
       [this](const emp::String & s){ data_dir = s.str(); },
       "Default directory to write data files.", 'd');
+    settings.Metadata("base.data_dir").AddTag("local only");
     AddValue("base.update", [this](){ return update; }, "Current population update");
 
     AddOutputKeyword("print",
@@ -139,6 +142,12 @@ public:
         PrintQueries(args, os);
       },
       "Print comma-separated query expressions; supports trailing > filename or >> filename");
+
+    AddKeyword("exit", [this](emp::vector<emp::String> /* no args*/){ Exit(); },
+               "Trigger the run to exit.");
+    AddKeyword("pause",
+               [this](emp::vector<emp::String> /* no args*/){ run_state = RunState::PAUSED; },
+               "Pause the run until the interface unpauses it.");
 
     AddKeyword("help",
       [this](emp::vector<emp::String> kw_args) {
