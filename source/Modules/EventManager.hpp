@@ -8,6 +8,7 @@
  *  Schedule SettingsManager commands at population start, selected updates, or run end.
  */
 
+#include <algorithm>
 #include <charconv>
 #include <cstddef>
 #include <system_error>
@@ -139,6 +140,16 @@ private:
   }
 
 public:
+  enum class Timing { START, UPDATE, INTERVAL, END };
+
+  struct Config {
+    Timing timing = Timing::UPDATE;
+    size_t start = 10000;
+    size_t interval = 1;
+    size_t stop = 0;  // Zero means no stop for interval events.
+    emp::String command{"pause"};
+  };
+
   EventManager(AVIDA_T & avida)
     : ModuleBase<AVIDA_T>(
         avida,
@@ -164,6 +175,65 @@ public:
   [[nodiscard]] size_t GetNumStartEvents() const { return start_commands.size(); }
   [[nodiscard]] size_t GetNumUpdateEvents() const { return update_events.size(); }
   [[nodiscard]] size_t GetNumEndEvents() const { return end_commands.size(); }
+
+  [[nodiscard]] emp::vector<Config> GetConfigs() const {
+    emp::vector<Config> configs;
+    configs.reserve(start_commands.size() + update_events.size() + end_commands.size());
+    for (const emp::String & command : start_commands) {
+      configs.push_back({.timing = Timing::START, .command = command});
+    }
+    for (const UpdateEvent & event : update_events) {
+      const bool repeats = event.stop != event.start;
+      configs.push_back({
+        .timing = repeats ? Timing::INTERVAL : Timing::UPDATE,
+        .start = event.start,
+        .interval = event.step,
+        .stop = event.stop == NO_STOP ? 0 : event.stop,
+        .command = event.command
+      });
+    }
+    for (const emp::String & command : end_commands) {
+      configs.push_back({.timing = Timing::END, .command = command});
+    }
+    return configs;
+  }
+
+  /// Replace the schedule. During a run, update and end events take effect immediately;
+  /// newly added start events wait until the next run.
+  void SetConfigs(const emp::vector<Config> & configs) {
+    start_commands.clear();
+    update_events.clear();
+    end_commands.clear();
+    for (const Config & config : configs) {
+      switch (config.timing) {
+      case Timing::START:
+        start_commands.push_back(config.command);
+        break;
+      case Timing::UPDATE:
+        update_events.push_back({
+          .start = std::max<size_t>(1, config.start),
+          .step = 1,
+          .stop = std::max<size_t>(1, config.start),
+          .command = config.command
+        });
+        break;
+      case Timing::INTERVAL:
+        {
+        const size_t start = std::max<size_t>(1, config.start);
+        update_events.push_back({
+          .start = start,
+          .step = std::max<size_t>(1, config.interval),
+          .stop = config.stop ? std::max(start, config.stop) : NO_STOP,
+          .command = config.command
+        });
+        }
+        break;
+      case Timing::END:
+        end_commands.push_back(config.command);
+        break;
+      }
+    }
+  }
 
   /// Start events run only after the complete initial population is available.
   void OnPopulationReady() {
