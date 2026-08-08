@@ -8,7 +8,10 @@
  *  This is the handler for tracking per-organism traits and behaviors.
  */
 
+#include <algorithm>
+
 #include "emp/base/Ptr.hpp"
+#include "emp/base/vector.hpp"
 #include "emp/datastructs/RobinHoodMap.hpp"
 #include "emp/meta/TypeID.hpp"
 #include "emp/tools/String.hpp"
@@ -133,6 +136,16 @@ public:
   ~TraitManager() { Clear(); }
 
   [[nodiscard]] bool Has(const emp::String & name) const { return trait_map.contains(name); }
+
+  template <typename TRAIT_T>
+  [[nodiscard]] emp::vector<emp::String> GetNames() const {
+    emp::vector<emp::String> names;
+    for (const auto & [name, trait_ptr] : trait_map) {
+      if (trait_ptr->GetTypeID() == emp::GetTypeID<TRAIT_T>()) names.push_back(name);
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+  }
 
   // Generic lookup — use for AsDouble/AsString/AsSpan (virtual, safe for any type).
   const trait_base_t & Get(const emp::String & name) const {
