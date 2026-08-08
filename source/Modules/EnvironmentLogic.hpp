@@ -25,6 +25,7 @@ private:
     org.Hardware().SetInput(org.GetPhenotype().inputs);
   }
 
+  // The 16 possible Boolean functions are used to decode an output's fixed truth-table bits.
   enum LogicOp {
     // Inputs:       00  01  10  11    Min NANDs
     FALSE = 0,   //   0   0   0   0    0
@@ -46,50 +47,63 @@ private:
     NUM_OPS
   };
 
-  emp::array<size_t, LogicOp::NUM_OPS> task_id;       // Unique Avida ID for each task performed
-  emp::array<size_t, LogicOp::NUM_OPS> update_counts; // Number of times task performed this update
-  emp::array<uint32_t, 2> analysis_inputs{};          // Inputs of the organism currently being analyzed
+  // Tasks that are equivalent under an exchange of the two inputs share one identity.
+  enum class LogicTask {
+    TASK_FALSE,
+    TASK_AND,
+    TASK_AND_NOT,
+    TASK_ECHO,
+    TASK_XOR,
+    TASK_OR,
+    TASK_NOR,
+    TASK_EQU,
+    TASK_NOT,
+    TASK_OR_NOT,
+    TASK_NAND,
+    TASK_TRUE,
+    NUM_TASKS
+  };
 
-  static constexpr const char * ToName(LogicOp op) {
-    switch (op) {
-    case FALSE:       return "FALSE";
-    case AND:         return "AND";
-    case A_AND_NOT_B: return "A_AND_NOT_B";
-    case ECHO_A:      return "ECHO_A";
-    case B_AND_NOT_A: return "B_AND_NOT_A";
-    case ECHO_B:      return "ECHO_B";
-    case XOR:         return "XOR";
-    case OR:          return "OR";
-    case NOR:         return "NOR";
-    case EQU:         return "EQU";
-    case NOT_B:       return "NOT_B";
-    case A_OR_NOT_B:  return "A_OR_NOT_B";
-    case NOT_A:       return "NOT_A";
-    case B_OR_NOT_A:  return "B_OR_NOT_A";
-    case NAND:        return "NAND";
-    case TRUE:        return "TRUE";
-    default:          return "Error";
+  static constexpr size_t num_tasks = static_cast<size_t>(LogicTask::NUM_TASKS);
+
+  emp::array<size_t, num_tasks> task_id;        // Unique Avida ID for each task performed
+  emp::array<size_t, num_tasks> update_counts;  // Number of times task performed this update
+  emp::array<uint32_t, 2> analysis_inputs{};    // Inputs of the organism currently being analyzed
+
+  static constexpr const char * ToName(LogicTask task) {
+    switch (task) {
+    case LogicTask::TASK_FALSE:   return "FALSE";
+    case LogicTask::TASK_AND:     return "AND";
+    case LogicTask::TASK_AND_NOT: return "AND_NOT";
+    case LogicTask::TASK_ECHO:    return "ECHO";
+    case LogicTask::TASK_XOR:     return "XOR";
+    case LogicTask::TASK_OR:      return "OR";
+    case LogicTask::TASK_NOR:     return "NOR";
+    case LogicTask::TASK_EQU:     return "EQU";
+    case LogicTask::TASK_NOT:     return "NOT";
+    case LogicTask::TASK_OR_NOT:  return "OR_NOT";
+    case LogicTask::TASK_NAND:    return "NAND";
+    case LogicTask::TASK_TRUE:    return "TRUE";
+    default:                      return "Error";
     }
   }
 
-  static constexpr LogicOp ToOp(const emp::String & name) {
-    if (name == "FALSE")       return LogicOp::FALSE;
-    if (name == "TRUE")        return LogicOp::TRUE;
-    if (name == "ECHO_A")      return LogicOp::ECHO_A;
-    if (name == "ECHO_B")      return LogicOp::ECHO_B;
-    if (name == "NOT_A")       return LogicOp::NOT_A;
-    if (name == "NOT_B")       return LogicOp::NOT_B;
-    if (name == "NAND")        return LogicOp::NAND;
-    if (name == "AND")         return LogicOp::AND;
-    if (name == "A_OR_NOT_B")  return LogicOp::A_OR_NOT_B;
-    if (name == "B_OR_NOT_A")  return LogicOp::B_OR_NOT_A;
-    if (name == "OR")          return LogicOp::OR;
-    if (name == "A_AND_NOT_B") return LogicOp::A_AND_NOT_B;
-    if (name == "B_AND_NOT_A") return LogicOp::B_AND_NOT_A;
-    if (name == "NOR")         return LogicOp::NOR;
-    if (name == "XOR")         return LogicOp::XOR;
-    if (name == "EQU")         return LogicOp::EQU;
-    return LogicOp::NUM_OPS;
+  static constexpr LogicTask ToTask(LogicOp op) {
+    switch (op) {
+    case FALSE:                         return LogicTask::TASK_FALSE;
+    case AND:                           return LogicTask::TASK_AND;
+    case A_AND_NOT_B: case B_AND_NOT_A: return LogicTask::TASK_AND_NOT;
+    case ECHO_A:      case ECHO_B:      return LogicTask::TASK_ECHO;
+    case XOR:                           return LogicTask::TASK_XOR;
+    case OR:                            return LogicTask::TASK_OR;
+    case NOR:                           return LogicTask::TASK_NOR;
+    case EQU:                           return LogicTask::TASK_EQU;
+    case NOT_A:       case NOT_B:       return LogicTask::TASK_NOT;
+    case A_OR_NOT_B:  case B_OR_NOT_A:  return LogicTask::TASK_OR_NOT;
+    case NAND:                          return LogicTask::TASK_NAND;
+    case TRUE:                          return LogicTask::TASK_TRUE;
+    default:                            return LogicTask::NUM_TASKS;
+    }
   }
 
   static constexpr uint32_t fixed_count = 4;
@@ -134,18 +148,20 @@ public:
 
   // Identify which logic task (if any) the given output value completes for these inputs.
   // The fixed bits of the output select a single candidate op; a task is done only when the full
-  // output equals that op applied to the inputs.  Returns LogicOp::NUM_OPS when nothing matches.
-  static constexpr LogicOp DetectTask(uint32_t output, const emp::array<uint32_t, 2> & inputs) {
+  // output equals that op applied to the inputs. Symmetric ops map to the same task identity.
+  static constexpr LogicTask DetectTask(
+    uint32_t output, const emp::array<uint32_t, 2> & inputs
+  ) {
     LogicOp test_op = static_cast<LogicOp>((output & fixed_mask) >> fixed_offset);
-    if (output == PerformOp(test_op, inputs[0], inputs[1])) return test_op;
-    return LogicOp::NUM_OPS;
+    if (output == PerformOp(test_op, inputs[0], inputs[1])) return ToTask(test_op);
+    return LogicTask::NUM_TASKS;
   }
 
   // === Phenotypic Traits ===
 
   struct Phenotype {
     emp::array<uint32_t, 2> inputs;            // Input values to perform logic on
-    emp::array<size_t, NUM_OPS> logic_counts;  // Counts of logic operation performance
+    emp::array<size_t, num_tasks> logic_counts; // Counts of logic task performance
   };
 
   void RegisterTraits() {
@@ -153,15 +169,15 @@ public:
     AVIDA_REGISTER_TRAIT(logic_counts, "Number of times each logic task was performed.");
 
     // Register all of the tasks.
-    for (size_t i = 0; i < LogicOp::NUM_OPS; ++i) {
-      task_id[i] = avida.RegisterTask(ToName(static_cast<LogicOp>(i)));
+    for (size_t i = 0; i < num_tasks; ++i) {
+      task_id[i] = avida.RegisterTask(ToName(static_cast<LogicTask>(i)));
     }
   }
 
   // === Signal Listeners ===
 
   void OnUpdateStart([[maybe_unused]] size_t update) {
-    update_counts.fill(0); // Reset all logic operation counts for the new update.
+    update_counts.fill(0); // Reset all logic task counts for the new update.
   }
 
   // Before an organism is placed in the environment, make sure it has its inputs ready.
@@ -182,11 +198,12 @@ public:
 
   template <concepts::Organism ORG_T>
   void OnOutputValue(ORG_T & org, uint32_t output) {
-    LogicOp op = DetectTask(output, org.GetPhenotype().inputs);
-    if (op != LogicOp::NUM_OPS) {
-      ++org.GetPhenotype().logic_counts[op];  // Increment org phenotype count.
-      ++update_counts[op];                    // Increment global task count this update.
-      avida.SignalTask(org, task_id[op]);     // Allow other modules to know about task.
+    LogicTask task = DetectTask(output, org.GetPhenotype().inputs);
+    if (task != LogicTask::NUM_TASKS) {
+      const size_t task_idx = static_cast<size_t>(task);
+      ++org.GetPhenotype().logic_counts[task_idx]; // Increment org phenotype count.
+      ++update_counts[task_idx];                   // Increment global task count this update.
+      avida.SignalTask(org, task_id[task_idx]);    // Allow other modules to know about task.
     }
   }
 
@@ -195,25 +212,21 @@ public:
   // hardware (which Trace() flushes) rather than mutating any organism or module state.
   template <typename HARDWARE_T>
   void OnAnalyzeOutput(HARDWARE_T & hardware, uint32_t output) {
-    LogicOp op = DetectTask(output, analysis_inputs);
-    if (op != LogicOp::NUM_OPS) hardware.AddNote("Task performed: ", ToName(op));
+    LogicTask task = DetectTask(output, analysis_inputs);
+    if (task != LogicTask::NUM_TASKS) hardware.AddNote("Task performed: ", ToName(task));
   }
 
   void OnConfigWrite(std::ostream & os) {
     std::print(os,
-      "Reaction ECHO_A      metabolic_mult mult 2.0 1\n"
-      "Reaction ECHO_B      metabolic_mult mult 2.0 1\n"
-      "Reaction NOT_A       metabolic_mult mult 2.0 1\n"
-      "Reaction NOT_B       metabolic_mult mult 2.0 1\n"
-      "Reaction NAND        metabolic_mult mult 2.0 1\n"
-      "Reaction AND         metabolic_mult mult 2.0 1\n"
-      "Reaction A_OR_NOT_B  metabolic_mult mult 2.0 1\n"
-      "Reaction B_OR_NOT_A  metabolic_mult mult 2.0 1\n"
-      "Reaction OR          metabolic_mult mult 2.0 1\n"
-      "Reaction A_AND_NOT_B metabolic_mult mult 2.0 1\n"
-      "Reaction B_AND_NOT_A metabolic_mult mult 2.0 1\n"
-      "Reaction NOR         metabolic_mult mult 2.0 1\n"
-      "Reaction XOR         metabolic_mult mult 2.0 1\n"
-      "Reaction EQU         metabolic_mult mult 2.0 1\n");
+      "Reaction ECHO     metabolic_mult mult 2.0 1\n"
+      "Reaction NOT      metabolic_mult mult 2.0 1\n"
+      "Reaction NAND     metabolic_mult mult 2.0 1\n"
+      "Reaction AND      metabolic_mult mult 2.0 1\n"
+      "Reaction OR_NOT   metabolic_mult mult 2.0 1\n"
+      "Reaction OR       metabolic_mult mult 2.0 1\n"
+      "Reaction AND_NOT  metabolic_mult mult 2.0 1\n"
+      "Reaction NOR      metabolic_mult mult 2.0 1\n"
+      "Reaction XOR      metabolic_mult mult 2.0 1\n"
+      "Reaction EQU      metabolic_mult mult 2.0 1\n");
   }
 };
