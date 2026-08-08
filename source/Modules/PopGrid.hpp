@@ -66,6 +66,8 @@ public:
   void RegisterSettings() {
     avida.AddSetting("grid.width", width, "Number of columns in population grid");
     avida.AddSetting("grid.height", height, "Number of rows in population grid");
+    avida.GetSettings().Metadata("grid.width").SetMinimum(1).AddTag("startup only");
+    avida.GetSettings().Metadata("grid.height").SetMinimum(1).AddTag("startup only");
   }
 
   size_t GetOrgReserveCount() const { return width * height; }
