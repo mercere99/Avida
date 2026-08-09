@@ -78,6 +78,14 @@ public:
   [[nodiscard]] size_t GetHeight() const { return height; }
   [[nodiscard]] std::span<const size_t> GetCells() const { return org_grid; }
 
+  bool DeleteOrganismAt(size_t cell_id) {
+    if (cell_id >= org_grid.size() || org_grid[cell_id] == EMPTY_CELL) return false;
+    const size_t organism_id = org_grid[cell_id];
+    org_grid[cell_id] = EMPTY_CELL;
+    if (avida.IsOccupied(organism_id)) avida.DeleteOrg(organism_id);
+    return true;
+  }
+
   // === Signal Listeners ===
   void BeforeStart() {
     num_cells = width * height;
@@ -129,5 +137,13 @@ public:
     emp_assert(org_grid[pop_pos] == EMPTY_CELL, "Org must be placed into empty cells");
 
     org_grid[pop_pos] = org.GetBiotaID();
+  }
+
+  template <concepts::Organism ORG_T>
+  void BeforeDeath(ORG_T & org) {
+    const size_t pop_pos = org.GetPhenotype().pop_pos;
+    if (pop_pos < org_grid.size() && org_grid[pop_pos] == org.GetBiotaID()) {
+      org_grid[pop_pos] = EMPTY_CELL;
+    }
   }
 };
