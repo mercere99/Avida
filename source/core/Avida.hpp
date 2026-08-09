@@ -308,6 +308,10 @@ public:
 
   [[nodiscard]] bool HasTrait(const emp::String & name) const { return trait_man.Has(name); }
 
+  [[nodiscard]] emp::vector<emp::String> GetPrintableTraitNames() const {
+    return trait_man.GetPrintableNames();
+  }
+
   template <typename TRAIT_T>
   [[nodiscard]] emp::vector<emp::String> GetTraitNames() const {
     return trait_man.template GetNames<TRAIT_T>();
