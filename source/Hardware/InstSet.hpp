@@ -33,6 +33,7 @@ public:
 private:
   struct InstInfo {
     emp::String name;
+    emp::String description;
     inst_id_t id;
     char symbol = '?';
   };
@@ -50,6 +51,10 @@ public:
   [[nodiscard]] const emp::String & GetName(size_t id) const noexcept {
     emp_assert(id < num_insts);
     return info[id].name;
+  }
+  [[nodiscard]] const emp::String & GetDescription(size_t id) const noexcept {
+    emp_assert(id < num_insts);
+    return info[id].description;
   }
   [[nodiscard]] char GetSymbol(size_t id) const noexcept {
     emp_assert(id < num_insts);
@@ -90,13 +95,15 @@ public:
     return static_cast<inst_id_t>(random.GetUInt(num_insts));
   }
 
-  void AddInst(const emp::String & name, inst_fun_t fun) noexcept {
+  void AddInst(const emp::String & name,
+               inst_fun_t fun,
+               const emp::String & description = "") noexcept {
     emp_assert(num_insts < MAX_SET_SIZE);
 
     const char symbol = GetNextSymbol();
     inst_id_t id = static_cast<inst_id_t>(num_insts);
 
-    info[num_insts] = InstInfo{name, id, symbol};
+    info[num_insts] = InstInfo{name, description, id, symbol};
     funs[num_insts] = fun;
 
     ++num_insts;
@@ -104,10 +111,12 @@ public:
 
   /// Add an instruction to the set that is a nop that can be used as a modifier.
   /// Note: Nops must be at the BEGINNING of the instruction set.
-  bool AddNopInst(const emp::String & name, inst_fun_t fun) noexcept {
+  bool AddNopInst(const emp::String & name,
+                  inst_fun_t fun,
+                  const emp::String & description = "") noexcept {
     emp_always_assert(num_nops == num_insts, "Nops must be at beginning of instruction set.",
         name, num_insts, num_nops);
-    AddInst(name, fun);
+    AddInst(name, fun, description);
     ++num_nops;
     return true;
   }
