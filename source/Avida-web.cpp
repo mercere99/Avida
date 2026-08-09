@@ -10,12 +10,16 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <emscripten.h>
@@ -139,11 +143,146 @@ EM_JS(void, ResizePopulationDisplay, (int width, int height), {
   }
 });
 
+EM_JS(int, GetPopulationCellAtClient,
+      (int client_x, int client_y, int width, int height), {
+  const canvas = document.getElementById('population_canvas');
+  if (!canvas || width <= 0 || height <= 0) return -1;
+
+  const bounds = canvas.getBoundingClientRect();
+  if (client_x < bounds.left || client_x >= bounds.right
+      || client_y < bounds.top || client_y >= bounds.bottom) return -1;
+
+  const x = Math.floor((client_x - bounds.left) * width / bounds.width);
+  const y = Math.floor((client_y - bounds.top) * height / bounds.height);
+  return x + y * width;
+});
+
+EM_JS(void, PositionActiveCellHighlight,
+      (int cell_id, int width, int height), {
+  const highlight = document.getElementById('active_cell_highlight');
+  if (!highlight) return;
+  if (cell_id < 0 || width <= 0 || height <= 0) {
+    highlight.style.display = 'none';
+    return;
+  }
+
+  const x = cell_id % width;
+  const y = Math.floor(cell_id / width);
+  highlight.style.display = 'block';
+  highlight.style.left = `${100 * x / width}%`;
+  highlight.style.top = `${100 * y / height}%`;
+  highlight.style.width = `${100 / width}%`;
+  highlight.style.height = `${100 / height}%`;
+});
+
+EM_JS(char *, LoadFreezerLocalStorage, (), {
+  try {
+    const value = window.localStorage.getItem('avida.web.freezer.v1');
+    if (value === null) return 0;
+    const size = lengthBytesUTF8(value) + 1;
+    const buffer = _malloc(size);
+    stringToUTF8(value, buffer, size);
+    return buffer;
+  } catch (error) {
+    console.warn('Avida freezer could not read local storage.', error);
+    return 0;
+  }
+});
+
+EM_JS(bool, SaveFreezerLocalStorage, (const char * value), {
+  try {
+    window.localStorage.setItem('avida.web.freezer.v1', UTF8ToString(value));
+    return true;
+  } catch (error) {
+    console.warn('Avida freezer could not write local storage.', error);
+    return false;
+  }
+});
+
 class AvidaWebApp {
 private:
   enum class RunMode { PAUSED, PLAY, FAST_FORWARD };
   enum class ColorScale { UNIFORM, CATEGORICAL, CONTINUOUS };
   enum class ConfigurationTab { SETTINGS, ENVIRONMENT, EVENTS };
+  enum class SidePanel { POPULATION, ORGANISM, FREEZER, CONFIGURATION };
+
+  struct FrozenConfiguration {
+    std::map<emp::String, emp::String> settings;
+    emp::String ancestor_genome;
+    emp::vector<reaction_config_t> reactions;
+    emp::vector<event_config_t> events;
+
+    void Serialize(emp::SerialPod & pod) {
+      pod(settings, ancestor_genome);
+
+      size_t reaction_count = reactions.size();
+      pod(reaction_count);
+      if (pod.IsLoad()) reactions.resize(reaction_count);
+      for (auto & reaction : reactions) {
+        pod(
+          reaction.task_name,
+          reaction.trait_name,
+          reaction.operation,
+          reaction.value,
+          reaction.max_triggers
+        );
+      }
+
+      size_t event_count = events.size();
+      pod(event_count);
+      if (pod.IsLoad()) events.resize(event_count);
+      for (auto & event : events) {
+        pod(
+          event.timing,
+          event.start,
+          event.interval,
+          event.stop,
+          event.command
+        );
+      }
+    }
+  };
+
+  struct FrozenOrganism {
+    size_t id = 0;
+    emp::String name;
+    emp::String genome;
+    size_t instruction_count = 0;
+
+    void Serialize(emp::SerialPod & pod) { pod(id, name, genome, instruction_count); }
+  };
+
+  struct FrozenConfigurationItem {
+    size_t id = 0;
+    emp::String name;
+    FrozenConfiguration configuration;
+
+    void Serialize(emp::SerialPod & pod) { pod(id, name, configuration); }
+  };
+
+  struct FrozenRun {
+    size_t id = 0;
+    emp::String name;
+    FrozenConfiguration configuration;
+    emp::String state;
+    size_t update = 0;
+    size_t organism_count = 0;
+
+    void Serialize(emp::SerialPod & pod) {
+      pod(id, name, configuration, state, update, organism_count);
+    }
+  };
+
+  struct FreezerStore {
+    size_t next_id = 1;
+    emp::vector<FrozenOrganism> organisms;
+    emp::vector<FrozenConfigurationItem> configurations;
+    emp::vector<FrozenRun> runs;
+
+    void Serialize(emp::SerialPod & pod) {
+      pod(next_id, organisms, configurations, runs);
+    }
+  };
 
   static constexpr double PLAY_INTERVAL_MS = 100.0;
   static constexpr double FAST_FORWARD_FRAME_BUDGET_MS = 12.0;
@@ -185,15 +324,23 @@ private:
   UI::Button pause_button;
   UI::Button fast_forward_button;
   UI::Button pop_stats_mode;
+  UI::Button org_stats_mode;
+  UI::Button freezer_mode;
   UI::Button configure_mode;
+  UI::Button save_organism_button;
+  UI::Button save_configuration_button;
+  UI::Button save_run_button;
   UI::Button advanced_toggle;
   UI::Button reset_configuration_button;
   UI::Selector color_selector{"population_color_mode"};
   UI::Div run_inspector;
+  UI::Div org_stats_inspector;
+  UI::Div freezer_inspector;
   UI::Div configuration_inspector;
   emp::vector<UI::Input> configuration_inputs;
   emp::vector<UI::Selector> configuration_selectors;
   emp::vector<UI::Text> statistic_texts;
+  UI::Text org_stats_content;
 
   RunMode run_mode = RunMode::PAUSED;
   ColorScale active_color_scale = ColorScale::UNIFORM;
@@ -204,18 +351,246 @@ private:
   emp::vector<double> continuous_values;
   emp::vector<emp::String> final_statistic_values;
   bool has_final_snapshot = false;
-  bool configuration_visible = false;
   bool advanced_settings_visible = false;
   bool run_started = false;
   bool interface_rebuild_requested = false;
   bool structured_config_initialized = false;
   ConfigurationTab active_configuration_tab = ConfigurationTab::SETTINGS;
+  SidePanel active_side_panel = SidePanel::POPULATION;
+  avida_t::org_ref_t active_organism;
+  size_t active_cell_id = PopGrid<avida_t>::EMPTY_CELL;
+  FreezerStore freezer;
+  emp::String freezer_message;
+  emp::String configured_ancestor_genome;
 
   [[nodiscard]] avida_t & Avida() { return *avida; }
   [[nodiscard]] const avida_t & Avida() const { return *avida; }
   [[nodiscard]] auto & Grid() { return Avida().GetPlugIn<PopGrid>(); }
   [[nodiscard]] auto & Reactions() { return Avida().GetPlugIn<ReactionsManager>(); }
   [[nodiscard]] auto & Events() { return Avida().GetPlugIn<EventManager>(); }
+
+  [[nodiscard]] static emp::String ReadTextFile(const std::string & filename) {
+    std::ifstream input{filename};
+    std::ostringstream contents;
+    contents << input.rdbuf();
+    return contents.str();
+  }
+
+  [[nodiscard]] bool PersistFreezer() {
+    std::ostringstream output;
+    output << "AVIDA_FREEZER_V1\n";
+    emp::SerialPod pod{output};
+    pod(freezer);
+    const std::string serialized = output.str();
+    const bool persisted = SaveFreezerLocalStorage(serialized.c_str());
+    freezer_message = persisted
+      ? "Saved in this browser."
+      : "Saved for this session; browser storage is unavailable or full.";
+    return persisted;
+  }
+
+  [[nodiscard]] bool RestoreFreezer() {
+    char * stored_value = LoadFreezerLocalStorage();
+    if (!stored_value) return false;
+    const std::string serialized{stored_value};
+    std::free(stored_value);
+
+    static constexpr std::string_view prefix{"AVIDA_FREEZER_V1\n"};
+    if (!serialized.starts_with(prefix)) return false;
+    std::istringstream input{serialized.substr(prefix.size())};
+    emp::SerialPod pod{input};
+    pod(freezer);
+    freezer_message = "Loaded from this browser.";
+    return true;
+  }
+
+  [[nodiscard]] FrozenConfiguration SnapshotConfiguration() const {
+    return {
+      .settings = SnapshotSettingValues(),
+      .ancestor_genome = configured_ancestor_genome,
+      .reactions = reaction_configs,
+      .events = event_configs
+    };
+  }
+
+  void InitializeFreezer() {
+    if (RestoreFreezer()) return;
+
+    const emp::String ancestor_text = ReadTextFile("/config/ancestor.org");
+    size_t ancestor_size = 0;
+    const auto ancestor = Avida().GetPlugIn<OrgTypeAvidian>().LoadGenome("/config/ancestor.org");
+    if (ancestor) ancestor_size = ancestor->size();
+    freezer.organisms.push_back({
+      .id = freezer.next_id++,
+      .name = "Ancestor",
+      .genome = ancestor_text,
+      .instruction_count = ancestor_size
+    });
+    freezer.configurations.push_back({
+      .id = freezer.next_id++,
+      .name = "Default Configuration",
+      .configuration = SnapshotConfiguration()
+    });
+    (void) PersistFreezer();
+  }
+
+  void SaveActiveOrganism() {
+    const auto * organism = GetActiveOrganism();
+    if (!organism) return;
+
+    emp::String genome_text;
+    const auto & genome = organism->GetGenome();
+    const auto & inst_set = organism->Hardware().GetInstSet();
+    for (const auto inst_id : genome) {
+      genome_text += inst_set.GetName(inst_id);
+      genome_text += '\n';
+    }
+    freezer.organisms.push_back({
+      .id = freezer.next_id++,
+      .name = emp::MakeString("Organism #", organism->GetGlobalID(), " at update ", Avida().GetUpdate()),
+      .genome = std::move(genome_text),
+      .instruction_count = genome.size()
+    });
+    (void) PersistFreezer();
+    RequestInterfaceRebuild();
+  }
+
+  void SaveConfiguration() {
+    const size_t id = freezer.next_id++;
+    freezer.configurations.push_back({
+      .id = id,
+      .name = emp::MakeString("Configuration ", id),
+      .configuration = SnapshotConfiguration()
+    });
+    (void) PersistFreezer();
+    RequestInterfaceRebuild();
+  }
+
+  void SaveRun() {
+    if (!run_started) return;
+
+    std::ostringstream output;
+    emp::SerialPod pod{output};
+    pod(Avida());
+    const size_t id = freezer.next_id++;
+    freezer.runs.push_back({
+      .id = id,
+      .name = emp::MakeString("Run at update ", Avida().GetUpdate()),
+      .configuration = SnapshotConfiguration(),
+      .state = output.str(),
+      .update = Avida().GetUpdate(),
+      .organism_count = Avida().GetNumOrgs()
+    });
+    (void) PersistFreezer();
+    RequestInterfaceRebuild();
+  }
+
+  void LoadConfiguration(const FrozenConfiguration & configuration) {
+    SetRunMode(RunMode::PAUSED);
+    reaction_configs = configuration.reactions;
+    event_configs = configuration.events;
+    CreateConfiguredAvida(configuration.settings, configuration.ancestor_genome);
+    RequestInterfaceRebuild();
+  }
+
+  void LoadFrozenOrganism(size_t id) {
+    for (const auto & item : freezer.organisms) {
+      if (item.id != id) continue;
+      FrozenConfiguration configuration = SnapshotConfiguration();
+      configuration.ancestor_genome = item.genome;
+      LoadConfiguration(configuration);
+      freezer_message = emp::MakeString("Loaded ", item.name, " as the dish ancestor.");
+      return;
+    }
+  }
+
+  void LoadFrozenConfiguration(size_t id) {
+    for (const auto & item : freezer.configurations) {
+      if (item.id != id) continue;
+      LoadConfiguration(item.configuration);
+      freezer_message = emp::MakeString("Loaded ", item.name, ".");
+      return;
+    }
+  }
+
+  void LoadFrozenRun(size_t id) {
+    for (const auto & item : freezer.runs) {
+      if (item.id != id) continue;
+
+      SetRunMode(RunMode::PAUSED);
+      reaction_configs = item.configuration.reactions;
+      event_configs = item.configuration.events;
+      CreateConfiguredAvida(item.configuration.settings, item.configuration.ancestor_genome);
+      std::istringstream input{item.state.str()};
+      emp::SerialPod pod{input};
+      pod(Avida());
+      Avida().GetBiota().ForEachOrg([this](auto & organism) {
+        Avida().GetPlugIn<OrgTypeAvidian>().SetupHardware(organism);
+      });
+      Avida().GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback(
+        [this](){ CaptureFinalView(); }
+      );
+      run_started = true;
+      run_mode = RunMode::PAUSED;
+      has_final_snapshot = false;
+      last_grid_redraw_update = 0;
+      play_elapsed_ms = 0.0;
+      active_organism = {};
+      active_cell_id = PopGrid<avida_t>::EMPTY_CELL;
+      CollectPopulationViewOptions();
+      emp_assert(Avida().OK());
+      freezer_message = emp::MakeString("Loaded ", item.name, ".");
+      RequestInterfaceRebuild();
+      return;
+    }
+  }
+
+  template <typename ITEM_T>
+  void RemoveFrozenItem(emp::vector<ITEM_T> & items, size_t id) {
+    const auto iterator = std::find_if(items.begin(), items.end(), [id](const auto & item) {
+      return item.id == id;
+    });
+    if (iterator == items.end()) return;
+    const emp::String removed_name = iterator->name;
+    items.erase(iterator);
+    (void) PersistFreezer();
+    freezer_message = emp::MakeString("Removed ", removed_name, ".");
+    RequestInterfaceRebuild();
+  }
+
+  [[nodiscard]] const avida_t::organism_t * GetActiveOrganism() const {
+    return active_organism.TryGet();
+  }
+
+  void UpdateActiveCellHighlight() {
+    if (!GetActiveOrganism()) {
+      active_organism = {};
+      active_cell_id = PopGrid<avida_t>::EMPTY_CELL;
+    }
+    const int display_cell = active_cell_id == PopGrid<avida_t>::EMPTY_CELL
+      ? -1
+      : static_cast<int>(active_cell_id);
+    PositionActiveCellHighlight(
+      display_cell, static_cast<int>(Grid().GetWidth()), static_cast<int>(Grid().GetHeight())
+    );
+  }
+
+  void SelectPopulationCell(size_t cell_id) {
+    const auto cells = Grid().GetCells();
+    if (!run_started || cell_id >= cells.size()) return;
+
+    const size_t org_id = cells[cell_id];
+    if (org_id == PopGrid<avida_t>::EMPTY_CELL || !Avida().IsOccupied(org_id)) {
+      active_organism = {};
+      active_cell_id = PopGrid<avida_t>::EMPTY_CELL;
+    } else {
+      active_organism = Avida().GetOrgRef(org_id);
+      active_cell_id = cell_id;
+    }
+    UpdateActiveCellHighlight();
+    UpdateControls();
+    if (active_side_panel == SidePanel::ORGANISM) org_stats_content.Redraw();
+  }
 
   void RequestInterfaceRebuild() {
     if (interface_rebuild_requested) return;
@@ -261,6 +636,10 @@ private:
 
   void RefreshReadouts() {
     for (auto & text : statistic_texts) text.Redraw();
+    if (active_side_panel == SidePanel::ORGANISM) {
+      UpdateActiveCellHighlight();
+      org_stats_content.Redraw();
+    }
   }
 
   [[nodiscard]] emp::String GetStatisticValue(size_t statistic_id) const {
@@ -316,6 +695,9 @@ private:
       "aria-pressed",
       run_mode == RunMode::FAST_FORWARD ? "true" : "false"
     );
+    save_organism_button.SetDisabled(!GetActiveOrganism());
+    save_configuration_button.SetDisabled(false);
+    save_run_button.SetDisabled(!run_started);
   }
 
   void SetRunMode(RunMode new_mode) {
@@ -385,6 +767,7 @@ private:
         static_cast<int>(width),
         static_cast<int>(height)
       );
+      UpdateActiveCellHighlight();
       return;
     }
 
@@ -395,6 +778,7 @@ private:
       RenderPopulationPixels(
         population_pixels.data(), static_cast<int>(width), static_cast<int>(height)
       );
+      UpdateActiveCellHighlight();
       last_grid_redraw_update = 0;
       return;
     }
@@ -440,6 +824,7 @@ private:
       static_cast<int>(width),
       static_cast<int>(height)
     );
+    UpdateActiveCellHighlight();
     last_grid_redraw_update = Avida().GetUpdate();
   }
 
@@ -469,7 +854,10 @@ private:
     return values;
   }
 
-  void CreateConfiguredAvida(const std::map<emp::String, emp::String> & values = {}) {
+  void CreateConfiguredAvida(
+    const std::map<emp::String, emp::String> & values = {},
+    const emp::String & ancestor_genome = ""
+  ) {
     if (avida) {
       Avida().GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback({});
       avida.reset();
@@ -493,6 +881,13 @@ private:
     for (const auto & [name, value] : values) {
       if (settings.HasSetting(name)) settings.Set(name, value);
     }
+    configured_ancestor_genome = ancestor_genome;
+    if (configured_ancestor_genome.size()) {
+      static constexpr const char * frozen_ancestor_path = "/tmp/avida-web-frozen-ancestor.org";
+      std::ofstream ancestor_output{frozen_ancestor_path};
+      ancestor_output << configured_ancestor_genome;
+      settings.Set("base.ancestor_filename", emp::String{frozen_ancestor_path});
+    }
 
     run_mode = RunMode::PAUSED;
     run_started = false;
@@ -502,6 +897,8 @@ private:
     population_pixels.clear();
     continuous_values.clear();
     final_statistic_values.clear();
+    active_organism = {};
+    active_cell_id = PopGrid<avida_t>::EMPTY_CELL;
     CollectPopulationViewOptions();
   }
 
@@ -520,8 +917,9 @@ private:
   void RestartPopulation() {
     if (!ConfirmPopulationRestart()) return;
     const auto current_values = SnapshotSettingValues();
+    const emp::String current_ancestor = configured_ancestor_genome;
     SetRunMode(RunMode::PAUSED);
-    CreateConfiguredAvida(current_values);
+    CreateConfiguredAvida(current_values, current_ancestor);
     RequestInterfaceRebuild();
   }
 
@@ -683,20 +1081,120 @@ private:
     }
   }
 
-  void SetConfigurationVisible(bool visible) {
-    configuration_visible = visible;
-    run_inspector.SetCSS("display", visible ? "none" : "block");
-    configuration_inspector.SetCSS("display", visible ? "block" : "none");
+  [[nodiscard]] emp::String BuildOrganismStatsHTML() {
+    const auto * organism = GetActiveOrganism();
+    if (!organism) {
+      return "<p class='org-stats-empty'>Select an occupied population cell to inspect its organism.</p>";
+    }
+
+    const size_t width = Grid().GetWidth();
+    const size_t x = active_cell_id % width;
+    const size_t y = active_cell_id / width;
+    emp::String out;
+    out.Append(
+      "<div class='org-stats-summary'><span>Active organism <strong>#",
+      organism->GetGlobalID(), "</strong></span><span>Cell ", x, ", ", y, "</span></div>"
+    );
+
+    out += "<section class='org-stats-section'><h3>Phenotype</h3><dl class='trait-list'>";
+    const auto trait_names = Avida().GetPrintableTraitNames();
+    for (const emp::String & name : trait_names) {
+      const auto & trait = Avida().GetTrait(name);
+      out.Append(
+        "<div class='trait-row' title='", emp::MakeWebSafe(trait.GetDesc()), "'><dt>",
+        emp::MakeWebSafe(name), "</dt><dd>", emp::MakeWebSafe(trait.AsString(*organism)),
+        "</dd></div>"
+      );
+    }
+    if (trait_names.empty()) out += "<div class='org-stats-empty'>No printable traits.</div>";
+    out += "</dl></section>";
+
+    const auto & genome = organism->GetGenome();
+    const auto & inst_set = organism->Hardware().GetInstSet();
+    out.Append(
+      "<section class='org-stats-section'><h3>Genome <span>", genome.size(),
+      " instructions</span></h3><ol class='genome-list'>"
+    );
+    for (size_t pos = 0; pos < genome.size(); ++pos) {
+      const size_t inst_id = genome[pos];
+      const emp::String & description = inst_set.GetDescription(inst_id);
+      out.Append(
+        "<li title='", emp::MakeWebSafe(description), "'><code>",
+        emp::MakeWebSafe(inst_set.GetName(inst_id)), "</code></li>"
+      );
+    }
+    out += "</ol></section>";
+
+    const AvidaVM & hardware = organism->Hardware();
+    static constexpr std::array<const char *, AvidaVM::NUM_NOPS> head_names{
+      "Instruction", "Genome read", "Genome write", "Memory read", "Memory write", "Flow"
+    };
+    out += "<section class='org-stats-section'><h3>Hardware</h3>";
+    out.Append(
+      "<div class='hardware-counters'><span>Executed <strong>", hardware.GetExeCount(),
+      "</strong></span><span>Copied <strong>", hardware.GetCopyCount(),
+      "</strong></span><span>Errors <strong>", hardware.GetErrorCount(), "</strong></span></div>"
+    );
+    out += "<h4>Heads</h4><dl class='hardware-list'>";
+    const auto & heads = hardware.GetHeads();
+    for (size_t i = 0; i < heads.size(); ++i) {
+      out.Append("<div><dt>", head_names[i], "</dt><dd>", heads[i], "</dd></div>");
+    }
+    out += "</dl><h4>Stacks</h4><dl class='hardware-list'>";
+    const auto & stacks = hardware.GetStacks();
+    for (size_t i = 0; i < stacks.size(); ++i) {
+      emp::String values = stacks[i].ToString();
+      if (values.empty()) values = "0";
+      out.Append(
+        "<div><dt>", static_cast<char>('A' + i), "</dt><dd>",
+        emp::MakeWebSafe(values), "</dd></div>"
+      );
+    }
+    out += "</dl><h4>Nonzero memory</h4><div class='hardware-memory'>";
+    bool found_memory = false;
+    const auto & memory = hardware.GetMemory();
+    for (size_t i = 0; i < memory.size(); ++i) {
+      if (memory[i] == 0) continue;
+      found_memory = true;
+      out.Append("<span><code>", i, "</code>: ", memory[i], "</span>");
+    }
+    if (!found_memory) out += "<span>All locations are zero.</span>";
+    out += "</div></section>";
+    return out;
+  }
+
+  void SetSidePanel(SidePanel panel) {
+    active_side_panel = panel;
+    const bool show_population = panel == SidePanel::POPULATION;
+    const bool show_organism = panel == SidePanel::ORGANISM;
+    const bool show_freezer = panel == SidePanel::FREEZER;
+    const bool show_configuration = panel == SidePanel::CONFIGURATION;
+
+    run_inspector.SetCSS("display", show_population ? "block" : "none");
+    org_stats_inspector.SetCSS("display", show_organism ? "block" : "none");
+    freezer_inspector.SetCSS("display", show_freezer ? "block" : "none");
+    configuration_inspector.SetCSS("display", show_configuration ? "block" : "none");
     pop_stats_mode.SetAttr(
-      "class",
-      visible ? "mode-button side-mode-button" : "mode-button side-mode-button is-active"
+      "class", show_population
+        ? "mode-button side-mode-button is-active" : "mode-button side-mode-button"
+    );
+    org_stats_mode.SetAttr(
+      "class", show_organism
+        ? "mode-button side-mode-button is-active" : "mode-button side-mode-button"
+    );
+    freezer_mode.SetAttr(
+      "class", show_freezer
+        ? "mode-button side-mode-button is-active" : "mode-button side-mode-button"
     );
     configure_mode.SetAttr(
-      "class",
-      visible ? "mode-button side-mode-button is-active" : "mode-button side-mode-button"
+      "class", show_configuration
+        ? "mode-button side-mode-button is-active" : "mode-button side-mode-button"
     );
-    pop_stats_mode.SetAttr("aria-pressed", visible ? "false" : "true");
-    configure_mode.SetAttr("aria-pressed", visible ? "true" : "false");
+    pop_stats_mode.SetAttr("aria-pressed", show_population ? "true" : "false");
+    org_stats_mode.SetAttr("aria-pressed", show_organism ? "true" : "false");
+    freezer_mode.SetAttr("aria-pressed", show_freezer ? "true" : "false");
+    configure_mode.SetAttr("aria-pressed", show_configuration ? "true" : "false");
+    if (show_organism) org_stats_content.Redraw();
   }
 
   void AddConfigurationSetting(UI::Div & scope_panel,
@@ -1107,6 +1605,156 @@ private:
     content << event_list;
   }
 
+  void BuildFreezerPanel() {
+    freezer_inspector = UI::Div{"freezer_inspector"};
+    freezer_inspector.AddAttr("class", "freezer-inspector");
+    freezer_inspector.SetCSS("display", "none");
+    freezer_inspector << "<h2>Freezer</h2>";
+    freezer_inspector <<
+      "<p class='freezer-intro'>Save organisms, configured dishes, and complete running dishes in this browser.</p>";
+    if (freezer_message.size()) {
+      freezer_inspector << emp::MakeString(
+        "<p class='freezer-message'>", emp::MakeWebSafe(freezer_message), "</p>"
+      );
+    }
+
+    UI::Div organism_section{"freezer_organism_section"};
+    organism_section.AddAttr("class", "freezer-section");
+    UI::Div organism_header{"freezer_organism_header"};
+    organism_header.AddAttr("class", "freezer-section-header");
+    organism_header << "<div><h3>Organisms</h3><p>Genomes that can seed a new dish.</p></div>";
+    save_organism_button = UI::Button{
+      [this](){ SaveActiveOrganism(); }, "Save Organism", "save_organism_button"
+    };
+    save_organism_button.AddAttr("class", "freezer-save-button");
+    save_organism_button.SetDisabled(!GetActiveOrganism());
+    organism_header << save_organism_button;
+    organism_section << organism_header;
+    UI::Div organism_list{"freezer_organism_list"};
+    organism_list.AddAttr("class", "freezer-list");
+    for (const auto & item : freezer.organisms) {
+      UI::Div row{emp::MakeString("frozen_organism_", item.id)};
+      row.AddAttr("class", "freezer-item");
+      row << emp::MakeString(
+        "<div class='freezer-item-copy'><strong>", emp::MakeWebSafe(item.name),
+        "</strong><span>", item.instruction_count, " instructions</span></div>"
+      );
+      UI::Div actions{emp::MakeString("frozen_organism_actions_", item.id)};
+      actions.AddAttr("class", "freezer-item-actions");
+      UI::Button load_button{
+        [this, id=item.id](){ LoadFrozenOrganism(id); },
+        "Load", emp::MakeString("load_frozen_organism_", item.id)
+      };
+      load_button.AddAttr("class", "freezer-load-button");
+      UI::Button remove_button{
+        [this, id=item.id](){ RemoveFrozenItem(freezer.organisms, id); },
+        "&times;", emp::MakeString("remove_frozen_organism_", item.id)
+      };
+      remove_button.AddAttr("class", "freezer-remove-button");
+      remove_button.SetAttr("aria-label", emp::MakeString("Remove ", item.name));
+      remove_button.SetTitle(emp::MakeString("Remove ", item.name));
+      actions << load_button;
+      actions << remove_button;
+      row << actions;
+      organism_list << row;
+    }
+    if (freezer.organisms.empty()) {
+      organism_list << "<p class='freezer-empty'>No frozen organisms.</p>";
+    }
+    organism_section << organism_list;
+    freezer_inspector << organism_section;
+
+    UI::Div configuration_section{"freezer_configuration_section"};
+    configuration_section.AddAttr("class", "freezer-section");
+    UI::Div configuration_header{"freezer_configuration_header"};
+    configuration_header.AddAttr("class", "freezer-section-header");
+    configuration_header << "<div><h3>Configurations</h3><p>Configured dishes before a run.</p></div>";
+    save_configuration_button = UI::Button{
+      [this](){ SaveConfiguration(); }, "Save Configuration", "save_configuration_button"
+    };
+    save_configuration_button.AddAttr("class", "freezer-save-button");
+    configuration_header << save_configuration_button;
+    configuration_section << configuration_header;
+    UI::Div configuration_list{"freezer_configuration_list"};
+    configuration_list.AddAttr("class", "freezer-list");
+    for (const auto & item : freezer.configurations) {
+      UI::Div row{emp::MakeString("frozen_configuration_", item.id)};
+      row.AddAttr("class", "freezer-item");
+      row << emp::MakeString(
+        "<div class='freezer-item-copy'><strong>", emp::MakeWebSafe(item.name),
+        "</strong><span>", item.configuration.reactions.size(), " reactions, ",
+        item.configuration.events.size(), " events</span></div>"
+      );
+      UI::Div actions{emp::MakeString("frozen_configuration_actions_", item.id)};
+      actions.AddAttr("class", "freezer-item-actions");
+      UI::Button load_button{
+        [this, id=item.id](){ LoadFrozenConfiguration(id); },
+        "Load", emp::MakeString("load_frozen_configuration_", item.id)
+      };
+      load_button.AddAttr("class", "freezer-load-button");
+      UI::Button remove_button{
+        [this, id=item.id](){ RemoveFrozenItem(freezer.configurations, id); },
+        "&times;", emp::MakeString("remove_frozen_configuration_", item.id)
+      };
+      remove_button.AddAttr("class", "freezer-remove-button");
+      remove_button.SetAttr("aria-label", emp::MakeString("Remove ", item.name));
+      remove_button.SetTitle(emp::MakeString("Remove ", item.name));
+      actions << load_button;
+      actions << remove_button;
+      row << actions;
+      configuration_list << row;
+    }
+    if (freezer.configurations.empty()) {
+      configuration_list << "<p class='freezer-empty'>No frozen configurations.</p>";
+    }
+    configuration_section << configuration_list;
+    freezer_inspector << configuration_section;
+
+    UI::Div run_section{"freezer_run_section"};
+    run_section.AddAttr("class", "freezer-section");
+    UI::Div run_header{"freezer_run_header"};
+    run_header.AddAttr("class", "freezer-section-header");
+    run_header << "<div><h3>Runs</h3><p>Complete population and hardware state.</p></div>";
+    save_run_button = UI::Button{
+      [this](){ SaveRun(); }, "Save Run", "save_run_button"
+    };
+    save_run_button.AddAttr("class", "freezer-save-button");
+    save_run_button.SetDisabled(!run_started);
+    run_header << save_run_button;
+    run_section << run_header;
+    UI::Div run_list{"freezer_run_list"};
+    run_list.AddAttr("class", "freezer-list");
+    for (const auto & item : freezer.runs) {
+      UI::Div row{emp::MakeString("frozen_run_", item.id)};
+      row.AddAttr("class", "freezer-item");
+      row << emp::MakeString(
+        "<div class='freezer-item-copy'><strong>", emp::MakeWebSafe(item.name),
+        "</strong><span>", item.organism_count, " organisms</span></div>"
+      );
+      UI::Div actions{emp::MakeString("frozen_run_actions_", item.id)};
+      actions.AddAttr("class", "freezer-item-actions");
+      UI::Button load_button{
+        [this, id=item.id](){ LoadFrozenRun(id); },
+        "Load", emp::MakeString("load_frozen_run_", item.id)
+      };
+      load_button.AddAttr("class", "freezer-load-button");
+      UI::Button remove_button{
+        [this, id=item.id](){ RemoveFrozenItem(freezer.runs, id); },
+        "&times;", emp::MakeString("remove_frozen_run_", item.id)
+      };
+      remove_button.AddAttr("class", "freezer-remove-button");
+      remove_button.SetAttr("aria-label", emp::MakeString("Remove ", item.name));
+      remove_button.SetTitle(emp::MakeString("Remove ", item.name));
+      actions << load_button;
+      actions << remove_button;
+      row << actions;
+      run_list << row;
+    }
+    if (freezer.runs.empty()) run_list << "<p class='freezer-empty'>No frozen runs.</p>";
+    run_section << run_list;
+    freezer_inspector << run_section;
+  }
+
   void BuildConfigurationPanel() {
     configuration_inspector = UI::Div{"configuration_inspector"};
     configuration_inspector.AddAttr("class", "configuration-inspector");
@@ -1293,22 +1941,28 @@ private:
     UI::Div side_modes{"side_mode_buttons"};
     side_modes.AddAttr("class", "mode-buttons side-mode-buttons");
     pop_stats_mode = UI::Button{
-      [this](){ SetConfigurationVisible(false); },
+      [this](){ SetSidePanel(SidePanel::POPULATION); },
       "<img src='assets/icons/StatsPop.png' alt=''><span>POP STATS</span>",
       "pop_stats_mode"
     };
-    UI::Button org_stats_mode{
-      [](){},
+    org_stats_mode = UI::Button{
+      [this](){ SetSidePanel(SidePanel::ORGANISM); },
       "<img src='assets/icons/StatsOrg.png' alt=''><span>ORG STATS</span>",
       "org_stats_mode"
     };
-    UI::Button freezer_mode{
-      [](){},
+    freezer_mode = UI::Button{
+      [this](){ SetSidePanel(SidePanel::FREEZER); },
       "<img src='assets/icons/Freezer.png' alt=''><span>FREEZER</span>",
       "freezer_mode"
     };
     configure_mode = UI::Button{
-      [this](){ SetConfigurationVisible(!configuration_visible); },
+      [this](){
+        SetSidePanel(
+          active_side_panel == SidePanel::CONFIGURATION
+            ? SidePanel::POPULATION
+            : SidePanel::CONFIGURATION
+        );
+      },
       "<img src='assets/icons/Config.png' alt=''><span>CONFIGURE</span>",
       "configure_mode"
     };
@@ -1321,6 +1975,8 @@ private:
     freezer_mode.SetAttr("aria-label", "Freezer");
     configure_mode.SetAttr("aria-label", "Configure");
     pop_stats_mode.SetAttr("aria-controls", "run_inspector");
+    org_stats_mode.SetAttr("aria-controls", "org_stats_inspector");
+    freezer_mode.SetAttr("aria-controls", "freezer_inspector");
     configure_mode.SetAttr("aria-controls", "configuration_inspector");
     pop_stats_mode.SetAttr("aria-pressed", "true");
     org_stats_mode.SetAttr("aria-pressed", "false");
@@ -1356,6 +2012,17 @@ private:
     population_canvas.AddAttr("class", "population-canvas");
     population_canvas.SetAttr("role", "img");
     population_canvas.SetAttr("aria-label", "Grid population of digital organisms");
+    population_canvas.OnClick(std::function<void(UI::MouseEvent)>{
+      [this](UI::MouseEvent event) {
+        const int cell_id = GetPopulationCellAtClient(
+          event.clientX,
+          event.clientY,
+          static_cast<int>(Grid().GetWidth()),
+          static_cast<int>(Grid().GetHeight())
+        );
+        if (cell_id >= 0) SelectPopulationCell(static_cast<size_t>(cell_id));
+      }
+    });
     UI::Div population_surface{"population_grid_surface"};
     population_surface.AddAttr("class", "population-grid-surface");
     population_surface.AddAttr(
@@ -1366,6 +2033,10 @@ private:
       )
     );
     population_surface << population_canvas;
+    UI::Div active_cell_highlight{"active_cell_highlight"};
+    active_cell_highlight.AddAttr("class", "active-cell-highlight");
+    active_cell_highlight.SetAttr("aria-hidden", "true");
+    population_surface << active_cell_highlight;
     canvas_frame << population_surface;
 
     UI::Div transport{"transport"};
@@ -1445,12 +2116,22 @@ private:
     }
     run_inspector << readouts;
 
+    org_stats_inspector = UI::Div{"org_stats_inspector"};
+    org_stats_inspector.AddAttr("class", "org-stats-inspector");
+    org_stats_inspector << "<h2>Organism</h2>";
+    org_stats_content = UI::Text{"org_stats_content"};
+    org_stats_content << UI::Live([this](){ return BuildOrganismStatsHTML(); });
+    org_stats_inspector << org_stats_content;
+
+    BuildFreezerPanel();
     BuildConfigurationPanel();
 
     workspace << population_card;
     UI::Div side_panel{"side_panel"};
     side_panel.AddAttr("class", "side-panel");
     side_panel << run_inspector;
+    side_panel << org_stats_inspector;
+    side_panel << freezer_inspector;
     side_panel << configuration_inspector;
     workspace << side_panel;
     app << workspace;
@@ -1458,7 +2139,7 @@ private:
   }
 
   void RebuildInterface() {
-    const bool restore_configuration = configuration_visible;
+    const SidePanel restore_side_panel = active_side_panel;
     document.Freeze();
     document.ClearChildren();
     configuration_inputs.clear();
@@ -1466,7 +2147,7 @@ private:
     statistic_texts.clear();
     SetupColorSelector();
     BuildInterface();
-    SetConfigurationVisible(restore_configuration);
+    SetSidePanel(restore_side_panel);
     UpdateControls();
     document.Activate();
     DrawPopulation();
@@ -1484,6 +2165,7 @@ public:
   void Initialize() {
     CreateConfiguredAvida();
     default_setting_values = SnapshotSettingValues();
+    InitializeFreezer();
     std::println(
       "Loaded /config/Avida-web.cfg (substitution probability = {}).",
       Avida().GetSettings().Get<double>("mutations.substitution_prob")
