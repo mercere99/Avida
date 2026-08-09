@@ -57,6 +57,7 @@ public:
   [[nodiscard]] emp::String GetLocation() const { return emp::MakeString(filename, ':', line); }
 
   [[nodiscard]] virtual emp::TypeID GetTypeID() const = 0;
+  [[nodiscard]] virtual bool IsPrintable() const = 0;
   [[nodiscard]] virtual double AsDouble(const organism_t &) const = 0;
   [[nodiscard]] virtual emp::String AsString(const organism_t &) const = 0;
   [[nodiscard]] virtual std::span<double> AsSpan(const organism_t &) const = 0;
@@ -93,6 +94,9 @@ public:
   [[nodiscard]] const cget_fun_t & GetConstAccessFun() const { return cget_fun; }
 
   [[nodiscard]] emp::TypeID GetTypeID() const override { return emp::GetTypeID<TRAIT_T>(); }
+  [[nodiscard]] bool IsPrintable() const override {
+    return std::formattable<const TRAIT_T, char>;
+  }
 
   [[nodiscard]] double AsDouble(const organism_t & o) const override {
     if constexpr (std::convertible_to<TRAIT_T, double>) {
@@ -136,6 +140,15 @@ public:
   ~TraitManager() { Clear(); }
 
   [[nodiscard]] bool Has(const emp::String & name) const { return trait_map.contains(name); }
+
+  [[nodiscard]] emp::vector<emp::String> GetPrintableNames() const {
+    emp::vector<emp::String> names;
+    for (const auto & [name, trait_ptr] : trait_map) {
+      if (trait_ptr->IsPrintable()) names.push_back(name);
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+  }
 
   template <typename TRAIT_T>
   [[nodiscard]] emp::vector<emp::String> GetNames() const {
