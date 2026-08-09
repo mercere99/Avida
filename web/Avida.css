@@ -202,6 +202,7 @@ select:focus-visible {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 1;
   background-image:
     linear-gradient(to right, rgba(4, 17, 25, 0.28) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(4, 17, 25, 0.28) 1px, transparent 1px);
@@ -216,6 +217,20 @@ select:focus-visible {
   display: block;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+  cursor: pointer;
+}
+
+.active-cell-highlight {
+  position: absolute;
+  z-index: 2;
+  display: none;
+  box-sizing: border-box;
+  border: 2px solid #ffffff;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(8, 25, 36, 0.92),
+    0 0 0 1px rgba(8, 25, 36, 0.92),
+    0 0 8px rgba(255, 255, 255, 0.72);
 }
 
 .transport {
@@ -351,6 +366,8 @@ select:focus-visible {
 }
 
 .run-inspector,
+.org-stats-inspector,
+.freezer-inspector,
 .configuration-inspector {
   min-height: 0;
   padding: 12px;
@@ -360,6 +377,8 @@ select:focus-visible {
 }
 
 .run-inspector h2,
+.org-stats-inspector h2,
+.freezer-inspector h2,
 .configuration-inspector h2 {
   margin: 0;
   color: #8faab7;
@@ -370,6 +389,313 @@ select:focus-visible {
 
 .run-inspector h2 {
   margin-bottom: 10px;
+}
+
+.org-stats-inspector {
+  max-height: min(calc(100dvh - 124px), 790px);
+  overflow-y: auto;
+}
+
+.org-stats-inspector > h2 {
+  margin-bottom: 10px;
+}
+
+.org-stats-summary {
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #b9ced8;
+  font-size: 0.72rem;
+}
+
+.org-stats-section {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(132, 180, 200, 0.16);
+  border-radius: 10px;
+  background: rgba(7, 24, 36, 0.48);
+}
+
+.org-stats-section h3,
+.org-stats-section h4 {
+  margin: 0 0 8px;
+  color: #dcebf1;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.org-stats-section h3 span {
+  color: #7795a3;
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.org-stats-section h4 {
+  margin-top: 10px;
+  color: #91acb8;
+  font-size: 0.58rem;
+}
+
+.org-stats-empty {
+  margin: 0;
+  padding: 16px 8px;
+  color: #7894a1;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.trait-list,
+.hardware-list {
+  margin: 0;
+}
+
+.trait-row,
+.hardware-list > div {
+  padding: 4px 0;
+  display: grid;
+  grid-template-columns: minmax(94px, 0.9fr) minmax(0, 1.1fr);
+  gap: 8px;
+  border-bottom: 1px solid rgba(132, 180, 200, 0.09);
+}
+
+.trait-row:last-child,
+.hardware-list > div:last-child {
+  border-bottom: 0;
+}
+
+.trait-row dt,
+.hardware-list dt {
+  color: #819eab;
+  font-size: 0.62rem;
+}
+
+.trait-row dd,
+.hardware-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #edf7fa;
+  font-size: 0.68rem;
+  text-align: right;
+}
+
+.genome-list {
+  max-height: 240px;
+  margin: 0;
+  padding-left: 32px;
+  overflow-y: auto;
+  columns: 2;
+  column-gap: 26px;
+  color: #7795a3;
+  font-size: 0.66rem;
+}
+
+.genome-list li {
+  padding: 2px 4px;
+  break-inside: avoid;
+}
+
+.genome-list li:hover {
+  border-radius: 4px;
+  background: rgba(99, 213, 224, 0.12);
+}
+
+.genome-list code {
+  color: #dcebf1;
+  font-size: 0.66rem;
+}
+
+.hardware-counters {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.hardware-counters span {
+  padding: 5px;
+  border-radius: 6px;
+  background: rgba(22, 59, 78, 0.7);
+  color: #819eab;
+  font-size: 0.58rem;
+  text-align: center;
+}
+
+.hardware-counters strong {
+  display: block;
+  color: #edf7fa;
+  font-size: 0.75rem;
+}
+
+.hardware-memory {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  color: #a9c0ca;
+  font-size: 0.64rem;
+}
+
+.hardware-memory code {
+  color: #63d5e0;
+}
+
+.freezer-inspector {
+  max-height: min(calc(100dvh - 124px), 790px);
+  overflow-y: auto;
+}
+
+.freezer-inspector > h2 {
+  margin-bottom: 6px;
+}
+
+.freezer-intro,
+.freezer-message {
+  margin: 0 0 10px;
+  color: #7894a1;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.freezer-message {
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: rgba(99, 213, 224, 0.09);
+  color: #9fc4cf;
+}
+
+.freezer-section {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(132, 180, 200, 0.16);
+  border-radius: 10px;
+  background: rgba(7, 24, 36, 0.48);
+}
+
+.freezer-section-header {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.freezer-section-header h3 {
+  margin: 0;
+  color: #dcebf1;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.freezer-section-header p {
+  margin: 2px 0 0;
+  color: #7894a1;
+  font-size: 0.6rem;
+}
+
+.freezer-save-button,
+.freezer-load-button,
+.freezer-remove-button {
+  min-height: 28px;
+  border: 1px solid rgba(130, 182, 202, 0.25);
+  border-radius: 7px;
+  color: #dcebf1;
+  cursor: pointer;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.freezer-save-button {
+  flex: 0 0 auto;
+  padding: 0 9px;
+  background: #15384c;
+}
+
+.freezer-load-button {
+  padding: 0 8px;
+  background: rgba(22, 59, 78, 0.88);
+}
+
+.freezer-remove-button {
+  width: 28px;
+  padding: 0;
+  border-color: rgba(239, 115, 91, 0.24);
+  background: rgba(86, 33, 36, 0.62);
+  color: #ef9c8b;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.freezer-save-button:hover,
+.freezer-load-button:hover {
+  border-color: rgba(99, 213, 224, 0.48);
+  background: #1a455d;
+}
+
+.freezer-remove-button:hover {
+  border-color: rgba(239, 115, 91, 0.48);
+  background: rgba(112, 40, 42, 0.78);
+}
+
+.freezer-save-button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.freezer-list {
+  display: grid;
+  gap: 6px;
+}
+
+.freezer-item {
+  min-width: 0;
+  padding: 7px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 7px;
+  background: rgba(17, 48, 65, 0.62);
+}
+
+.freezer-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.freezer-item-copy strong,
+.freezer-item-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.freezer-item-copy strong {
+  color: #e8f3f6;
+  font-size: 0.67rem;
+}
+
+.freezer-item-copy span {
+  color: #7894a1;
+  font-size: 0.58rem;
+}
+
+.freezer-item-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 5px;
+}
+
+.freezer-empty {
+  margin: 0;
+  padding: 10px 6px;
+  color: #7894a1;
+  font-size: 0.64rem;
+  text-align: center;
 }
 
 .configuration-header {
