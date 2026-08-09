@@ -268,7 +268,11 @@ public:
   // === Accessors ===
 
   [[nodiscard]] size_t GetExeCount() const { return exe_count; }
+  [[nodiscard]] size_t GetCopyCount() const { return copy_count; }
   [[nodiscard]] size_t GetErrorCount() const { return error_count; }
+  [[nodiscard]] const mem_t & GetMemory() const { return memory; }
+  [[nodiscard]] const auto & GetHeads() const { return heads; }
+  [[nodiscard]] const auto & GetStacks() const { return stacks; }
   
   [[nodiscard]] size_t GetBiotaID() const { return biota_id; }
   [[nodiscard]] bool IsAnalysis() const { return biota_id == ANALYSIS_BIOTA_ID; }
@@ -424,8 +428,14 @@ public:
 
   static void BuildInstSet(inst_set_t & inst_set);
 
-  static bool AddCallback(inst_set_t & inst_set, emp::String name, callback_t callback_fun) {
-    inst_set.AddInst(name, callback_fun);
+  static bool AddCallback(inst_set_t & inst_set,
+                          emp::String name,
+                          callback_t callback_fun,
+                          emp::String description = "") {
+    if (description.empty()) {
+      description = emp::MakeString("Invoke the registered ", name, " callback.");
+    }
+    inst_set.AddInst(name, callback_fun, description);
     return true;
   }
 
@@ -708,42 +718,42 @@ struct AvidaVM_Insts {
 
 void AvidaVM::BuildInstSet(inst_set_t & inst_set) {
   using Inst = AvidaVM_Insts;
-  inst_set.AddNopInst("Nop-A", Inst::Nop);
-  inst_set.AddNopInst("Nop-B", Inst::Nop);
-  inst_set.AddNopInst("Nop-C", Inst::Nop);
-  inst_set.AddNopInst("Nop-D", Inst::Nop);
-  inst_set.AddNopInst("Nop-E", Inst::Nop);
-  inst_set.AddNopInst("Nop-F", Inst::Nop);
+  inst_set.AddNopInst("Nop-A", Inst::Nop, "No operation; selects component A as an argument.");
+  inst_set.AddNopInst("Nop-B", Inst::Nop, "No operation; selects component B as an argument.");
+  inst_set.AddNopInst("Nop-C", Inst::Nop, "No operation; selects component C as an argument.");
+  inst_set.AddNopInst("Nop-D", Inst::Nop, "No operation; selects component D as an argument.");
+  inst_set.AddNopInst("Nop-E", Inst::Nop, "No operation; selects component E as an argument.");
+  inst_set.AddNopInst("Nop-F", Inst::Nop, "No operation; selects component F as an argument.");
 
-  inst_set.AddInst("Const",      Inst::Const);
-  inst_set.AddInst("Offset",     Inst::Offset);
-  inst_set.AddInst("Not",        Inst::Not);
-  inst_set.AddInst("Shift",      Inst::Shift);
-  inst_set.AddInst("Add",        Inst::Add);
-  inst_set.AddInst("Sub",        Inst::Sub);
-  inst_set.AddInst("Mult",       Inst::Mult);
-  inst_set.AddInst("Div",        Inst::Div);
-  inst_set.AddInst("Mod",        Inst::Mod);
-  inst_set.AddInst("Exp",        Inst::Exp);
-  inst_set.AddInst("Sort",       Inst::Sort);
-  inst_set.AddInst("TestLess",   Inst::TestLess);
-  inst_set.AddInst("TestEqu",    Inst::TestEqu);
-  inst_set.AddInst("Nand",       Inst::Nand);
-  inst_set.AddInst("Xor",        Inst::Xor);
-  inst_set.AddInst("If",         Inst::If);
-  inst_set.AddInst("IfNot",      Inst::IfNot);
-  inst_set.AddInst("Scope",      Inst::Scope);
-  inst_set.AddInst("Continue",   Inst::Continue);
-  inst_set.AddInst("Break",      Inst::Break);
-  inst_set.AddInst("StackPop",   Inst::StackPop);
-  inst_set.AddInst("StackDup",   Inst::StackDup);
-  inst_set.AddInst("StackSwap",  Inst::StackSwap);
-  inst_set.AddInst("StackMove",  Inst::StackMove);
-  inst_set.AddInst("CopyInst",   Inst::CopyInst);
-  inst_set.AddInst("Load",       Inst::Load);
-  inst_set.AddInst("Store",      Inst::Store);
-  inst_set.AddInst("HeadPos",    Inst::HeadPos);
-  inst_set.AddInst("SetHead",    Inst::SetHead);
-  inst_set.AddInst("JumpHead",   Inst::JumpHead);
-  inst_set.AddInst("OffsetHead", Inst::OffsetHead);
+  inst_set.AddInst("Const", Inst::Const, "Push a selected constant onto a selected stack.");
+  inst_set.AddInst("Offset", Inst::Offset, "Add a selected constant to a popped stack value.");
+  inst_set.AddInst("Not", Inst::Not, "Apply logical NOT to a popped stack value.");
+  inst_set.AddInst("Shift", Inst::Shift, "Left-shift one popped value by another.");
+  inst_set.AddInst("Add", Inst::Add, "Add two popped stack values.");
+  inst_set.AddInst("Sub", Inst::Sub, "Subtract one popped stack value from another.");
+  inst_set.AddInst("Mult", Inst::Mult, "Multiply two popped stack values.");
+  inst_set.AddInst("Div", Inst::Div, "Divide two popped stack values; division by zero is an error.");
+  inst_set.AddInst("Mod", Inst::Mod, "Calculate the remainder of two popped values.");
+  inst_set.AddInst("Exp", Inst::Exp, "Raise one popped stack value to the power of another.");
+  inst_set.AddInst("Sort", Inst::Sort, "Sort the top values of two selected stacks.");
+  inst_set.AddInst("TestLess", Inst::TestLess, "Test whether one popped value is less than another.");
+  inst_set.AddInst("TestEqu", Inst::TestEqu, "Test whether two popped stack values are equal.");
+  inst_set.AddInst("Nand", Inst::Nand, "Apply bitwise NAND to two popped stack values.");
+  inst_set.AddInst("Xor", Inst::Xor, "Apply bitwise XOR to two popped stack values.");
+  inst_set.AddInst("If", Inst::If, "Skip the next instruction when the selected value is zero.");
+  inst_set.AddInst("IfNot", Inst::IfNot, "Skip the next instruction when the selected value is nonzero.");
+  inst_set.AddInst("Scope", Inst::Scope, "Mark a scope boundary identified by following Nops.");
+  inst_set.AddInst("Continue", Inst::Continue, "Jump backward to the selected scope boundary.");
+  inst_set.AddInst("Break", Inst::Break, "Jump forward to the selected scope boundary.");
+  inst_set.AddInst("StackPop", Inst::StackPop, "Discard the top value of a selected stack.");
+  inst_set.AddInst("StackDup", Inst::StackDup, "Copy the top value of one stack onto another.");
+  inst_set.AddInst("StackSwap", Inst::StackSwap, "Exchange the top values of two selected stacks.");
+  inst_set.AddInst("StackMove", Inst::StackMove, "Move the top value from one stack to another.");
+  inst_set.AddInst("CopyInst", Inst::CopyInst, "Copy an instruction between selected genome heads.");
+  inst_set.AddInst("Load", Inst::Load, "Load a memory value onto a selected stack.");
+  inst_set.AddInst("Store", Inst::Store, "Store a popped stack value in memory.");
+  inst_set.AddInst("HeadPos", Inst::HeadPos, "Push a selected head's position onto a stack.");
+  inst_set.AddInst("SetHead", Inst::SetHead, "Set a selected head from a popped stack value.");
+  inst_set.AddInst("JumpHead", Inst::JumpHead, "Move one selected head to another head's position.");
+  inst_set.AddInst("OffsetHead", Inst::OffsetHead, "Move a selected head by a popped offset.");
 }
