@@ -303,5 +303,9 @@ public:
     return inst_set.LoadGenome(filepath);
   }
 
+  std::expected<typename GlobalTypes::genome_t, emp::String> LoadGenome(std::istream & input) {
+    return inst_set.LoadGenome(input);
+  }
+
 
 };
