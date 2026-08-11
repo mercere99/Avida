@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
@@ -32,6 +33,7 @@
 #include "emp/web/Document.hpp"
 #include "emp/web/Image.hpp"
 #include "emp/web/Input.hpp"
+#include "emp/web/JSWrap.hpp"
 #include "emp/web/Selector.hpp"
 #include "emp/web/Text.hpp"
 #include "emp/web/emfunctions.hpp"
@@ -55,6 +57,7 @@ namespace UI = emp::web;
 template <typename AVIDA_T>
 class WebInterfaceBridge : public ModuleBase<AVIDA_T> {
 private:
+  std::function<void()> on_start_callback;
   std::function<void()> before_exit_callback;
 
 public:
@@ -68,8 +71,16 @@ public:
 
   void Serialize(emp::SerialPod & /* pod */) { }
 
+  void SetOnStartCallback(std::function<void()> callback) {
+    on_start_callback = std::move(callback);
+  }
+
   void SetBeforeExitCallback(std::function<void()> callback) {
     before_exit_callback = std::move(callback);
+  }
+
+  void OnStart() {
+    if (on_start_callback) on_start_callback();
   }
 
   void BeforeExit() {
@@ -175,9 +186,45 @@ EM_JS(void, PositionActiveCellHighlight,
   highlight.style.height = `${100 / height}%`;
 });
 
-EM_JS(char *, LoadFreezerLocalStorage, (), {
+EM_JS(void, ShowGridCellMenu, (int client_x, int client_y), {
+  const menu = document.getElementById('grid_cell_menu');
+  const surface = document.getElementById('population_grid_surface');
+  if (!menu || !surface) return;
+
+  const bounds = surface.getBoundingClientRect();
+  menu.style.visibility = 'hidden';
+  menu.style.display = 'grid';
+  const left = Math.max(4, Math.min(client_x - bounds.left, bounds.width - menu.offsetWidth - 4));
+  const top = Math.max(4, Math.min(client_y - bounds.top, bounds.height - menu.offsetHeight - 4));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  menu.style.visibility = 'visible';
+  const firstAction = menu.querySelector('button');
+  if (firstAction) firstAction.focus();
+
+  if (!window.__avidaGridCellMenuDismissal) {
+    window.__avidaGridCellMenuDismissal = true;
+    document.addEventListener('pointerdown', event => {
+      const activeMenu = document.getElementById('grid_cell_menu');
+      if (activeMenu && activeMenu.style.display !== 'none'
+          && !activeMenu.contains(event.target)) activeMenu.style.display = 'none';
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      const activeMenu = document.getElementById('grid_cell_menu');
+      if (activeMenu) activeMenu.style.display = 'none';
+    });
+  }
+});
+
+EM_JS(void, HideGridCellMenu, (), {
+  const menu = document.getElementById('grid_cell_menu');
+  if (menu) menu.style.display = 'none';
+});
+
+EM_JS(char *, LoadFreezerLocalStorage, (const char * key), {
   try {
-    const value = window.localStorage.getItem('avida.web.freezer.v1');
+    const value = window.localStorage.getItem(UTF8ToString(key));
     if (value === null) return 0;
     const size = lengthBytesUTF8(value) + 1;
     const buffer = _malloc(size);
@@ -189,14 +236,104 @@ EM_JS(char *, LoadFreezerLocalStorage, (), {
   }
 });
 
-EM_JS(bool, SaveFreezerLocalStorage, (const char * value), {
+EM_JS(bool, SaveFreezerLocalStorage, (const char * key, const char * value), {
   try {
-    window.localStorage.setItem('avida.web.freezer.v1', UTF8ToString(value));
+    window.localStorage.setItem(UTF8ToString(key), UTF8ToString(value));
     return true;
   } catch (error) {
     console.warn('Avida freezer could not write local storage.', error);
     return false;
   }
+});
+
+EM_JS(void, DownloadBrowserFile,
+      (const char * filename, const char * mime_type, const char * contents), {
+  const blob = new Blob([UTF8ToString(contents)], {type: UTF8ToString(mime_type)});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = UTF8ToString(filename);
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
+EM_JS(void, InstallOrganismDragBridge, (size_t drop_callback, size_t freeze_callback), {
+  if (window.__avidaOrganismDragBridge) return;
+  window.__avidaOrganismDragBridge = true;
+  let drag = null;
+
+  const cellAt = (canvas, clientX, clientY) => {
+    const bounds = canvas.getBoundingClientRect();
+    const width = Number(canvas.dataset.gridWidth);
+    const height = Number(canvas.dataset.gridHeight);
+    if (!width || !height || clientX < bounds.left || clientX >= bounds.right
+        || clientY < bounds.top || clientY >= bounds.bottom) return -1;
+    const x = Math.floor((clientX - bounds.left) * width / bounds.width);
+    const y = Math.floor((clientY - bounds.top) * height / bounds.height);
+    return x + y * width;
+  };
+
+  document.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    const freezerItem = event.target.closest('[data-avida-freezer-organism]');
+    if (freezerItem) {
+      drag = {
+        kind: 'freezer',
+        id: Number(freezerItem.dataset.avidaFreezerOrganism),
+        x: event.clientX,
+        y: event.clientY
+      };
+      return;
+    }
+
+    const canvas = event.target.closest('#population_canvas');
+    if (!canvas) return;
+    const cell = cellAt(canvas, event.clientX, event.clientY);
+    if (cell >= 0) drag = {kind: 'grid', cell, x: event.clientX, y: event.clientY};
+  });
+
+  document.addEventListener('pointermove', event => {
+    if (!drag) return;
+    const moved = Math.hypot(event.clientX - drag.x, event.clientY - drag.y) >= 5;
+    if (!moved) return;
+    drag.moved = true;
+    document.body.classList.add('avida-organism-dragging');
+    const target = drag.kind === 'freezer'
+      ? document.getElementById('population_canvas')
+      : document.getElementById('freezer_organism_section');
+    if (target) target.classList.add('is-organism-drop-target');
+    event.preventDefault();
+  });
+
+  document.addEventListener('pointerup', event => {
+    if (!drag) return;
+    const current = drag;
+    drag = null;
+    document.body.classList.remove('avida-organism-dragging');
+    document.querySelectorAll('.is-organism-drop-target').forEach(
+      element => element.classList.remove('is-organism-drop-target')
+    );
+    if (!current.moved) return;
+
+    if (current.kind === 'freezer') {
+      const canvas = document.getElementById('population_canvas');
+      if (!canvas) return;
+      const cell = cellAt(canvas, event.clientX, event.clientY);
+      if (cell >= 0) emp.Callback(drop_callback, current.id, cell);
+      return;
+    }
+
+    const freezerSection = document.getElementById('freezer_organism_section');
+    if (!freezerSection) return;
+    const bounds = freezerSection.getBoundingClientRect();
+    if (event.clientX >= bounds.left && event.clientX < bounds.right
+        && event.clientY >= bounds.top && event.clientY < bounds.bottom) {
+      emp.Callback(freeze_callback, current.cell);
+    }
+  });
 });
 
 class AvidaWebApp {
@@ -206,11 +343,54 @@ private:
   enum class ConfigurationTab { SETTINGS, ENVIRONMENT, EVENTS };
   enum class SidePanel { POPULATION, ORGANISM, FREEZER, CONFIGURATION };
 
+  struct PlacedOrganism {
+    size_t cell_id = 0;
+    emp::String name;
+    emp::String genome;
+    size_t instruction_count = 0;
+
+    void Serialize(emp::SerialPod & pod) {
+      pod(cell_id, name, genome, instruction_count);
+    }
+  };
+
+  struct FrozenConfigurationV1 {
+    std::map<emp::String, emp::String> settings;
+    emp::String ancestor_genome;
+    emp::vector<reaction_config_t> reactions;
+    emp::vector<event_config_t> events;
+
+    void Serialize(emp::SerialPod & pod) {
+      pod(settings, ancestor_genome);
+
+      size_t reaction_count = reactions.size();
+      pod(reaction_count);
+      if (pod.IsLoad()) reactions.resize(reaction_count);
+      for (auto & reaction : reactions) {
+        pod(
+          reaction.task_name,
+          reaction.trait_name,
+          reaction.operation,
+          reaction.value,
+          reaction.max_triggers
+        );
+      }
+
+      size_t event_count = events.size();
+      pod(event_count);
+      if (pod.IsLoad()) events.resize(event_count);
+      for (auto & event : events) {
+        pod(event.timing, event.start, event.interval, event.stop, event.command);
+      }
+    }
+  };
+
   struct FrozenConfiguration {
     std::map<emp::String, emp::String> settings;
     emp::String ancestor_genome;
     emp::vector<reaction_config_t> reactions;
     emp::vector<event_config_t> events;
+    emp::vector<PlacedOrganism> placed_organisms;
 
     void Serialize(emp::SerialPod & pod) {
       pod(settings, ancestor_genome);
@@ -240,6 +420,7 @@ private:
           event.command
         );
       }
+      pod(placed_organisms);
     }
   };
 
@@ -284,12 +465,45 @@ private:
     }
   };
 
+  struct FrozenConfigurationItemV1 {
+    size_t id = 0;
+    emp::String name;
+    FrozenConfigurationV1 configuration;
+
+    void Serialize(emp::SerialPod & pod) { pod(id, name, configuration); }
+  };
+
+  struct FrozenRunV1 {
+    size_t id = 0;
+    emp::String name;
+    FrozenConfigurationV1 configuration;
+    emp::String state;
+    size_t update = 0;
+    size_t organism_count = 0;
+
+    void Serialize(emp::SerialPod & pod) {
+      pod(id, name, configuration, state, update, organism_count);
+    }
+  };
+
+  struct FreezerStoreV1 {
+    size_t next_id = 1;
+    emp::vector<FrozenOrganism> organisms;
+    emp::vector<FrozenConfigurationItemV1> configurations;
+    emp::vector<FrozenRunV1> runs;
+
+    void Serialize(emp::SerialPod & pod) {
+      pod(next_id, organisms, configurations, runs);
+    }
+  };
+
   static constexpr double PLAY_INTERVAL_MS = 100.0;
   static constexpr double FAST_FORWARD_FRAME_BUDGET_MS = 12.0;
   static constexpr size_t FAST_FORWARD_REDRAW_UPDATES = 10;
 
   static constexpr uint32_t EMPTY_COLOR = PackRGBA(12, 30, 46);
   static constexpr uint32_t DEFAULT_ORG_COLOR = PackRGBA(110, 205, 224);
+  static constexpr uint32_t STAGED_ORG_COLOR = PackRGBA(239, 115, 91);
   static constexpr uint32_t LOW_FITNESS_COLOR = PackRGBA(73, 210, 218);
   static constexpr uint32_t MID_FITNESS_COLOR = PackRGBA(246, 211, 70);
   static constexpr uint32_t HIGH_FITNESS_COLOR = PackRGBA(186, 84, 198);
@@ -360,8 +574,13 @@ private:
   avida_t::org_ref_t active_organism;
   size_t active_cell_id = PopGrid<avida_t>::EMPTY_CELL;
   FreezerStore freezer;
+  emp::vector<PlacedOrganism> placed_organisms;
   emp::String freezer_message;
   emp::String configured_ancestor_genome;
+  size_t drop_organism_callback_id = 0;
+  size_t freeze_grid_callback_id = 0;
+  size_t rename_freezer_callback_id = 0;
+  size_t grid_context_cell_id = PopGrid<avida_t>::EMPTY_CELL;
 
   [[nodiscard]] avida_t & Avida() { return *avida; }
   [[nodiscard]] const avida_t & Avida() const { return *avida; }
@@ -376,13 +595,27 @@ private:
     return contents.str();
   }
 
+  [[nodiscard]] static FrozenConfiguration UpgradeConfiguration(
+    FrozenConfigurationV1 configuration
+  ) {
+    return {
+      .settings = std::move(configuration.settings),
+      .ancestor_genome = std::move(configuration.ancestor_genome),
+      .reactions = std::move(configuration.reactions),
+      .events = std::move(configuration.events),
+      .placed_organisms = {}
+    };
+  }
+
   [[nodiscard]] bool PersistFreezer() {
     std::ostringstream output;
-    output << "AVIDA_FREEZER_V1\n";
+    output << "AVIDA_FREEZER_V2\n";
     emp::SerialPod pod{output};
     pod(freezer);
     const std::string serialized = output.str();
-    const bool persisted = SaveFreezerLocalStorage(serialized.c_str());
+    const bool persisted = SaveFreezerLocalStorage(
+      "avida.web.freezer.v2", serialized.c_str()
+    );
     freezer_message = persisted
       ? "Saved in this browser."
       : "Saved for this session; browser storage is unavailable or full.";
@@ -390,17 +623,51 @@ private:
   }
 
   [[nodiscard]] bool RestoreFreezer() {
-    char * stored_value = LoadFreezerLocalStorage();
+    if (char * stored_value = LoadFreezerLocalStorage("avida.web.freezer.v2")) {
+      const std::string serialized{stored_value};
+      std::free(stored_value);
+      static constexpr std::string_view prefix{"AVIDA_FREEZER_V2\n"};
+      if (serialized.starts_with(prefix)) {
+        std::istringstream input{serialized.substr(prefix.size())};
+        emp::SerialPod pod{input};
+        pod(freezer);
+        freezer_message = "Loaded from this browser.";
+        return true;
+      }
+    }
+
+    char * stored_value = LoadFreezerLocalStorage("avida.web.freezer.v1");
     if (!stored_value) return false;
     const std::string serialized{stored_value};
     std::free(stored_value);
+    static constexpr std::string_view legacy_prefix{"AVIDA_FREEZER_V1\n"};
+    if (!serialized.starts_with(legacy_prefix)) return false;
 
-    static constexpr std::string_view prefix{"AVIDA_FREEZER_V1\n"};
-    if (!serialized.starts_with(prefix)) return false;
-    std::istringstream input{serialized.substr(prefix.size())};
+    FreezerStoreV1 legacy;
+    std::istringstream input{serialized.substr(legacy_prefix.size())};
     emp::SerialPod pod{input};
-    pod(freezer);
-    freezer_message = "Loaded from this browser.";
+    pod(legacy);
+    freezer.next_id = legacy.next_id;
+    freezer.organisms = std::move(legacy.organisms);
+    for (auto & item : legacy.configurations) {
+      freezer.configurations.push_back({
+        .id = item.id,
+        .name = std::move(item.name),
+        .configuration = UpgradeConfiguration(std::move(item.configuration))
+      });
+    }
+    for (auto & item : legacy.runs) {
+      freezer.runs.push_back({
+        .id = item.id,
+        .name = std::move(item.name),
+        .configuration = UpgradeConfiguration(std::move(item.configuration)),
+        .state = std::move(item.state),
+        .update = item.update,
+        .organism_count = item.organism_count
+      });
+    }
+    (void) PersistFreezer();
+    freezer_message = "Upgraded saved freezer items in this browser.";
     return true;
   }
 
@@ -409,7 +676,8 @@ private:
       .settings = SnapshotSettingValues(),
       .ancestor_genome = configured_ancestor_genome,
       .reactions = reaction_configs,
-      .events = event_configs
+      .events = event_configs,
+      .placed_organisms = placed_organisms
     };
   }
 
@@ -434,21 +702,370 @@ private:
     (void) PersistFreezer();
   }
 
-  void SaveActiveOrganism() {
-    const auto * organism = GetActiveOrganism();
-    if (!organism) return;
+  [[nodiscard]] static emp::String TrimmedName(emp::String name) {
+    while (name.size() && std::isspace(static_cast<unsigned char>(name.front()))) {
+      name.erase(0, 1);
+    }
+    while (name.size() && std::isspace(static_cast<unsigned char>(name.back()))) {
+      name.pop_back();
+    }
+    return name;
+  }
 
+  [[nodiscard]] static emp::String DownloadStem(const emp::String & name) {
+    emp::String stem;
+    bool pending_dash = false;
+    for (const unsigned char character : name) {
+      if (std::isalnum(character) || character == '-' || character == '_') {
+        if (pending_dash && stem.size()) stem += '-';
+        stem += static_cast<char>(character);
+        pending_dash = false;
+      } else {
+        pending_dash = true;
+      }
+    }
+    if (!stem.size()) stem = "avida-item";
+    return stem;
+  }
+
+  [[nodiscard]] static emp::String QuoteConfigString(const emp::String & value) {
+    emp::String result{'"'};
+    for (const char character : value) {
+      if (character == '\\' || character == '"') result += '\\';
+      result += character;
+    }
+    result += '"';
+    return result;
+  }
+
+  template <typename ITEM_T>
+  void RenameFrozenItem(emp::vector<ITEM_T> & items, size_t id, emp::String new_name) {
+    const auto iterator = std::find_if(items.begin(), items.end(), [id](const auto & item) {
+      return item.id == id;
+    });
+    if (iterator == items.end()) return;
+    new_name = TrimmedName(std::move(new_name));
+    if (!new_name.size() || new_name == iterator->name) return;
+
+    iterator->name = std::move(new_name);
+    (void) PersistFreezer();
+    freezer_message = emp::MakeString("Renamed freezer item to ", iterator->name, ".");
+    RequestInterfaceRebuild();
+  }
+
+  [[nodiscard]] emp::String BuildConfigurationFile(
+    const FrozenConfiguration & configuration,
+    const emp::String & ancestor_filename
+  ) {
+    std::ostringstream output;
+    auto & settings = Avida().GetSettings();
+    settings.Save(output, [&](const auto & info) -> emp::String {
+      const emp::String & name = info.GetName();
+      if (name == "base.config_dir") return QuoteConfigString(".");
+      if (name == "base.data_dir") return QuoteConfigString("data");
+      if (name == "base.ancestor_filename") return QuoteConfigString(ancestor_filename);
+
+      const auto iterator = configuration.settings.find(name);
+      if (iterator == configuration.settings.end()) return info.GetDefaultLiteral();
+      if (settings.GetTypeName(name) == "emp::String") return QuoteConfigString(iterator->second);
+      return iterator->second;
+    });
+
+    output << "# Environment reactions\n";
+    for (const auto & reaction : configuration.reactions) {
+      std::println(
+        output,
+        "Reaction {} {} {} {} {}",
+        reaction.task_name,
+        reaction.trait_name,
+        reaction.operation,
+        reaction.value,
+        reaction.max_triggers
+      );
+    }
+
+    output << "\n# Scheduled events\n";
+    using Timing = EventManager<avida_t>::Timing;
+    for (const auto & event : configuration.events) {
+      if (event.timing == Timing::START) {
+        std::println(output, "on start {}", event.command);
+      } else if (event.timing == Timing::END) {
+        std::println(output, "on end {}", event.command);
+      } else if (event.timing == Timing::UPDATE) {
+        std::println(output, "on update {} {}", event.start, event.command);
+      } else if (event.stop) {
+        std::println(
+          output,
+          "on update {}:{}:{} {}",
+          event.start,
+          event.interval,
+          event.stop,
+          event.command
+        );
+      } else {
+        std::println(
+          output,
+          "on update {}:{} {}",
+          event.start,
+          event.interval,
+          event.command
+        );
+      }
+    }
+    return output.str();
+  }
+
+  void DownloadFrozenOrganism(size_t id) {
+    for (const auto & item : freezer.organisms) {
+      if (item.id != id) continue;
+      const emp::String filename = DownloadStem(item.name) + ".org";
+      DownloadBrowserFile(filename.c_str(), "text/plain;charset=utf-8", item.genome.c_str());
+      freezer_message = emp::MakeString("Downloaded ", filename, ".");
+      return;
+    }
+  }
+
+  void DownloadFrozenConfiguration(size_t id) {
+    for (const auto & item : freezer.configurations) {
+      if (item.id != id) continue;
+      const emp::String stem = DownloadStem(item.name);
+      const emp::String config_filename = stem + ".cfg";
+      const emp::String ancestor_filename = item.configuration.ancestor_genome.size()
+        ? stem + ".org"
+        : emp::String{"ancestor.org"};
+      const emp::String contents = BuildConfigurationFile(
+        item.configuration, ancestor_filename
+      );
+      DownloadBrowserFile(
+        config_filename.c_str(), "text/plain;charset=utf-8", contents.c_str()
+      );
+      if (item.configuration.ancestor_genome.size()) {
+        DownloadBrowserFile(
+          ancestor_filename.c_str(),
+          "text/plain;charset=utf-8",
+          item.configuration.ancestor_genome.c_str()
+        );
+      }
+      freezer_message = emp::MakeString("Downloaded ", config_filename, ".");
+      return;
+    }
+  }
+
+  void DownloadFrozenRun(size_t id) {
+    for (const auto & item : freezer.runs) {
+      if (item.id != id) continue;
+      const emp::String filename = DownloadStem(item.name) + ".pod";
+      DownloadBrowserFile(
+        filename.c_str(), "application/octet-stream", item.state.c_str()
+      );
+      freezer_message = emp::MakeString("Downloaded ", filename, ".");
+      return;
+    }
+  }
+
+  [[nodiscard]] static emp::String GenomeFileText(const avida_t::organism_t & organism) {
     emp::String genome_text;
-    const auto & genome = organism->GetGenome();
-    const auto & inst_set = organism->Hardware().GetInstSet();
+    const auto & genome = organism.GetGenome();
+    const auto & inst_set = organism.Hardware().GetInstSet();
     for (const auto inst_id : genome) {
       genome_text += inst_set.GetName(inst_id);
       genome_text += '\n';
     }
+    return genome_text;
+  }
+
+  [[nodiscard]] bool InjectGenomeAtCell(const emp::String & genome_text, size_t cell_id) {
+    if (cell_id >= Grid().GetWidth() * Grid().GetHeight()) return false;
+    std::istringstream genome_input{genome_text.str()};
+    auto genome = Avida().GetPlugIn<OrgTypeAvidian>().LoadGenome(genome_input);
+    if (!genome) return false;
+
+    auto & organism = Avida().GetBiota().ReserveOrganism(std::move(*genome));
+    organism.GetPhenotype().pop_pos = cell_id;
+    Avida().Inject(organism);
+    return true;
+  }
+
+  void ApplyPlacedOrganisms() {
+    for (const auto & placement : placed_organisms) {
+      (void) InjectGenomeAtCell(placement.genome, placement.cell_id);
+    }
+  }
+
+  [[nodiscard]] auto FindPlacedOrganism(size_t cell_id) {
+    return std::find_if(
+      placed_organisms.begin(), placed_organisms.end(),
+      [cell_id](const auto & item){ return item.cell_id == cell_id; }
+    );
+  }
+
+  [[nodiscard]] bool HasGridCellOrganism(size_t cell_id) {
+    if (!run_started) {
+      return std::find_if(
+        placed_organisms.begin(), placed_organisms.end(),
+        [cell_id](const auto & item){ return item.cell_id == cell_id; }
+      ) != placed_organisms.end();
+    }
+
+    const auto cells = Grid().GetCells();
+    if (cell_id >= cells.size()) return false;
+    const size_t organism_id = cells[cell_id];
+    return organism_id != PopGrid<avida_t>::EMPTY_CELL && Avida().IsOccupied(organism_id);
+  }
+
+  void OpenGridCellMenu(size_t cell_id, int client_x, int client_y) {
+    if (!HasGridCellOrganism(cell_id)) {
+      HideGridCellMenu();
+      return;
+    }
+    if (run_started && run_mode != RunMode::PAUSED) SetRunMode(RunMode::PAUSED);
+    grid_context_cell_id = cell_id;
+    ShowGridCellMenu(client_x, client_y);
+  }
+
+  void SaveGridCellOrganism(size_t cell_id) {
+    if (!run_started) {
+      const auto iterator = FindPlacedOrganism(cell_id);
+      if (iterator == placed_organisms.end()) return;
+      freezer.organisms.push_back({
+        .id = freezer.next_id++,
+        .name = emp::MakeString(iterator->name, " copy"),
+        .genome = iterator->genome,
+        .instruction_count = iterator->instruction_count
+      });
+      (void) PersistFreezer();
+      freezer_message = emp::MakeString("Saved staged ", iterator->name, ".");
+      RequestInterfaceRebuild();
+      return;
+    }
+
+    const auto cells = Grid().GetCells();
+    if (cell_id >= cells.size()) return;
+    const size_t organism_id = cells[cell_id];
+    if (organism_id == PopGrid<avida_t>::EMPTY_CELL || !Avida().IsOccupied(organism_id)) return;
+    const auto & organism = Avida().GetOrg(organism_id);
+    freezer.organisms.push_back({
+      .id = freezer.next_id++,
+      .name = emp::MakeString(
+        "Organism #", organism.GetGlobalID(), " at update ", Avida().GetUpdate()
+      ),
+      .genome = GenomeFileText(organism),
+      .instruction_count = organism.GetGenome().size()
+    });
+    (void) PersistFreezer();
+    freezer_message = emp::MakeString("Saved organism #", organism.GetGlobalID(), ".");
+    RequestInterfaceRebuild();
+  }
+
+  void RemoveGridCellOrganism(size_t cell_id) {
+    if (!run_started) {
+      const auto iterator = FindPlacedOrganism(cell_id);
+      if (iterator == placed_organisms.end()) return;
+      const emp::String name = iterator->name;
+      placed_organisms.erase(iterator);
+      freezer_message = emp::MakeString("Removed staged ", name, " from the grid.");
+      RequestInterfaceRebuild();
+      return;
+    }
+
+    if (run_mode != RunMode::PAUSED) SetRunMode(RunMode::PAUSED);
+    const auto cells = Grid().GetCells();
+    if (cell_id >= cells.size()) return;
+    const size_t organism_id = cells[cell_id];
+    if (organism_id == PopGrid<avida_t>::EMPTY_CELL || !Avida().IsOccupied(organism_id)) return;
+    const size_t global_id = Avida().GetOrg(organism_id).GetGlobalID();
+    if (active_cell_id == cell_id) {
+      active_organism = {};
+      active_cell_id = PopGrid<avida_t>::EMPTY_CELL;
+    }
+    if (!Grid().DeleteOrganismAt(cell_id)) return;
+    freezer_message = emp::MakeString("Removed organism #", global_id, " from the grid.");
+    DrawPopulation();
+    RefreshReadouts();
+    UpdateControls();
+  }
+
+  void DropFrozenOrganismOnGrid(size_t freezer_id, size_t cell_id) {
+    if (cell_id >= Grid().GetWidth() * Grid().GetHeight()) return;
+    const auto iterator = std::find_if(
+      freezer.organisms.begin(), freezer.organisms.end(),
+      [freezer_id](const auto & item){ return item.id == freezer_id; }
+    );
+    if (iterator == freezer.organisms.end()) return;
+
+    if (run_started) {
+      if (!InjectGenomeAtCell(iterator->genome, cell_id)) return;
+      freezer_message = emp::MakeString(
+        "Injected ", iterator->name, " into cell ", cell_id, " as a new organism."
+      );
+      DrawPopulation();
+      RefreshReadouts();
+      return;
+    }
+
+    PlacedOrganism placement{
+      .cell_id = cell_id,
+      .name = iterator->name,
+      .genome = iterator->genome,
+      .instruction_count = iterator->instruction_count
+    };
+    const auto existing = std::find_if(
+      placed_organisms.begin(), placed_organisms.end(),
+      [cell_id](const auto & item){ return item.cell_id == cell_id; }
+    );
+    if (existing == placed_organisms.end()) placed_organisms.push_back(std::move(placement));
+    else *existing = std::move(placement);
+    freezer_message = emp::MakeString(
+      "Staged ", iterator->name, " in cell ", cell_id, " for the next run."
+    );
+    RequestInterfaceRebuild();
+  }
+
+  void FreezeOrUnstageGridCell(size_t cell_id) {
+    if (!run_started) {
+      RemoveGridCellOrganism(cell_id);
+      return;
+    }
+    SaveGridCellOrganism(cell_id);
+  }
+
+  void InitializeDragCallbacks() {
+    if (!drop_organism_callback_id) {
+      drop_organism_callback_id = emp::JSWrap(std::function<void(size_t, size_t)>{
+        [this](size_t freezer_id, size_t cell_id) {
+          DropFrozenOrganismOnGrid(freezer_id, cell_id);
+        }
+      });
+    }
+    if (!freeze_grid_callback_id) {
+      freeze_grid_callback_id = emp::JSWrap(std::function<void(size_t)>{
+        [this](size_t cell_id) { FreezeOrUnstageGridCell(cell_id); }
+      });
+    }
+    if (!rename_freezer_callback_id) {
+      rename_freezer_callback_id = emp::JSWrap(std::function<void(size_t, size_t, std::string)>{
+        [this](size_t item_type, size_t item_id, std::string name) {
+          if (item_type == 0) {
+            RenameFrozenItem(freezer.organisms, item_id, name);
+          } else if (item_type == 1) {
+            RenameFrozenItem(freezer.configurations, item_id, name);
+          } else if (item_type == 2) {
+            RenameFrozenItem(freezer.runs, item_id, name);
+          }
+        }
+      });
+    }
+  }
+
+  void SaveActiveOrganism() {
+    const auto * organism = GetActiveOrganism();
+    if (!organism) return;
+
+    const auto & genome = organism->GetGenome();
     freezer.organisms.push_back({
       .id = freezer.next_id++,
       .name = emp::MakeString("Organism #", organism->GetGlobalID(), " at update ", Avida().GetUpdate()),
-      .genome = std::move(genome_text),
+      .genome = GenomeFileText(*organism),
       .instruction_count = genome.size()
     });
     (void) PersistFreezer();
@@ -489,6 +1106,7 @@ private:
     SetRunMode(RunMode::PAUSED);
     reaction_configs = configuration.reactions;
     event_configs = configuration.events;
+    placed_organisms = configuration.placed_organisms;
     CreateConfiguredAvida(configuration.settings, configuration.ancestor_genome);
     RequestInterfaceRebuild();
   }
@@ -498,6 +1116,7 @@ private:
       if (item.id != id) continue;
       FrozenConfiguration configuration = SnapshotConfiguration();
       configuration.ancestor_genome = item.genome;
+      configuration.placed_organisms.clear();
       LoadConfiguration(configuration);
       freezer_message = emp::MakeString("Loaded ", item.name, " as the dish ancestor.");
       return;
@@ -520,6 +1139,7 @@ private:
       SetRunMode(RunMode::PAUSED);
       reaction_configs = item.configuration.reactions;
       event_configs = item.configuration.events;
+      placed_organisms = item.configuration.placed_organisms;
       CreateConfiguredAvida(item.configuration.settings, item.configuration.ancestor_genome);
       std::istringstream input{item.state.str()};
       emp::SerialPod pod{input};
@@ -774,6 +1394,13 @@ private:
     const std::span<const size_t> cells = Grid().GetCells();
     if (!run_started || cells.size() != width * height) {
       population_pixels.assign(width * height, EMPTY_COLOR);
+      if (!run_started) {
+        for (const auto & placement : placed_organisms) {
+          if (placement.cell_id < population_pixels.size()) {
+            population_pixels[placement.cell_id] = STAGED_ORG_COLOR;
+          }
+        }
+      }
       continuous_values.clear();
       RenderPopulationPixels(
         population_pixels.data(), static_cast<int>(width), static_cast<int>(height)
@@ -859,6 +1486,7 @@ private:
     const emp::String & ancestor_genome = ""
   ) {
     if (avida) {
+      Avida().GetPlugIn<WebInterfaceBridge>().SetOnStartCallback({});
       Avida().GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback({});
       avida.reset();
     }
@@ -905,6 +1533,10 @@ private:
   void StartRun() {
     emp_assert(!run_started);
     ApplyStructuredConfiguration();
+    Avida().GetPlugIn<DriverBuffered>().SetInjectAncestor(placed_organisms.empty());
+    Avida().GetPlugIn<WebInterfaceBridge>().SetOnStartCallback(
+      [this](){ ApplyPlacedOrganisms(); }
+    );
     Avida().GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback(
       [this](){ CaptureFinalView(); }
     );
@@ -1605,13 +2237,51 @@ private:
     content << event_list;
   }
 
+  [[nodiscard]] UI::Div BuildFreezerNameEditor(
+    size_t item_type,
+    size_t item_id,
+    const emp::String & name,
+    const emp::String & id_prefix
+  ) {
+    UI::Div editor{emp::MakeString(id_prefix, item_id)};
+    editor.AddAttr("class", "freezer-item-name");
+    editor.SetAttr("role", "textbox");
+    editor.SetAttr("aria-label", emp::MakeString("Name for ", name, "; double-click to edit"));
+    editor.SetAttr("aria-readonly", "true");
+    editor.SetAttr("tabindex", "0");
+    editor.SetAttr("contenteditable", "false");
+    editor.SetTitle("Double-click to rename");
+    editor.SetAttr(
+      "ondblclick",
+      "event.stopPropagation();this.contentEditable='true';"
+      "this.setAttribute('aria-readonly','false');this.focus();"
+      "const range=document.createRange();range.selectNodeContents(this);"
+      "const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);"
+    );
+    editor.SetAttr(
+      "onkeydown",
+      "if(event.key==='Enter'){event.preventDefault();this.blur();}"
+      "else if(event.key==='Escape'){event.preventDefault();this.blur();}"
+    );
+    editor.SetAttr(
+      "onblur",
+      emp::MakeString(
+        "if(this.isContentEditable){this.contentEditable='false';",
+        "this.setAttribute('aria-readonly','true');emp.Callback(",
+        rename_freezer_callback_id, ",", item_type, ",", item_id, ",this.textContent);}"
+      )
+    );
+    editor << emp::MakeWebSafe(name);
+    return editor;
+  }
+
   void BuildFreezerPanel() {
     freezer_inspector = UI::Div{"freezer_inspector"};
     freezer_inspector.AddAttr("class", "freezer-inspector");
     freezer_inspector.SetCSS("display", "none");
     freezer_inspector << "<h2>Freezer</h2>";
     freezer_inspector <<
-      "<p class='freezer-intro'>Save organisms, configured dishes, and complete running dishes in this browser.</p>";
+      "<p class='freezer-intro'>Double-click a name to edit it. Drag organisms between this freezer and the grid.</p>";
     if (freezer_message.size()) {
       freezer_inspector << emp::MakeString(
         "<p class='freezer-message'>", emp::MakeWebSafe(freezer_message), "</p>"
@@ -1635,10 +2305,12 @@ private:
     for (const auto & item : freezer.organisms) {
       UI::Div row{emp::MakeString("frozen_organism_", item.id)};
       row.AddAttr("class", "freezer-item");
-      row << emp::MakeString(
-        "<div class='freezer-item-copy'><strong>", emp::MakeWebSafe(item.name),
-        "</strong><span>", item.instruction_count, " instructions</span></div>"
-      );
+      row.SetAttr("data-avida-freezer-organism", item.id);
+      UI::Div copy{emp::MakeString("frozen_organism_copy_", item.id)};
+      copy.AddAttr("class", "freezer-item-copy");
+      copy << BuildFreezerNameEditor(0, item.id, item.name, "rename_frozen_organism_");
+      copy << emp::MakeString("<span>", item.instruction_count, " instructions</span>");
+      row << copy;
       UI::Div actions{emp::MakeString("frozen_organism_actions_", item.id)};
       actions.AddAttr("class", "freezer-item-actions");
       UI::Button load_button{
@@ -1646,6 +2318,13 @@ private:
         "Load", emp::MakeString("load_frozen_organism_", item.id)
       };
       load_button.AddAttr("class", "freezer-load-button");
+      UI::Button download_button{
+        [this, id=item.id](){ DownloadFrozenOrganism(id); },
+        "&#x2B07;", emp::MakeString("download_frozen_organism_", item.id)
+      };
+      download_button.AddAttr("class", "freezer-download-button");
+      download_button.SetAttr("aria-label", emp::MakeString("Download ", item.name, " organism file"));
+      download_button.SetTitle(emp::MakeString("Download ", item.name, " as .org"));
       UI::Button remove_button{
         [this, id=item.id](){ RemoveFrozenItem(freezer.organisms, id); },
         "&times;", emp::MakeString("remove_frozen_organism_", item.id)
@@ -1654,6 +2333,7 @@ private:
       remove_button.SetAttr("aria-label", emp::MakeString("Remove ", item.name));
       remove_button.SetTitle(emp::MakeString("Remove ", item.name));
       actions << load_button;
+      actions << download_button;
       actions << remove_button;
       row << actions;
       organism_list << row;
@@ -1680,11 +2360,20 @@ private:
     for (const auto & item : freezer.configurations) {
       UI::Div row{emp::MakeString("frozen_configuration_", item.id)};
       row.AddAttr("class", "freezer-item");
-      row << emp::MakeString(
-        "<div class='freezer-item-copy'><strong>", emp::MakeWebSafe(item.name),
-        "</strong><span>", item.configuration.reactions.size(), " reactions, ",
-        item.configuration.events.size(), " events</span></div>"
+      UI::Div copy{emp::MakeString("frozen_configuration_copy_", item.id)};
+      copy.AddAttr("class", "freezer-item-copy");
+      copy << BuildFreezerNameEditor(
+        1, item.id, item.name, "rename_frozen_configuration_"
       );
+      copy << emp::MakeString(
+        "<span>", item.configuration.reactions.size(), " reactions, ",
+        item.configuration.events.size(), " events, ",
+        item.configuration.placed_organisms.size(),
+        item.configuration.placed_organisms.size() == 1
+          ? " placed organism</span>"
+          : " placed organisms</span>"
+      );
+      row << copy;
       UI::Div actions{emp::MakeString("frozen_configuration_actions_", item.id)};
       actions.AddAttr("class", "freezer-item-actions");
       UI::Button load_button{
@@ -1692,6 +2381,15 @@ private:
         "Load", emp::MakeString("load_frozen_configuration_", item.id)
       };
       load_button.AddAttr("class", "freezer-load-button");
+      UI::Button download_button{
+        [this, id=item.id](){ DownloadFrozenConfiguration(id); },
+        "&#x2B07;", emp::MakeString("download_frozen_configuration_", item.id)
+      };
+      download_button.AddAttr("class", "freezer-download-button");
+      download_button.SetAttr(
+        "aria-label", emp::MakeString("Download ", item.name, " configuration file")
+      );
+      download_button.SetTitle(emp::MakeString("Download ", item.name, " as .cfg"));
       UI::Button remove_button{
         [this, id=item.id](){ RemoveFrozenItem(freezer.configurations, id); },
         "&times;", emp::MakeString("remove_frozen_configuration_", item.id)
@@ -1700,6 +2398,7 @@ private:
       remove_button.SetAttr("aria-label", emp::MakeString("Remove ", item.name));
       remove_button.SetTitle(emp::MakeString("Remove ", item.name));
       actions << load_button;
+      actions << download_button;
       actions << remove_button;
       row << actions;
       configuration_list << row;
@@ -1727,10 +2426,14 @@ private:
     for (const auto & item : freezer.runs) {
       UI::Div row{emp::MakeString("frozen_run_", item.id)};
       row.AddAttr("class", "freezer-item");
-      row << emp::MakeString(
-        "<div class='freezer-item-copy'><strong>", emp::MakeWebSafe(item.name),
-        "</strong><span>", item.organism_count, " organisms</span></div>"
+      UI::Div copy{emp::MakeString("frozen_run_copy_", item.id)};
+      copy.AddAttr("class", "freezer-item-copy");
+      copy << BuildFreezerNameEditor(2, item.id, item.name, "rename_frozen_run_");
+      copy << emp::MakeString(
+        "<span>", item.organism_count,
+        item.organism_count == 1 ? " organism</span>" : " organisms</span>"
       );
+      row << copy;
       UI::Div actions{emp::MakeString("frozen_run_actions_", item.id)};
       actions.AddAttr("class", "freezer-item-actions");
       UI::Button load_button{
@@ -1738,6 +2441,13 @@ private:
         "Load", emp::MakeString("load_frozen_run_", item.id)
       };
       load_button.AddAttr("class", "freezer-load-button");
+      UI::Button download_button{
+        [this, id=item.id](){ DownloadFrozenRun(id); },
+        "&#x2B07;", emp::MakeString("download_frozen_run_", item.id)
+      };
+      download_button.AddAttr("class", "freezer-download-button");
+      download_button.SetAttr("aria-label", emp::MakeString("Download ", item.name, " run pod"));
+      download_button.SetTitle(emp::MakeString("Download ", item.name, " as .pod"));
       UI::Button remove_button{
         [this, id=item.id](){ RemoveFrozenItem(freezer.runs, id); },
         "&times;", emp::MakeString("remove_frozen_run_", item.id)
@@ -1746,6 +2456,7 @@ private:
       remove_button.SetAttr("aria-label", emp::MakeString("Remove ", item.name));
       remove_button.SetTitle(emp::MakeString("Remove ", item.name));
       actions << load_button;
+      actions << download_button;
       actions << remove_button;
       row << actions;
       run_list << row;
@@ -2012,6 +2723,12 @@ private:
     population_canvas.AddAttr("class", "population-canvas");
     population_canvas.SetAttr("role", "img");
     population_canvas.SetAttr("aria-label", "Grid population of digital organisms");
+    population_canvas.SetAttr("data-grid-width", Grid().GetWidth());
+    population_canvas.SetAttr("data-grid-height", Grid().GetHeight());
+    population_canvas.SetTitle(
+      "Drag organisms between the grid and freezer. Ctrl-click or right-click an occupied cell for actions."
+    );
+    population_canvas.SetAttr("oncontextmenu", "event.preventDefault();");
     population_canvas.OnClick(std::function<void(UI::MouseEvent)>{
       [this](UI::MouseEvent event) {
         const int cell_id = GetPopulationCellAtClient(
@@ -2020,7 +2737,29 @@ private:
           static_cast<int>(Grid().GetWidth()),
           static_cast<int>(Grid().GetHeight())
         );
-        if (cell_id >= 0) SelectPopulationCell(static_cast<size_t>(cell_id));
+        if (cell_id < 0) return;
+        if (event.ctrlKey) {
+          OpenGridCellMenu(
+            static_cast<size_t>(cell_id), event.clientX, event.clientY
+          );
+        } else {
+          SelectPopulationCell(static_cast<size_t>(cell_id));
+        }
+      }
+    });
+    population_canvas.On("contextmenu", std::function<void(UI::MouseEvent)>{
+      [this](UI::MouseEvent event) {
+        const int cell_id = GetPopulationCellAtClient(
+          event.clientX,
+          event.clientY,
+          static_cast<int>(Grid().GetWidth()),
+          static_cast<int>(Grid().GetHeight())
+        );
+        if (cell_id >= 0) {
+          OpenGridCellMenu(
+            static_cast<size_t>(cell_id), event.clientX, event.clientY
+          );
+        }
       }
     });
     UI::Div population_surface{"population_grid_surface"};
@@ -2037,6 +2776,44 @@ private:
     active_cell_highlight.AddAttr("class", "active-cell-highlight");
     active_cell_highlight.SetAttr("aria-hidden", "true");
     population_surface << active_cell_highlight;
+    UI::Div grid_cell_menu{"grid_cell_menu"};
+    grid_cell_menu.AddAttr("class", "grid-cell-menu");
+    grid_cell_menu.SetAttr("role", "menu");
+    grid_cell_menu.SetAttr("aria-label", "Organism actions");
+    grid_cell_menu.SetCSS("display", "none");
+    UI::Button save_grid_organism_button{
+      [this](){
+        HideGridCellMenu();
+        SaveGridCellOrganism(grid_context_cell_id);
+      },
+      "Save Organism",
+      "save_grid_organism_button"
+    };
+    save_grid_organism_button.AddAttr("class", "grid-cell-menu-action");
+    save_grid_organism_button.SetAttr("role", "menuitem");
+    UI::Button remove_grid_organism_button{
+      [this](){
+        HideGridCellMenu();
+        RemoveGridCellOrganism(grid_context_cell_id);
+      },
+      "Remove Organism",
+      "remove_grid_organism_button"
+    };
+    remove_grid_organism_button.AddAttr(
+      "class", "grid-cell-menu-action grid-cell-menu-remove"
+    );
+    remove_grid_organism_button.SetAttr("role", "menuitem");
+    grid_cell_menu << save_grid_organism_button;
+    grid_cell_menu << remove_grid_organism_button;
+    population_surface << grid_cell_menu;
+    if (!run_started && placed_organisms.size()) {
+      population_surface << emp::MakeString(
+        "<div class='staged-organism-badge'>",
+        placed_organisms.size(),
+        placed_organisms.size() == 1 ? " organism staged" : " organisms staged",
+        "</div>"
+      );
+    }
     canvas_frame << population_surface;
 
     UI::Div transport{"transport"};
@@ -2159,13 +2936,21 @@ public:
     : animation([this](const UI::Animate & frame){ OnAnimationFrame(frame); }) { }
 
   ~AvidaWebApp() {
-    if (avida) Avida().GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback({});
+    if (avida) {
+      Avida().GetPlugIn<WebInterfaceBridge>().SetOnStartCallback({});
+      Avida().GetPlugIn<WebInterfaceBridge>().SetBeforeExitCallback({});
+    }
+    if (drop_organism_callback_id) emp::JSDelete(drop_organism_callback_id);
+    if (freeze_grid_callback_id) emp::JSDelete(freeze_grid_callback_id);
+    if (rename_freezer_callback_id) emp::JSDelete(rename_freezer_callback_id);
   }
 
   void Initialize() {
     CreateConfiguredAvida();
     default_setting_values = SnapshotSettingValues();
     InitializeFreezer();
+    InitializeDragCallbacks();
+    InstallOrganismDragBridge(drop_organism_callback_id, freeze_grid_callback_id);
     std::println(
       "Loaded /config/Avida-web.cfg (substitution probability = {}).",
       Avida().GetSettings().Get<double>("mutations.substitution_prob")
