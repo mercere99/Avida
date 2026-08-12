@@ -19,6 +19,8 @@
  */
 
 #include <cstddef>    // for size_t
+#include <map>
+#include <string>
 
 #include "emp/base/notify.hpp"
 #include "emp/base/Ptr.hpp"
@@ -54,6 +56,7 @@ private:
 
   emp::vector<Reaction> reactions;                  // All reactions, in declaration order.
   emp::vector<emp::vector<size_t>> task_reactions;  // task ID -> indices into `reactions`.
+  std::map<std::string, size_t> phenotype_categories;
 
   static Op ToOp(emp::String name) {
     name.SetLower();
@@ -70,6 +73,23 @@ private:
       if (task_id < p_tasks.size() && p_tasks[task_id]) ++count;
     });
     return count;
+  }
+
+  template <concepts::Organism ORG_T>
+  size_t GetParentReactionPhenotype(const ORG_T & org) {
+    const auto & parent_counts = org.GetPhenotype().parent_task_counts;
+    std::string reaction_profile;
+    reaction_profile.reserve(reactions.size());
+    for (const Reaction & reaction : reactions) {
+      const bool performed = reaction.task_id < parent_counts.size()
+        && parent_counts[reaction.task_id] != 0;
+      reaction_profile.push_back(performed ? '1' : '0');
+    }
+
+    const auto [iterator, inserted] = phenotype_categories.try_emplace(
+      std::move(reaction_profile), phenotype_categories.size()
+    );
+    return iterator->second;
   }
 
 public:
@@ -149,6 +169,7 @@ public:
       "Reactions can only be configured before a run starts.");
     reactions.clear();
     task_reactions.clear();
+    phenotype_categories.clear();
     reactions.reserve(configs.size());
     for (const Config & config : configs) {
       reactions.push_back({
@@ -192,6 +213,16 @@ public:
   }
 
   void SetupPopulationView(PopulationViewOptions<AVIDA_T> & options) {
+    phenotype_categories.clear();
+    options.AddCategoricalColorMode(
+      "phenotype",
+      "Phenotype",
+      "Color organisms by the combination of reactions their parent performed.",
+      [this](const typename AVIDA_T::organism_t & org) {
+        return GetParentReactionPhenotype(org);
+      },
+      true
+    );
     for (size_t reaction_id = 0; reaction_id < reactions.size(); ++reaction_id) {
       const Reaction & reaction = reactions[reaction_id];
       options.AddStatistic(
@@ -233,12 +264,13 @@ public:
     }
   }
 
-  // The offspring inherits the parent's task counts for the gestation that produced it; the parent
+  // Both daughters inherit the completed gestation's task profile.  The retained parent object
   // then begins a fresh gestation and must re-earn its task bonuses (mirroring the rate reset in
   // TrackMetabolism's OnOffspringReady).
   template <concepts::Organism ORG_T>
   void OnOffspringReady(ORG_T & offspring, ORG_T & parent) {
     offspring.GetPhenotype().parent_task_counts = parent.GetPhenotype().task_counts;
+    parent.GetPhenotype().parent_task_counts = parent.GetPhenotype().task_counts;
     parent.GetPhenotype().task_counts.assign(avida.GetNumTasks(), 0);
   }
 
