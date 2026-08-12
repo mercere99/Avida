@@ -530,6 +530,13 @@ public:
     AVIDA_SIGNAL( AddCallback(name, callback) );
   }
 
+  template <typename ANALYSIS_FUN_T>
+  void AddCallback(const emp::String & name,
+                   std::function<void(size_t)> callback,
+                   ANALYSIS_FUN_T analysis_fun) {
+    AVIDA_SIGNAL( AddCallback(name, callback, analysis_fun) );
+  }
+
   template <typename TRAIT_T>
   void RegisterTrait(const emp::String & name, const emp::String & desc,
                      const emp::String & filename, size_t line,
