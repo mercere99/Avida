@@ -31,6 +31,7 @@ public:
     emp::String label;
     emp::String description;
     category_fun_t get_category;
+    bool distinct_colors = false;
   };
 
   struct ContinuousColorMode {
@@ -73,14 +74,16 @@ public:
   void AddCategoricalColorMode(emp::String id,
                                emp::String label,
                                emp::String description,
-                               category_fun_t get_category) {
+                               category_fun_t get_category,
+                               bool distinct_colors = false) {
     ValidateColorMode(id);
     emp_always_assert(get_category, "Population color modes require a category function.");
     categorical_color_modes.push_back({
       .id = std::move(id),
       .label = std::move(label),
       .description = std::move(description),
-      .get_category = std::move(get_category)
+      .get_category = std::move(get_category),
+      .distinct_colors = distinct_colors
     });
   }
 
