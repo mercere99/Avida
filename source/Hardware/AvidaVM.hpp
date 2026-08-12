@@ -270,6 +270,7 @@ public:
   [[nodiscard]] size_t GetExeCount() const { return exe_count; }
   [[nodiscard]] size_t GetCopyCount() const { return copy_count; }
   [[nodiscard]] size_t GetErrorCount() const { return error_count; }
+  [[nodiscard]] const genome_t & GetGenome() const { return genome; }
   [[nodiscard]] const mem_t & GetMemory() const { return memory; }
   [[nodiscard]] const auto & GetHeads() const { return heads; }
   [[nodiscard]] const auto & GetStacks() const { return stacks; }
@@ -321,6 +322,12 @@ public:
   void AddNote(auto &&... args) {
     analysis_notes.Append(args...);
     analysis_notes += '\n';
+  }
+
+  [[nodiscard]] emp::String TakeAnalysisNotes() {
+    emp::String notes = std::move(analysis_notes);
+    analysis_notes.clear();
+    return notes;
   }
 
   void Trace(size_t cpu_cycles=200, std::ostream & os=std::cout) {
