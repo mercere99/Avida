@@ -19,7 +19,7 @@ template <typename GENOME_T, typename PHENOTYPE_T>
 class Organism : public OrganismBase {
 private:
   GENOME_T genome;        // Original genome for this organism.
-  PHENOTYPE_T phenotype;  // Current phenotype for this organism.
+  PHENOTYPE_T phenotype{};  // Current phenotype for this organism.
 
 public:
   using this_t = Organism<GENOME_T, PHENOTYPE_T>;
