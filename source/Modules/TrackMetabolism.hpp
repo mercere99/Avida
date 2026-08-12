@@ -57,6 +57,23 @@ public:
 
   void SetupPopulationView(PopulationViewOptions<AVIDA_T> & options) const {
     options.AddContinuousColorMode(
+      "gestation_cost",
+      "Gestation Cost",
+      "Color organisms by the CPU cycles required to produce their offspring.",
+      [](const typename AVIDA_T::organism_t & org) {
+        return static_cast<double>(org.GetPhenotype().gestation_cost);
+      }
+    );
+    options.AddContinuousColorMode(
+      "metabolic_rate",
+      "Metabolic Rate",
+      "Color organisms by metabolic base multiplied by metabolic multiplier.",
+      [](const typename AVIDA_T::organism_t & org) {
+        const auto & phenotype = org.GetPhenotype();
+        return phenotype.metabolic_base * phenotype.metabolic_mult;
+      }
+    );
+    options.AddContinuousColorMode(
       "fitness",
       "Fitness",
       "Color organisms by current metabolic rate divided by gestation cost.",
