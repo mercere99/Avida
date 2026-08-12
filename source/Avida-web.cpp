@@ -18,6 +18,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -120,12 +121,43 @@ EM_JS(void, RenderPopulationPixels,
       return;
     }
 
+    const displayWidth = Math.max(1, canvas.clientWidth);
+    const displayHeight = Math.max(1, canvas.clientHeight);
+    const pixelRatio = window.devicePixelRatio || 1;
+    const pixelWidth = Math.max(width, Math.round(displayWidth * pixelRatio));
+    const pixelHeight = Math.max(height, Math.round(displayHeight * pixelRatio));
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+
     const byteLength = width * height * 4;
     const wasmPixels = new Uint8ClampedArray(HEAPU8.buffer, pixels, byteLength);
-    const image = new ImageData(new Uint8ClampedArray(wasmPixels), width, height);
     const context = canvas.getContext('2d');
     context.imageSmoothingEnabled = false;
-    context.putImageData(image, 0, 0);
+    for (let row = 0; row < height; ++row) {
+      const top = Math.round(row * pixelHeight / height);
+      const bottom = Math.round((row + 1) * pixelHeight / height);
+      for (let column = 0; column < width; ++column) {
+        const left = Math.round(column * pixelWidth / width);
+        const right = Math.round((column + 1) * pixelWidth / width);
+        const offset = (row * width + column) * 4;
+        context.fillStyle = `rgb(${wasmPixels[offset]}, ${wasmPixels[offset + 1]}, ${wasmPixels[offset + 2]})`;
+        context.fillRect(left, top, right - left, bottom - top);
+      }
+    }
+
+    // Draw the colors and lines into the same bitmap so browser subpixel rounding
+    // cannot put a line in a neighboring cell.
+    const lineWidth = Math.max(1, Math.round(pixelRatio));
+    const lineOffset = Math.floor(lineWidth / 2);
+    context.fillStyle = 'rgba(4, 17, 25, 0.28)';
+    for (let column = 1; column < width; ++column) {
+      const left = Math.round(column * pixelWidth / width) - lineOffset;
+      context.fillRect(left, 0, lineWidth, pixelHeight);
+    }
+    for (let row = 1; row < height; ++row) {
+      const top = Math.round(row * pixelHeight / height) - lineOffset;
+      context.fillRect(0, top, pixelWidth, lineWidth);
+    }
   };
   render();
 });
@@ -138,6 +170,136 @@ EM_JS(void, SetConfigurationControlValue,
       (const char * control_id, const char * value), {
   const control = document.getElementById(UTF8ToString(control_id));
   if (control) control.value = UTF8ToString(value);
+});
+
+EM_JS(void, UpdateOrganismTimelineControl, (size_t step, size_t max_step), {
+  const slider = document.getElementById('organism_position_slider');
+  if (slider) {
+    slider.max = String(max_step);
+    slider.value = String(step);
+    slider.setAttribute('aria-valuenow', String(step));
+  }
+  const readout = document.getElementById('organism_position_readout');
+  if (readout) readout.textContent = `${step} / ${max_step}`;
+});
+
+EM_JS(void, UpdateOrganismTransportControls,
+      (bool has_subject, bool at_start, bool at_end, bool show_offspring, int run_mode), {
+  const paused = run_mode === 0;
+  const play = run_mode === 1;
+  const fast_forward = run_mode === 2;
+  const setDisabled = (id, disabled) => {
+    const control = document.getElementById(id);
+    if (control) control.disabled = disabled;
+  };
+  const setActive = (id, active) => {
+    const control = document.getElementById(id);
+    if (!control) return;
+    control.classList.toggle('is-active', active);
+    control.setAttribute('aria-pressed', active ? 'true' : 'false');
+  };
+
+  setDisabled('organism_reset_button', !has_subject || at_start);
+  setDisabled('organism_step_button', !has_subject || at_end || !paused);
+  const slider = document.getElementById('organism_position_slider');
+  if (slider) slider.disabled = !has_subject;
+  setDisabled('organism_play_button', !has_subject || at_end);
+  setDisabled('organism_pause_button', !has_subject || at_end || paused);
+  setDisabled('organism_fast_forward_button', !has_subject || at_end);
+  setDisabled('organism_offspring_button', !show_offspring);
+  setActive('organism_play_button', play);
+  setActive('organism_pause_button', paused);
+  setActive('organism_fast_forward_button', fast_forward);
+});
+
+EM_JS(void, ScrollTrackedGenomeHead, (int head_id, size_t position), {
+  if (head_id < 0) return;
+  requestAnimationFrame(() => {
+    const list = document.querySelector('.genome-execution-list');
+    const row = document.querySelector(
+      `.genome-execution-row[data-genome-position="${position}"]`
+    );
+    if (!list || !row) return;
+    const list_bounds = list.getBoundingClientRect();
+    const row_bounds = row.getBoundingClientRect();
+    const target = list.scrollTop + row_bounds.top - list_bounds.top
+      - (list.clientHeight - row.offsetHeight) / 2;
+    list.scrollTop = Math.max(0, target);
+  });
+});
+
+EM_JS(int, GetGenomeExecutionScrollTop, (), {
+  const list = document.querySelector('.genome-execution-list');
+  return list ? Math.round(list.scrollTop) : 0;
+});
+
+EM_JS(void, RestoreGenomeExecutionScrollTop, (int scroll_top), {
+  requestAnimationFrame(() => {
+    const list = document.querySelector('.genome-execution-list');
+    if (list) list.scrollTop = scroll_top;
+  });
+});
+
+EM_JS(void, InstallOrganismKeyboardBridge, (size_t step_callback), {
+  if (window.__avidaOrganismKeyboardBridge) return;
+  window.__avidaOrganismKeyboardBridge = true;
+  document.addEventListener('keydown', event => {
+    if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey) {
+      return;
+    }
+    const target = event.target;
+    if (target && (target.isContentEditable || target.tagName === 'TEXTAREA'
+        || target.tagName === 'SELECT'
+        || (target.tagName === 'INPUT' && target.type !== 'range')
+        || target.tagName === 'BUTTON')) return;
+    const mode = document.getElementById('organism_mode');
+    const step = document.getElementById('organism_step_button');
+    if (!mode || mode.getAttribute('aria-pressed') !== 'true' || !step || step.disabled) return;
+    event.preventDefault();
+    emp.Callback(step_callback);
+  });
+});
+
+EM_JS(void, InstallPopulationKeyboardBridge,
+      (size_t step_callback, size_t fast_forward_callback), {
+  if (window.__avidaPopulationKeyboardBridge) return;
+  window.__avidaPopulationKeyboardBridge = true;
+  document.addEventListener('keydown', event => {
+    if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+    const target = event.target;
+    if (target && (target.isContentEditable || target.tagName === 'TEXTAREA'
+        || target.tagName === 'SELECT' || target.tagName === 'INPUT'
+        || target.tagName === 'BUTTON')) return;
+    const mode = document.getElementById('population_mode');
+    if (!mode || mode.getAttribute('aria-pressed') !== 'true') return;
+
+    if (event.code === 'Space') {
+      const step = document.getElementById('step_button');
+      if (!step || step.disabled && document.getElementById('pause_button')?.disabled) return;
+      event.preventDefault();
+      emp.Callback(step_callback);
+    } else if (event.key === '>') {
+      const fastForward = document.getElementById('fast_forward_button');
+      if (!fastForward || fastForward.disabled) return;
+      event.preventDefault();
+      emp.Callback(fast_forward_callback);
+    }
+  });
+});
+
+EM_JS(void, InstallOrganismModeInteractionBridge,
+      (size_t scrub_callback, size_t head_callback), {
+  if (window.__avidaOrganismModeInteractionBridge) return;
+  window.__avidaOrganismModeInteractionBridge = true;
+  document.addEventListener('input', event => {
+    if (event.target?.id !== 'organism_position_slider') return;
+    emp.Callback(scrub_callback, event.target.value);
+  });
+  document.addEventListener('click', event => {
+    const marker = event.target.closest?.('[data-organism-head]');
+    if (!marker) return;
+    emp.Callback(head_callback, Number(marker.dataset.organismHead));
+  });
 });
 
 EM_JS(void, ResizePopulationDisplay, (int width, int height), {
@@ -265,6 +427,16 @@ EM_JS(void, InstallOrganismDragBridge, (size_t drop_callback, size_t freeze_call
   window.__avidaOrganismDragBridge = true;
   let drag = null;
 
+  const finishDrag = () => {
+    const current = drag;
+    drag = null;
+    document.body.classList.remove('avida-organism-dragging');
+    document.querySelectorAll('.is-organism-drop-target').forEach(
+      element => element.classList.remove('is-organism-drop-target')
+    );
+    return current;
+  };
+
   const cellAt = (canvas, clientX, clientY) => {
     const bounds = canvas.getBoundingClientRect();
     const width = Number(canvas.dataset.gridWidth);
@@ -297,8 +469,7 @@ EM_JS(void, InstallOrganismDragBridge, (size_t drop_callback, size_t freeze_call
 
   document.addEventListener('pointermove', event => {
     if (!drag) return;
-    const moved = Math.hypot(event.clientX - drag.x, event.clientY - drag.y) >= 5;
-    if (!moved) return;
+    if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
     drag.moved = true;
     document.body.classList.add('avida-organism-dragging');
     const target = drag.kind === 'freezer'
@@ -310,12 +481,7 @@ EM_JS(void, InstallOrganismDragBridge, (size_t drop_callback, size_t freeze_call
 
   document.addEventListener('pointerup', event => {
     if (!drag) return;
-    const current = drag;
-    drag = null;
-    document.body.classList.remove('avida-organism-dragging');
-    document.querySelectorAll('.is-organism-drop-target').forEach(
-      element => element.classList.remove('is-organism-drop-target')
-    );
+    const current = finishDrag();
     if (!current.moved) return;
 
     if (current.kind === 'freezer') {
@@ -334,11 +500,17 @@ EM_JS(void, InstallOrganismDragBridge, (size_t drop_callback, size_t freeze_call
       emp.Callback(freeze_callback, current.cell);
     }
   });
+
+  document.addEventListener('pointercancel', finishDrag);
+  window.addEventListener('blur', finishDrag);
 });
 
 class AvidaWebApp {
 private:
   enum class RunMode { PAUSED, PLAY, FAST_FORWARD };
+  enum class OrganismRunMode { PAUSED, PLAY, FAST_FORWARD };
+  enum class TrackedOrganismHead { NONE = -1, IP, READ, WRITE, FLOW };
+  enum class ApplicationMode { POPULATION, ORGANISM };
   enum class ColorScale { UNIFORM, CATEGORICAL, CONTINUOUS };
   enum class ConfigurationTab { SETTINGS, ENVIRONMENT, EVENTS };
   enum class SidePanel { POPULATION, ORGANISM, FREEZER, CONFIGURATION };
@@ -352,6 +524,23 @@ private:
     void Serialize(emp::SerialPod & pod) {
       pod(cell_id, name, genome, instruction_count);
     }
+  };
+
+  struct ContinuousColorRange {
+    double minimum = std::numeric_limits<double>::infinity();
+    double maximum = -std::numeric_limits<double>::infinity();
+
+    void Include(double value) {
+      if (!std::isfinite(value)) return;
+      minimum = std::min(minimum, value);
+      maximum = std::max(maximum, value);
+    }
+  };
+
+  struct AnalysisTrait {
+    emp::String name;
+    emp::String value;
+    emp::String description;
   };
 
   struct FrozenConfigurationV1 {
@@ -500,6 +689,9 @@ private:
   static constexpr double PLAY_INTERVAL_MS = 100.0;
   static constexpr double FAST_FORWARD_FRAME_BUDGET_MS = 12.0;
   static constexpr size_t FAST_FORWARD_REDRAW_UPDATES = 10;
+  static constexpr size_t ORGANISM_ANALYSIS_STEP_LIMIT = 100000;
+  static constexpr double ORGANISM_PLAY_INTERVAL_MS = 500.0;
+  static constexpr double ORGANISM_FAST_FORWARD_INTERVAL_MS = 50.0;
 
   static constexpr uint32_t EMPTY_COLOR = PackRGBA(12, 30, 46);
   static constexpr uint32_t DEFAULT_ORG_COLOR = PackRGBA(110, 205, 224);
@@ -541,6 +733,14 @@ private:
   UI::Button org_stats_mode;
   UI::Button freezer_mode;
   UI::Button configure_mode;
+  UI::Button organism_step_button;
+  UI::Button organism_reset_button;
+  UI::Button organism_play_button;
+  UI::Button organism_pause_button;
+  UI::Button organism_fast_forward_button;
+  UI::Button organism_offspring_button;
+  UI::Input organism_position_slider;
+  UI::Selector organism_freezer_selector{"organism_freezer_selector"};
   UI::Button save_organism_button;
   UI::Button save_configuration_button;
   UI::Button save_run_button;
@@ -555,14 +755,20 @@ private:
   emp::vector<UI::Selector> configuration_selectors;
   emp::vector<UI::Text> statistic_texts;
   UI::Text org_stats_content;
+  UI::Text organism_mode_content;
 
   RunMode run_mode = RunMode::PAUSED;
+  OrganismRunMode organism_run_mode = OrganismRunMode::PAUSED;
+  ApplicationMode active_application_mode = ApplicationMode::POPULATION;
   ColorScale active_color_scale = ColorScale::UNIFORM;
   size_t active_color_mode = 0;
   size_t last_grid_redraw_update = 0;
   double play_elapsed_ms = 0.0;
+  double organism_play_elapsed_ms = 0.0;
   emp::vector<uint32_t> population_pixels;
   emp::vector<double> continuous_values;
+  emp::vector<std::map<size_t, uint32_t>> categorical_color_maps;
+  emp::vector<ContinuousColorRange> continuous_color_ranges;
   emp::vector<emp::String> final_statistic_values;
   bool has_final_snapshot = false;
   bool advanced_settings_visible = false;
@@ -580,7 +786,26 @@ private:
   size_t drop_organism_callback_id = 0;
   size_t freeze_grid_callback_id = 0;
   size_t rename_freezer_callback_id = 0;
+  size_t population_step_callback_id = 0;
+  size_t population_fast_forward_callback_id = 0;
+  size_t organism_space_step_callback_id = 0;
+  size_t organism_scrub_callback_id = 0;
+  size_t organism_head_callback_id = 0;
   size_t grid_context_cell_id = PopGrid<avida_t>::EMPTY_CELL;
+
+  std::unique_ptr<avida_t::organism_t> organism_analysis_subject;
+  std::optional<AvidaVM> organism_analysis_hardware;
+  std::optional<avida_t::genome_t> organism_analysis_offspring;
+  emp::String organism_analysis_name;
+  emp::String organism_last_instruction;
+  emp::String organism_last_description;
+  emp::String organism_step_notes;
+  size_t organism_last_ip = 0;
+  size_t organism_execution_step = 0;
+  size_t organism_execution_length = 0;
+  bool organism_execution_complete = false;
+  TrackedOrganismHead tracked_organism_head = TrackedOrganismHead::IP;
+  emp::vector<AnalysisTrait> organism_analysis_traits;
 
   [[nodiscard]] avida_t & Avida() { return *avida; }
   [[nodiscard]] const avida_t & Avida() const { return *avida; }
@@ -874,6 +1099,14 @@ private:
     return genome_text;
   }
 
+  [[nodiscard]] std::optional<avida_t::genome_t>
+  ParseGenomeText(const emp::String & genome_text) {
+    std::istringstream genome_input{genome_text.str()};
+    auto genome = Avida().GetPlugIn<OrgTypeAvidian>().LoadGenome(genome_input);
+    if (!genome) return std::nullopt;
+    return std::move(*genome);
+  }
+
   [[nodiscard]] bool InjectGenomeAtCell(const emp::String & genome_text, size_t cell_id) {
     if (cell_id >= Grid().GetWidth() * Grid().GetHeight()) return false;
     std::istringstream genome_input{genome_text.str()};
@@ -895,6 +1128,13 @@ private:
   [[nodiscard]] auto FindPlacedOrganism(size_t cell_id) {
     return std::find_if(
       placed_organisms.begin(), placed_organisms.end(),
+      [cell_id](const auto & item){ return item.cell_id == cell_id; }
+    );
+  }
+
+  [[nodiscard]] auto FindPlacedOrganism(size_t cell_id) const {
+    return std::find_if(
+      placed_organisms.cbegin(), placed_organisms.cend(),
       [cell_id](const auto & item){ return item.cell_id == cell_id; }
     );
   }
@@ -963,6 +1203,7 @@ private:
       if (iterator == placed_organisms.end()) return;
       const emp::String name = iterator->name;
       placed_organisms.erase(iterator);
+      if (active_cell_id == cell_id) active_cell_id = PopGrid<avida_t>::EMPTY_CELL;
       freezer_message = emp::MakeString("Removed staged ", name, " from the grid.");
       RequestInterfaceRebuild();
       return;
@@ -1015,6 +1256,8 @@ private:
     );
     if (existing == placed_organisms.end()) placed_organisms.push_back(std::move(placement));
     else *existing = std::move(placement);
+    active_organism = {};
+    active_cell_id = cell_id;
     freezer_message = emp::MakeString(
       "Staged ", iterator->name, " in cell ", cell_id, " for the next run."
     );
@@ -1053,6 +1296,31 @@ private:
             RenameFrozenItem(freezer.runs, item_id, name);
           }
         }
+      });
+    }
+    if (!population_step_callback_id) {
+      population_step_callback_id = emp::JSWrap(std::function<void()>{
+        [this](){ StepPopulation(); }
+      });
+    }
+    if (!population_fast_forward_callback_id) {
+      population_fast_forward_callback_id = emp::JSWrap(std::function<void()>{
+        [this](){ ToggleRunMode(RunMode::FAST_FORWARD); }
+      });
+    }
+    if (!organism_space_step_callback_id) {
+      organism_space_step_callback_id = emp::JSWrap(std::function<void()>{
+        [this](){ StepOrganismInstruction(); }
+      });
+    }
+    if (!organism_scrub_callback_id) {
+      organism_scrub_callback_id = emp::JSWrap(std::function<void(std::string)>{
+        [this](std::string value){ JumpToOrganismExecutionPosition(value); }
+      });
+    }
+    if (!organism_head_callback_id) {
+      organism_head_callback_id = emp::JSWrap(std::function<void(size_t)>{
+        [this](size_t head_id){ SetTrackedOrganismHead(head_id); }
       });
     }
   }
@@ -1183,7 +1451,10 @@ private:
   }
 
   void UpdateActiveCellHighlight() {
-    if (!GetActiveOrganism()) {
+    const bool has_staged_selection = !run_started
+      && active_cell_id != PopGrid<avida_t>::EMPTY_CELL
+      && FindPlacedOrganism(active_cell_id) != placed_organisms.end();
+    if (!GetActiveOrganism() && !has_staged_selection) {
       active_organism = {};
       active_cell_id = PopGrid<avida_t>::EMPTY_CELL;
     }
@@ -1196,8 +1467,18 @@ private:
   }
 
   void SelectPopulationCell(size_t cell_id) {
+    if (!run_started) {
+      active_organism = {};
+      active_cell_id = FindPlacedOrganism(cell_id) == placed_organisms.end()
+        ? PopGrid<avida_t>::EMPTY_CELL
+        : cell_id;
+      UpdateActiveCellHighlight();
+      UpdateControls();
+      return;
+    }
+
     const auto cells = Grid().GetCells();
-    if (!run_started || cell_id >= cells.size()) return;
+    if (cell_id >= cells.size()) return;
 
     const size_t org_id = cells[cell_id];
     if (org_id == PopGrid<avida_t>::EMPTY_CELL || !Avida().IsOccupied(org_id)) {
@@ -1237,6 +1518,14 @@ private:
         module.SetupPopulationView(population_view_options);
       }
     });
+    continuous_color_ranges.clear();
+    continuous_color_ranges.resize(
+      population_view_options.GetContinuousColorModes().size()
+    );
+    categorical_color_maps.clear();
+    categorical_color_maps.resize(
+      population_view_options.GetCategoricalColorModes().size()
+    );
   }
 
   void ApplyReactionConfiguration() {
@@ -1341,6 +1630,10 @@ private:
     }
   }
 
+  void ToggleRunMode(RunMode mode) {
+    SetRunMode(run_mode == mode ? RunMode::PAUSED : mode);
+  }
+
   [[nodiscard]] static uint32_t BlendColors(uint32_t first, uint32_t second, double amount) {
     const auto blend_channel = [amount](uint32_t a, uint32_t b, size_t shift) {
       const double first_channel = static_cast<double>((a >> shift) & 0xffU);
@@ -1367,12 +1660,63 @@ private:
     return BlendColors(MID_FITNESS_COLOR, HIGH_FITNESS_COLOR, normalized * 2.0 - 1.0);
   }
 
-  [[nodiscard]] uint32_t GetCategoricalColor(const avida_t::organism_t & organism) const {
+  [[nodiscard]] static uint32_t MakeDistinctCategoryColor(size_t category, size_t attempt) {
+    uint64_t value = static_cast<uint64_t>(category)
+      + 0x9e3779b97f4a7c15ULL * static_cast<uint64_t>(attempt + 1);
+    value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+    value ^= value >> 31;
+
+    const double hue = static_cast<double>(value & 0xffffU) / 65536.0 * 6.0;
+    const double saturation = 0.58
+      + static_cast<double>((value >> 16) & 0xffU) / 255.0 * 0.28;
+    const double brightness = 0.78
+      + static_cast<double>((value >> 24) & 0xffU) / 255.0 * 0.18;
+    const double chroma = brightness * saturation;
+    const double second = chroma * (1.0 - std::abs(std::fmod(hue, 2.0) - 1.0));
+    const double match = brightness - chroma;
+    const size_t sector = static_cast<size_t>(hue);
+    const std::array<std::array<double, 3>, 6> channels{{
+      {{chroma, second, 0.0}}, {{second, chroma, 0.0}}, {{0.0, chroma, second}},
+      {{0.0, second, chroma}}, {{second, 0.0, chroma}}, {{chroma, 0.0, second}}
+    }};
+    const auto & color = channels[std::min(sector, channels.size() - 1)];
+    return PackRGBA(
+      static_cast<uint8_t>(std::round((color[0] + match) * 255.0)),
+      static_cast<uint8_t>(std::round((color[1] + match) * 255.0)),
+      static_cast<uint8_t>(std::round((color[2] + match) * 255.0))
+    );
+  }
+
+  [[nodiscard]] uint32_t GetDistinctCategoryColor(size_t category) {
+    if (active_color_mode >= categorical_color_maps.size()) return DEFAULT_ORG_COLOR;
+    auto & color_map = categorical_color_maps[active_color_mode];
+    if (const auto iterator = color_map.find(category); iterator != color_map.end()) {
+      return iterator->second;
+    }
+
+    for (size_t attempt = 0; ; ++attempt) {
+      const uint32_t candidate = MakeDistinctCategoryColor(category, attempt);
+      const bool already_used = std::any_of(
+        color_map.cbegin(), color_map.cend(),
+        [candidate](const auto & entry) { return entry.second == candidate; }
+      );
+      if (!already_used) {
+        color_map.emplace(category, candidate);
+        return candidate;
+      }
+    }
+  }
+
+  [[nodiscard]] uint32_t GetCategoricalColor(const avida_t::organism_t & organism) {
     const auto & color_modes = population_view_options.GetCategoricalColorModes();
     if (active_color_mode >= color_modes.size()) return DEFAULT_ORG_COLOR;
 
     const size_t category = color_modes[active_color_mode].get_category(organism);
     if (category == PopulationViewOptions<avida_t>::NO_CATEGORY) return DEFAULT_ORG_COLOR;
+    if (color_modes[active_color_mode].distinct_colors) {
+      return GetDistinctCategoryColor(category);
+    }
     return CATEGORY_COLORS[category % CATEGORY_COLORS.size()];
   }
 
@@ -1413,21 +1757,17 @@ private:
     population_pixels.resize(cells.size(), EMPTY_COLOR);
     continuous_values.resize(cells.size(), std::numeric_limits<double>::quiet_NaN());
 
-    double minimum = std::numeric_limits<double>::infinity();
-    double maximum = -std::numeric_limits<double>::infinity();
     const auto & continuous_modes = population_view_options.GetContinuousColorModes();
     if (active_color_scale == ColorScale::CONTINUOUS
         && active_color_mode < continuous_modes.size()) {
+      auto & color_range = continuous_color_ranges[active_color_mode];
       for (size_t cell_id = 0; cell_id < cells.size(); ++cell_id) {
         const size_t org_id = cells[cell_id];
         if (org_id == PopGrid<avida_t>::EMPTY_CELL || !Avida().IsOccupied(org_id)) continue;
 
         const double value = continuous_modes[active_color_mode].get_value(Avida().GetOrg(org_id));
         continuous_values[cell_id] = value;
-        if (std::isfinite(value)) {
-          minimum = std::min(minimum, value);
-          maximum = std::max(maximum, value);
-        }
+        color_range.Include(value);
       }
     }
 
@@ -1437,8 +1777,9 @@ private:
         if (active_color_scale == ColorScale::CATEGORICAL) {
           population_pixels[cell_id] = GetCategoricalColor(Avida().GetOrg(org_id));
         } else if (active_color_scale == ColorScale::CONTINUOUS) {
+          const auto & color_range = continuous_color_ranges[active_color_mode];
           population_pixels[cell_id] = GetContinuousColor(
-            continuous_values[cell_id], minimum, maximum
+            continuous_values[cell_id], color_range.minimum, color_range.maximum
           );
         } else {
           population_pixels[cell_id] = DEFAULT_ORG_COLOR;
@@ -1465,7 +1806,8 @@ private:
   }
 
   void StepPopulation() {
-    emp_assert(run_mode == RunMode::PAUSED);
+    if (Avida().IsComplete()) return;
+    if (run_mode != RunMode::PAUSED) SetRunMode(RunMode::PAUSED);
     if (!run_started) StartRun();
     (void) Avida().ConsumePauseRequest();  // An explicit step advances past a start-time pause.
     FinishUpdate(Avida().AdvanceUpdate(), true);
@@ -1711,6 +2053,433 @@ private:
     if (!run_started && (setting_name == "grid.width" || setting_name == "grid.height")) {
       DrawPopulation();
     }
+  }
+
+  void InitializeOrganismAnalysis(
+    const avida_t::genome_t & genome,
+    const emp::String & name,
+    const avida_t::organism_t * trait_source = nullptr
+  ) {
+    organism_analysis_subject = std::make_unique<avida_t::organism_t>(genome);
+    Avida().SetupAnalysisOrganism(*organism_analysis_subject);
+    organism_analysis_name = name;
+    organism_analysis_offspring.reset();
+    organism_execution_step = 0;
+    organism_execution_length = 0;
+    organism_execution_complete = false;
+    organism_last_instruction.clear();
+    organism_last_description.clear();
+    organism_step_notes.clear();
+    organism_last_ip = 0;
+    Avida().GetPlugIn<DriverBuffered>().ClearAnalysisOffspring();
+
+    organism_analysis_traits.clear();
+    const auto & displayed_organism = trait_source ? *trait_source : *organism_analysis_subject;
+    for (const emp::String & trait_name : Avida().GetPrintableTraitNames()) {
+      const auto & trait = Avida().GetTrait(trait_name);
+      organism_analysis_traits.push_back({
+        .name = trait_name,
+        .value = trait.AsString(displayed_organism),
+        .description = trait.GetDesc()
+      });
+    }
+
+    auto preview_hardware = organism_analysis_subject->Hardware().MakeAnalysisCopy();
+    auto & driver = Avida().GetPlugIn<DriverBuffered>();
+    while (organism_execution_length < ORGANISM_ANALYSIS_STEP_LIMIT) {
+      driver.ClearAnalysisOffspring();
+      preview_hardware.ProcessStep();
+      (void) preview_hardware.TakeAnalysisNotes();
+      ++organism_execution_length;
+      auto offspring = driver.TakeAnalysisOffspring();
+      if (!offspring) continue;
+      organism_analysis_offspring = std::move(*offspring);
+      organism_execution_complete = true;
+      break;
+    }
+    SetOrganismExecutionPosition(0);
+  }
+
+  void SetOrganismExecutionPosition(size_t target_step) {
+    if (!organism_analysis_subject) return;
+    target_step = std::min(target_step, organism_execution_length);
+    organism_analysis_hardware.emplace(
+      organism_analysis_subject->Hardware().MakeAnalysisCopy()
+    );
+    organism_last_instruction.clear();
+    organism_last_description.clear();
+    organism_step_notes.clear();
+    organism_last_ip = 0;
+
+    auto & hardware = *organism_analysis_hardware;
+    auto & driver = Avida().GetPlugIn<DriverBuffered>();
+    for (size_t step = 0; step < target_step; ++step) {
+      const auto & genome = hardware.GetGenome();
+      organism_last_ip = hardware.GetHeads()[AvidaVM::HEAD_IP];
+      const auto & inst_set = hardware.GetInstSet();
+      const size_t inst_id = organism_last_ip < genome.size() ? genome[organism_last_ip] : 0;
+      organism_last_instruction = inst_set.GetName(inst_id);
+      organism_last_description = inst_set.GetDescription(inst_id);
+      driver.ClearAnalysisOffspring();
+      hardware.ProcessStep();
+      organism_step_notes = hardware.TakeAnalysisNotes();
+      (void) driver.TakeAnalysisOffspring();
+    }
+    organism_execution_step = target_step;
+    UpdateOrganismTimelineControl(organism_execution_step, organism_execution_length);
+  }
+
+  void FocusTrackedOrganismHead() const {
+    if (!organism_analysis_hardware
+        || tracked_organism_head == TrackedOrganismHead::NONE) return;
+    static constexpr std::array<size_t, 4> head_ids{
+      AvidaVM::HEAD_IP, AvidaVM::HEAD_G_READ, AvidaVM::HEAD_G_WRITE, AvidaVM::HEAD_FLOW
+    };
+    const size_t tracked_id = static_cast<size_t>(tracked_organism_head);
+    if (tracked_id >= head_ids.size()) return;
+    const auto & hardware = *organism_analysis_hardware;
+    const size_t position = std::min(
+      hardware.GetHeads()[head_ids[tracked_id]], hardware.GetGenome().size()
+    );
+    ScrollTrackedGenomeHead(static_cast<int>(tracked_id), position);
+  }
+
+  void RedrawOrganismModeContent() {
+    const bool preserve_scroll = tracked_organism_head == TrackedOrganismHead::NONE;
+    const int scroll_top = preserve_scroll ? GetGenomeExecutionScrollTop() : 0;
+    organism_mode_content.Redraw();
+    if (preserve_scroll) RestoreGenomeExecutionScrollTop(scroll_top);
+    else FocusTrackedOrganismHead();
+  }
+
+  void SetTrackedOrganismHead(size_t head_id) {
+    if (head_id > static_cast<size_t>(TrackedOrganismHead::FLOW)) return;
+    const auto requested = static_cast<TrackedOrganismHead>(head_id);
+    tracked_organism_head = tracked_organism_head == requested
+      ? TrackedOrganismHead::NONE
+      : requested;
+    RedrawOrganismModeContent();
+  }
+
+  void SetOrganismRunMode(OrganismRunMode mode) {
+    if (!organism_analysis_hardware
+        || organism_execution_step >= organism_execution_length) {
+      mode = OrganismRunMode::PAUSED;
+    }
+    organism_run_mode = mode;
+    organism_play_elapsed_ms = 0.0;
+    UpdateOrganismModeControls();
+    if (organism_run_mode == OrganismRunMode::PAUSED) {
+      if (run_mode == RunMode::PAUSED && animation.GetActive()) animation.Stop();
+    } else if (!animation.GetActive()) {
+      animation.Start();
+    }
+  }
+
+  void ToggleOrganismRunMode(OrganismRunMode mode) {
+    SetOrganismRunMode(
+      organism_run_mode == mode ? OrganismRunMode::PAUSED : mode
+    );
+  }
+
+  void JumpToOrganismExecutionPosition(const std::string & value) {
+    if (!organism_analysis_subject || value.empty()) return;
+    SetOrganismRunMode(OrganismRunMode::PAUSED);
+    SetOrganismExecutionPosition(
+      emp::String{value}.As<size_t>(organism_execution_step)
+    );
+    RedrawOrganismModeContent();
+    UpdateOrganismModeControls();
+  }
+
+  [[nodiscard]] bool PrepareSelectedOrganismAnalysis() {
+    if (const auto * organism = GetActiveOrganism()) {
+      InitializeOrganismAnalysis(
+        organism->GetGenome(),
+        emp::MakeString("Organism #", organism->GetGlobalID()),
+        organism
+      );
+      return true;
+    }
+
+    if (!run_started && active_cell_id != PopGrid<avida_t>::EMPTY_CELL) {
+      const auto placement = FindPlacedOrganism(active_cell_id);
+      if (placement != placed_organisms.end()) {
+        const auto genome = ParseGenomeText(placement->genome);
+        if (genome) {
+          InitializeOrganismAnalysis(*genome, placement->name);
+          return true;
+        }
+      }
+    }
+
+    organism_analysis_subject.reset();
+    organism_analysis_hardware.reset();
+    organism_analysis_offspring.reset();
+    organism_analysis_traits.clear();
+    organism_execution_step = 0;
+    organism_execution_length = 0;
+    organism_execution_complete = false;
+    return false;
+  }
+
+  void SelectFrozenOrganismForAnalysis(size_t freezer_id) {
+    const auto iterator = std::find_if(
+      freezer.organisms.begin(), freezer.organisms.end(),
+      [freezer_id](const auto & item){ return item.id == freezer_id; }
+    );
+    if (iterator == freezer.organisms.end()) return;
+    const auto genome = ParseGenomeText(iterator->genome);
+    if (!genome) return;
+    SetOrganismRunMode(OrganismRunMode::PAUSED);
+    InitializeOrganismAnalysis(*genome, iterator->name);
+    tracked_organism_head = TrackedOrganismHead::IP;
+    RedrawOrganismModeContent();
+    UpdateOrganismModeControls();
+  }
+
+  void UpdateOrganismModeControls() {
+    const bool has_subject = organism_analysis_hardware.has_value();
+    const bool at_end = has_subject && organism_execution_step >= organism_execution_length;
+    const bool show_offspring = at_end && organism_analysis_offspring.has_value();
+    UpdateOrganismTransportControls(
+      has_subject,
+      organism_execution_step == 0,
+      at_end,
+      show_offspring,
+      static_cast<int>(organism_run_mode)
+    );
+    UpdateOrganismTimelineControl(organism_execution_step, organism_execution_length);
+  }
+
+  void StepOrganismInstruction() {
+    if (!organism_analysis_hardware || organism_execution_step >= organism_execution_length) return;
+    SetOrganismRunMode(OrganismRunMode::PAUSED);
+    SetOrganismExecutionPosition(organism_execution_step + 1);
+    RedrawOrganismModeContent();
+    UpdateOrganismModeControls();
+  }
+
+  void AdvancePlayingOrganismInstruction() {
+    if (!organism_analysis_hardware || organism_execution_step >= organism_execution_length) {
+      SetOrganismRunMode(OrganismRunMode::PAUSED);
+      return;
+    }
+    SetOrganismExecutionPosition(organism_execution_step + 1);
+    RedrawOrganismModeContent();
+    UpdateOrganismModeControls();
+    if (organism_execution_step >= organism_execution_length) {
+      SetOrganismRunMode(OrganismRunMode::PAUSED);
+    }
+  }
+
+  void ResetOrganismAnalysis() {
+    if (!organism_analysis_subject) return;
+    SetOrganismRunMode(OrganismRunMode::PAUSED);
+    SetOrganismExecutionPosition(0);
+    RedrawOrganismModeContent();
+    UpdateOrganismModeControls();
+  }
+
+  void ViewOrganismOffspring() {
+    if (!organism_analysis_offspring
+        || organism_execution_step != organism_execution_length) return;
+    const auto genome = *organism_analysis_offspring;
+    const emp::String name = emp::MakeString("Offspring of ", organism_analysis_name);
+    SetOrganismRunMode(OrganismRunMode::PAUSED);
+    InitializeOrganismAnalysis(genome, name);
+    tracked_organism_head = TrackedOrganismHead::IP;
+    organism_freezer_selector.SelectID(0);
+    SetConfigurationControlValue("organism_freezer_selector", "0");
+    RedrawOrganismModeContent();
+    UpdateOrganismModeControls();
+  }
+
+  void SetApplicationMode(ApplicationMode mode) {
+    if (mode == active_application_mode) return;
+    if (active_application_mode == ApplicationMode::ORGANISM) {
+      SetOrganismRunMode(OrganismRunMode::PAUSED);
+    }
+    if (mode == ApplicationMode::ORGANISM) {
+      if (run_mode != RunMode::PAUSED) SetRunMode(RunMode::PAUSED);
+      (void) PrepareSelectedOrganismAnalysis();
+      tracked_organism_head = TrackedOrganismHead::IP;
+    }
+    active_application_mode = mode;
+    RequestInterfaceRebuild();
+  }
+
+  [[nodiscard]] static emp::String NotesAsHTML(emp::String notes) {
+    notes = emp::MakeWebSafe(notes);
+    notes.ReplaceAll("\n", "<br>");
+    return notes;
+  }
+
+  [[nodiscard]] emp::String BuildOrganismModeHTML() const {
+    if (!organism_analysis_hardware) {
+      return
+        "<div class='organism-mode-empty'><div class='organism-mode-empty-icon'>"
+        "&#x2196;</div><h2>Select an organism first</h2>"
+        "<p>Select an organism from the freezer (above) or return to Population mode "
+        "and select an occupied cell.</p>"
+        "</div>";
+    }
+
+    const auto & hardware = *organism_analysis_hardware;
+    const auto & genome = hardware.GetGenome();
+    const auto & inst_set = hardware.GetInstSet();
+    const auto & heads = hardware.GetHeads();
+    const size_t instruction_pointer = heads[AvidaVM::HEAD_IP];
+    emp::String out;
+
+    out.Append(
+      "<div class='organism-cycle-status'><div><span class='eyebrow'>Single life cycle</span>",
+      "<h1>", emp::MakeWebSafe(organism_analysis_name), "</h1></div>",
+      "<div class='cycle-progress'><strong>", organism_execution_step, "</strong>",
+      "<span>instructions executed</span></div></div>"
+    );
+
+    out += "<div class='organism-mode-grid'>";
+    out += "<section class='organism-visual-panel genome-panel'><div class='panel-heading'>";
+    out.Append(
+      "<div><span class='eyebrow'>Execution map</span><h2>Genome</h2></div>",
+      "<span class='panel-count'>", genome.size(), " instructions</span></div>"
+    );
+    out += "<div class='genome-execution-list'>";
+    static constexpr std::array<size_t, 4> genome_head_ids{
+      AvidaVM::HEAD_IP, AvidaVM::HEAD_G_READ, AvidaVM::HEAD_G_WRITE, AvidaVM::HEAD_FLOW
+    };
+    static constexpr std::array<const char *, 4> genome_head_labels{
+      "IP", "READ", "WRITE", "FLOW"
+    };
+    for (size_t pos = 0; pos <= genome.size(); ++pos) {
+      emp::String markers;
+      for (size_t marker_id = 0; marker_id < genome_head_ids.size(); ++marker_id) {
+        if (heads[genome_head_ids[marker_id]] != pos) continue;
+        const bool is_tracked = tracked_organism_head
+          == static_cast<TrackedOrganismHead>(marker_id);
+        markers.Append(
+          "<button type='button' class='head-marker head-", marker_id,
+          is_tracked ? " is-tracked" : "", "' data-organism-head='", marker_id,
+          "' aria-pressed='", is_tracked ? "true" : "false",
+          "' title='", is_tracked ? "Stop following " : "Follow ",
+          genome_head_labels[marker_id], " head'>", genome_head_labels[marker_id],
+          " <span aria-hidden='true'>&rarr;</span></button>"
+        );
+      }
+      if (pos == genome.size() && markers.empty()) break;
+      const bool is_next = pos == instruction_pointer && pos < genome.size();
+      const bool was_last = hardware.GetExeCount() && pos == organism_last_ip;
+      out.Append(
+        "<div class='genome-execution-row", is_next ? " is-next" : "",
+        was_last ? " was-last" : "", pos == genome.size() ? " is-boundary" : "",
+        "' data-genome-position='", pos, "'>",
+        "<div class='genome-head-lane'>", markers, "</div>",
+        "<span class='genome-position'>", pos, "</span>"
+      );
+      if (pos < genome.size()) {
+        out.Append(
+          "<code title='", emp::MakeWebSafe(inst_set.GetDescription(genome[pos])), "'>",
+          emp::MakeWebSafe(inst_set.GetName(genome[pos])), "</code>"
+        );
+      } else {
+        out += "<span class='genome-end'>end of genome</span>";
+      }
+      if (is_next) out += "<span class='next-badge'>NEXT</span>";
+      out += "</div>";
+    }
+    out += "</div></section>";
+
+    out += "<div class='organism-state-column'>";
+    out += "<section class='organism-visual-panel instruction-panel'>";
+    if (organism_analysis_offspring
+        && organism_execution_step == organism_execution_length) {
+      out.Append(
+        "<div class='instruction-status success'><span>Life cycle complete</span>",
+        "<strong>Offspring produced &middot; ",
+        organism_analysis_offspring->size(), " instructions</strong>. Use “View offspring” ",
+        "above to start it with fresh hardware.</div>"
+      );
+    } else if (!organism_execution_complete
+               && organism_execution_step == organism_execution_length) {
+      out.Append(
+        "<div class='instruction-status'><span>Preview limit reached</span>",
+        "<strong>Execution continues</strong> &middot; No offspring was produced in the first ",
+        organism_execution_length, " instructions.</div>"
+      );
+    }
+    out += "<div class='instruction-context-grid'><div class='instruction-context previous'>";
+    if (organism_last_instruction.size()) {
+      out.Append(
+        "<span class='eyebrow'>Just executed at ", organism_last_ip, "</span><h2><code>",
+        emp::MakeWebSafe(organism_last_instruction), "</code></h2><p>",
+        emp::MakeWebSafe(organism_last_description), "</p>"
+      );
+      if (organism_step_notes.size()) {
+        out.Append("<div class='instruction-note'>", NotesAsHTML(organism_step_notes), "</div>");
+      }
+    } else {
+      out += "<span class='eyebrow'>Just executed</span><h2>Nothing yet</h2>";
+      out += "<p>Use Step, Play, or Fast-forward to begin this life cycle.</p>";
+    }
+    const size_t next_id = instruction_pointer < genome.size() ? genome[instruction_pointer] : 0;
+    out += "</div><div class='instruction-context next'>";
+    out.Append(
+      "<span class='eyebrow'>About to execute at ", instruction_pointer, "</span><h2><code>",
+      emp::MakeWebSafe(inst_set.GetName(next_id)), "</code></h2><p>",
+      emp::MakeWebSafe(inst_set.GetDescription(next_id)), "</p></div></div></section>"
+    );
+
+    out += "<section class='organism-visual-panel'><div class='panel-heading'>";
+    out += "<div><span class='eyebrow'>Registers</span><h2>Stacks</h2></div></div>";
+    out += "<div class='stack-grid'>";
+    const auto & stacks = hardware.GetStacks();
+    for (size_t i = 0; i < stacks.size(); ++i) {
+      emp::String values = stacks[i].ToString();
+      if (values.empty()) values = "0";
+      out.Append(
+        "<div class='stack-card'><span>Stack ", static_cast<char>('A' + i), "</span><code>",
+        emp::MakeWebSafe(values), "</code></div>"
+      );
+    }
+    out += "</div></section>";
+
+    out += "<section class='organism-visual-panel'><div class='panel-heading'>";
+    out += "<div><span class='eyebrow'>Working state</span><h2>Memory</h2></div>";
+    out.Append(
+      "<div class='hardware-mini-counters'><span>Copied <strong>", hardware.GetCopyCount(),
+      "</strong></span><span>Errors <strong>", hardware.GetErrorCount(), "</strong></span></div></div>"
+    );
+    out += "<div class='memory-grid'>";
+    const auto & memory = hardware.GetMemory();
+    for (size_t pos = 0; pos < memory.size(); ++pos) {
+      emp::String markers;
+      if (heads[AvidaVM::HEAD_M_READ] == pos) {
+        markers += "<span class='memory-head read'>READ &darr;</span>";
+      }
+      if (heads[AvidaVM::HEAD_M_WRITE] == pos) {
+        markers += "<span class='memory-head write'>WRITE &darr;</span>";
+      }
+      out.Append(
+        "<div class='memory-cell", memory[pos] ? " has-value" : "", "'>",
+        "<div class='memory-head-lane'>", markers, "</div>",
+        "<span>", pos, "</span><code>", memory[pos], "</code></div>"
+      );
+    }
+    out += "</div></section>";
+
+    out += "<section class='organism-visual-panel traits-panel'><div class='panel-heading'>";
+    out += "<div><span class='eyebrow'>Starting phenotype</span><h2>Organism traits</h2></div></div>";
+    out += "<dl class='analysis-trait-list'>";
+    for (const auto & trait : organism_analysis_traits) {
+      out.Append(
+        "<div title='", emp::MakeWebSafe(trait.description), "'><dt>",
+        emp::MakeWebSafe(trait.name), "</dt><dd>", emp::MakeWebSafe(trait.value), "</dd></div>"
+      );
+    }
+    if (organism_analysis_traits.empty()) out += "<p>No printable traits.</p>";
+    out += "</dl></section></div></div>";
+    return out;
   }
 
   [[nodiscard]] emp::String BuildOrganismStatsHTML() {
@@ -2536,6 +3305,19 @@ private:
   }
 
   void OnAnimationFrame(const UI::Animate & frame) {
+    if (active_application_mode == ApplicationMode::ORGANISM) {
+      if (organism_run_mode == OrganismRunMode::PAUSED) return;
+      organism_play_elapsed_ms += frame.GetStepTime();
+      const double interval = organism_run_mode == OrganismRunMode::PLAY
+        ? ORGANISM_PLAY_INTERVAL_MS
+        : ORGANISM_FAST_FORWARD_INTERVAL_MS;
+      if (organism_play_elapsed_ms < interval) return;
+
+      organism_play_elapsed_ms = 0.0;  // Do not catch up after a delayed frame.
+      AdvancePlayingOrganismInstruction();
+      return;
+    }
+
     if (run_mode == RunMode::PLAY) {
       play_elapsed_ms += frame.GetStepTime();
       if (play_elapsed_ms < PLAY_INTERVAL_MS) return;
@@ -2600,6 +3382,120 @@ private:
     color_selector.SetTitle("Color organisms by");
   }
 
+  void BuildOrganismModeWorkspace(UI::Div & app) {
+    UI::Div workspace{"organism_mode_workspace"};
+    workspace.AddAttr("class", "organism-mode-workspace");
+
+    UI::Div toolbar{"organism_mode_toolbar"};
+    toolbar.AddAttr("class", "organism-mode-toolbar");
+    UI::Div toolbar_actions{"organism_mode_toolbar_actions"};
+    toolbar_actions.AddAttr("class", "organism-mode-toolbar-actions");
+    organism_reset_button = UI::Button{
+      [this](){ ResetOrganismAnalysis(); },
+      "<span class='restart-icon' aria-hidden='true'></span>",
+      "organism_reset_button"
+    };
+    organism_step_button = UI::Button{
+      [this](){ StepOrganismInstruction(); },
+      "<span class='step-icon' aria-hidden='true'></span>",
+      "organism_step_button"
+    };
+    organism_play_button = UI::Button{
+      [this](){ ToggleOrganismRunMode(OrganismRunMode::PLAY); },
+      "&#x25B6;",
+      "organism_play_button"
+    };
+    organism_pause_button = UI::Button{
+      [this](){ SetOrganismRunMode(OrganismRunMode::PAUSED); },
+      "&#x275A;&#x275A;",
+      "organism_pause_button"
+    };
+    organism_fast_forward_button = UI::Button{
+      [this](){ ToggleOrganismRunMode(OrganismRunMode::FAST_FORWARD); },
+      "&#x25B6;&#x25B6;",
+      "organism_fast_forward_button"
+    };
+    organism_reset_button.AddAttr("class", "transport-button icon-button restart-button");
+    organism_step_button.AddAttr("class", "transport-button icon-button");
+    organism_play_button.AddAttr("class", "transport-button icon-button");
+    organism_pause_button.AddAttr("class", "transport-button icon-button is-active");
+    organism_fast_forward_button.AddAttr("class", "transport-button icon-button");
+    organism_reset_button.SetAttr("aria-label", "Rewind organism execution");
+    organism_step_button.SetAttr("aria-label", "Execute one organism instruction");
+    organism_play_button.SetAttr("aria-label", "Play at two instructions per second");
+    organism_pause_button.SetAttr("aria-label", "Pause organism execution");
+    organism_fast_forward_button.SetAttr(
+      "aria-label", "Fast-forward at twenty instructions per second"
+    );
+    organism_reset_button.SetTitle("Rewind");
+    organism_step_button.SetTitle("Step (Space)");
+    organism_play_button.SetTitle("Play (2 instructions per second)");
+    organism_pause_button.SetTitle("Pause");
+    organism_fast_forward_button.SetTitle("Fast-forward (20 instructions per second)");
+    organism_offspring_button = UI::Button{
+      [this](){ ViewOrganismOffspring(); },
+      "View offspring &#x2192;",
+      "organism_offspring_button"
+    };
+    organism_offspring_button.AddAttr("class", "organism-toolbar-button offspring");
+
+    UI::Div freezer_picker{"organism_freezer_picker"};
+    freezer_picker.AddAttr("class", "organism-freezer-picker");
+    freezer_picker << "<label for='organism_freezer_selector'>Organism</label>";
+    organism_freezer_selector = UI::Selector{"organism_freezer_selector"};
+    organism_freezer_selector.SetOption("Choose from freezer…", [](){});
+    for (const auto & item : freezer.organisms) {
+      organism_freezer_selector.SetOption(
+        emp::MakeWebSafe(item.name),
+        [this, id=item.id](){ SelectFrozenOrganismForAnalysis(id); }
+      );
+    }
+    organism_freezer_selector.SelectID(0);
+    organism_freezer_selector.Disabled(freezer.organisms.empty());
+    organism_freezer_selector.AddAttr("class", "organism-freezer-selector");
+    organism_freezer_selector.SetAttr("aria-label", "Choose an organism from the freezer");
+    freezer_picker << organism_freezer_selector;
+    toolbar_actions << freezer_picker;
+
+    UI::Div organism_transport_buttons{"organism_transport_buttons"};
+    organism_transport_buttons.AddAttr("class", "organism-transport-buttons");
+    organism_transport_buttons << organism_reset_button;
+    organism_transport_buttons << organism_step_button;
+    organism_transport_buttons << organism_play_button;
+    organism_transport_buttons << organism_fast_forward_button;
+    organism_transport_buttons << organism_pause_button;
+    toolbar_actions << organism_transport_buttons;
+    toolbar_actions << organism_offspring_button;
+    toolbar << toolbar_actions;
+
+    UI::Div timeline{"organism_timeline"};
+    timeline.AddAttr("class", "organism-timeline");
+    timeline << "<label for='organism_position_slider'>Execution position</label>";
+    organism_position_slider = UI::Input{
+      [](std::string){},
+      "range", "", "organism_position_slider"
+    };
+    organism_position_slider.Min("0");
+    organism_position_slider.Max(emp::MakeString(organism_execution_length));
+    organism_position_slider.Step("1");
+    organism_position_slider.Value(emp::MakeString(organism_execution_step));
+    organism_position_slider.AddAttr("class", "organism-position-slider");
+    organism_position_slider.SetAttr("aria-label", "Organism execution position");
+    timeline << organism_position_slider;
+    timeline << emp::MakeString(
+      "<output id='organism_position_readout' for='organism_position_slider'>",
+      organism_execution_step, " / ", organism_execution_length, "</output>"
+    );
+    toolbar << timeline;
+    workspace << toolbar;
+
+    organism_mode_content = UI::Text{"organism_mode_content"};
+    organism_mode_content << UI::Live([this](){ return BuildOrganismModeHTML(); });
+    workspace << organism_mode_content;
+    app << workspace;
+    UpdateOrganismModeControls();
+  }
+
   void BuildInterface() {
     UI::Div app{"avida_app"};
     app.AddAttr("class", "avida-app");
@@ -2619,12 +3515,12 @@ private:
     UI::Div modes{"mode_buttons"};
     modes.AddAttr("class", "mode-buttons");
     UI::Button population_mode{
-      [](){},
+      [this](){ SetApplicationMode(ApplicationMode::POPULATION); },
       "<img src='assets/icons/PopGrid.png' alt=''><span>POPULATION</span>",
       "population_mode"
     };
     UI::Button organism_mode{
-      [](){},
+      [this](){ SetApplicationMode(ApplicationMode::ORGANISM); },
       "<img src='assets/icons/ModeOrganism.png' alt=''><span>ORGANISMS</span>",
       "organism_mode"
     };
@@ -2633,14 +3529,15 @@ private:
       "<img src='assets/icons/ModeAnalyze.png' alt=''><span>ANALYZE</span>",
       "analyze_mode"
     };
-    population_mode.AddAttr("class", "mode-button is-active");
-    organism_mode.AddAttr("class", "mode-button");
+    const bool population_active = active_application_mode == ApplicationMode::POPULATION;
+    population_mode.AddAttr("class", population_active ? "mode-button is-active" : "mode-button");
+    organism_mode.AddAttr("class", population_active ? "mode-button" : "mode-button is-active");
     analyze_mode.AddAttr("class", "mode-button");
     population_mode.SetAttr("aria-label", "Population Mode");
     organism_mode.SetAttr("aria-label", "Organism Mode");
     analyze_mode.SetAttr("aria-label", "Analyze Mode");
-    population_mode.SetAttr("aria-pressed", "true");
-    organism_mode.SetAttr("aria-pressed", "false");
+    population_mode.SetAttr("aria-pressed", population_active ? "true" : "false");
+    organism_mode.SetAttr("aria-pressed", population_active ? "false" : "true");
     analyze_mode.SetAttr("aria-pressed", "false");
     population_mode.SetTitle("Population Mode");
     organism_mode.SetTitle("Organism Mode");
@@ -2651,6 +3548,7 @@ private:
 
     UI::Div side_modes{"side_mode_buttons"};
     side_modes.AddAttr("class", "mode-buttons side-mode-buttons");
+    if (!population_active) side_modes.SetCSS("visibility", "hidden");
     pop_stats_mode = UI::Button{
       [this](){ SetSidePanel(SidePanel::POPULATION); },
       "<img src='assets/icons/StatsPop.png' alt=''><span>POP STATS</span>",
@@ -2707,6 +3605,12 @@ private:
     header << primary_header;
     header << side_modes;
     app << header;
+
+    if (!population_active) {
+      BuildOrganismModeWorkspace(app);
+      document << app;
+      return;
+    }
 
     UI::Div workspace{"workspace"};
     workspace.AddAttr("class", "workspace");
@@ -2832,13 +3736,13 @@ private:
       "step_button"
     );
     play_button = UI::Button(
-      [this](){ SetRunMode(RunMode::PLAY); }, "&#x25B6;", "play_button"
+      [this](){ ToggleRunMode(RunMode::PLAY); }, "&#x25B6;", "play_button"
     );
     pause_button = UI::Button(
       [this](){ SetRunMode(RunMode::PAUSED); }, "&#x275A;&#x275A;", "pause_button"
     );
     fast_forward_button = UI::Button(
-      [this](){ SetRunMode(RunMode::FAST_FORWARD); },
+      [this](){ ToggleRunMode(RunMode::FAST_FORWARD); },
       "&#x25B6;&#x25B6;",
       "fast_forward_button"
     );
@@ -2854,16 +3758,16 @@ private:
     pause_button.SetAttr("aria-label", "Pause evolution");
     fast_forward_button.SetAttr("aria-label", "Run as fast as possible");
     restart_button.SetTitle("Restart");
-    step_button.SetTitle("Step");
+    step_button.SetTitle("Step (Space)");
     play_button.SetTitle("Play");
     pause_button.SetTitle("Pause");
-    fast_forward_button.SetTitle("Fast-forward");
+    fast_forward_button.SetTitle("Fast-forward (>)");
     color_selector.AddAttr("class", "color-selector");
     transport_buttons << restart_button;
     transport_buttons << step_button;
     transport_buttons << play_button;
-    transport_buttons << pause_button;
     transport_buttons << fast_forward_button;
+    transport_buttons << pause_button;
     transport_buttons << color_selector;
     transport << transport_buttons;
     population_card << canvas_frame;
@@ -2924,11 +3828,16 @@ private:
     statistic_texts.clear();
     SetupColorSelector();
     BuildInterface();
-    SetSidePanel(restore_side_panel);
-    UpdateControls();
     document.Activate();
-    DrawPopulation();
-    RefreshReadouts();
+    if (active_application_mode == ApplicationMode::POPULATION) {
+      SetSidePanel(restore_side_panel);
+      UpdateControls();
+      DrawPopulation();
+      RefreshReadouts();
+    } else {
+      UpdateOrganismModeControls();
+      FocusTrackedOrganismHead();
+    }
   }
 
 public:
@@ -2943,6 +3852,13 @@ public:
     if (drop_organism_callback_id) emp::JSDelete(drop_organism_callback_id);
     if (freeze_grid_callback_id) emp::JSDelete(freeze_grid_callback_id);
     if (rename_freezer_callback_id) emp::JSDelete(rename_freezer_callback_id);
+    if (population_step_callback_id) emp::JSDelete(population_step_callback_id);
+    if (population_fast_forward_callback_id) {
+      emp::JSDelete(population_fast_forward_callback_id);
+    }
+    if (organism_space_step_callback_id) emp::JSDelete(organism_space_step_callback_id);
+    if (organism_scrub_callback_id) emp::JSDelete(organism_scrub_callback_id);
+    if (organism_head_callback_id) emp::JSDelete(organism_head_callback_id);
   }
 
   void Initialize() {
@@ -2951,6 +3867,13 @@ public:
     InitializeFreezer();
     InitializeDragCallbacks();
     InstallOrganismDragBridge(drop_organism_callback_id, freeze_grid_callback_id);
+    InstallPopulationKeyboardBridge(
+      population_step_callback_id, population_fast_forward_callback_id
+    );
+    InstallOrganismKeyboardBridge(organism_space_step_callback_id);
+    InstallOrganismModeInteractionBridge(
+      organism_scrub_callback_id, organism_head_callback_id
+    );
     std::println(
       "Loaded /config/Avida-web.cfg (substitution probability = {}).",
       Avida().GetSettings().Get<double>("mutations.substitution_prob")
