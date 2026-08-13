@@ -213,7 +213,11 @@ public:
   template <typename HARDWARE_T>
   void OnAnalyzeOutput(HARDWARE_T & hardware, uint32_t output) {
     LogicTask task = DetectTask(output, analysis_inputs);
-    if (task != LogicTask::NUM_TASKS) hardware.AddNote("Task performed: ", ToName(task));
+    if (task != LogicTask::NUM_TASKS) {
+      const size_t task_idx = static_cast<size_t>(task);
+      hardware.AddNote("Task performed: ", ToName(task));
+      hardware.AddAnalysisTask(task_id[task_idx]);
+    }
   }
 
   void OnConfigWrite(std::ostream & os) {
