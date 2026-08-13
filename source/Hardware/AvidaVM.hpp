@@ -22,6 +22,7 @@
 #include <limits>      // for std::numeric_limits
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "emp/base/array.hpp"
 #include "emp/base/notify.hpp"
@@ -106,6 +107,7 @@ private:
   // Scratch buffer for analysis/trace annotations (e.g. "Task performed: NAND").
   // Stays empty during live evolution and flushed each step by Trace().
   emp::String analysis_notes{};
+  std::vector<size_t> analysis_task_ids{};
 
   struct AnalysisCopyTag { };
 
@@ -330,6 +332,16 @@ public:
     return notes;
   }
 
+  // Record task identities separately from human-readable notes so analysis UIs can present
+  // task progress without parsing display text.
+  void AddAnalysisTask(size_t task_id) { analysis_task_ids.push_back(task_id); }
+
+  [[nodiscard]] std::vector<size_t> TakeAnalysisTasks() {
+    std::vector<size_t> tasks = std::move(analysis_task_ids);
+    analysis_task_ids.clear();
+    return tasks;
+  }
+
   void Trace(size_t cpu_cycles=200, std::ostream & os=std::cout) {
     emp_always_assert(IsAnalysis(), "AvidaVM::Trace requires an analysis copy.");
     for (size_t i = 0; i <= cpu_cycles; ++i) {
@@ -337,6 +349,7 @@ public:
       std::println(os, "STEP {}: {}", i, StatusString());
       // Emit anything the step's signal handlers recorded (e.g. completed tasks), then reset.
       if (analysis_notes.size()) { std::print(os, "{}", analysis_notes); analysis_notes.clear(); }
+      analysis_task_ids.clear();
     }
   }
 
