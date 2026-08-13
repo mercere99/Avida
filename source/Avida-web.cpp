@@ -183,6 +183,31 @@ EM_JS(void, UpdateOrganismTimelineControl, (size_t step, size_t max_step), {
   if (readout) readout.textContent = `${step} / ${max_step}`;
 });
 
+EM_JS(bool, BeginOrganismTimelineTaskTicks,
+      (const char * tick_spec_ptr, size_t max_step), {
+  const layer = document.getElementById('organism_task_ticks');
+  if (!layer) return false;
+  const tickSpec = UTF8ToString(tick_spec_ptr);
+  const cacheKey = `${max_step}|${tickSpec}`;
+  if (layer.dataset.tickSpec === cacheKey) return false;
+  layer.dataset.tickSpec = cacheKey;
+  layer.replaceChildren();
+  return Boolean(max_step && tickSpec);
+});
+
+EM_JS(void, AddOrganismTimelineTaskTick,
+      (size_t step, size_t max_step, bool is_first, const char * task_name_ptr), {
+  const layer = document.getElementById('organism_task_ticks');
+  if (!layer || !max_step) return;
+  const taskName = UTF8ToString(task_name_ptr);
+  const tick = document.createElement('span');
+  tick.className = `organism-task-tick${is_first ? " is-first" : ""}`;
+  tick.style.left = `${Math.min(100, Math.max(0, step * 100 / max_step))}%`;
+  tick.dataset.task = taskName;
+  tick.title = taskName;
+  layer.appendChild(tick);
+});
+
 EM_JS(void, UpdateOrganismTransportControls,
       (bool has_subject, bool at_start, bool at_end, bool show_offspring, int run_mode), {
   const paused = run_mode === 0;
@@ -314,6 +339,14 @@ EM_JS(void, ResizePopulationDisplay, (int width, int height), {
     surface.style.setProperty('--grid-cell-width', `${100 / width}%`);
     surface.style.setProperty('--grid-cell-height', `${100 / height}%`);
   }
+});
+
+EM_JS(void, ClearPopulationDisplay, (), {
+  const canvas = document.getElementById('population_canvas');
+  if (!canvas) return;
+  canvas.width = 1;
+  canvas.height = 1;
+  canvas.getContext('2d').clearRect(0, 0, 1, 1);
 });
 
 EM_JS(int, GetPopulationCellAtClient,
@@ -511,7 +544,7 @@ private:
   enum class OrganismRunMode { PAUSED, PLAY, FAST_FORWARD };
   enum class TrackedOrganismHead { NONE = -1, IP, READ, WRITE, FLOW };
   enum class ApplicationMode { POPULATION, ORGANISM };
-  enum class ColorScale { UNIFORM, CATEGORICAL, CONTINUOUS };
+  enum class ColorScale { BLANK, CATEGORICAL, CONTINUOUS };
   enum class ConfigurationTab { SETTINGS, ENVIRONMENT, EVENTS };
   enum class SidePanel { POPULATION, ORGANISM, FREEZER, CONFIGURATION };
 
@@ -541,6 +574,12 @@ private:
     emp::String name;
     emp::String value;
     emp::String description;
+  };
+
+  struct AnalysisTaskExecution {
+    size_t task_id = 0;
+    size_t step = 0;
+    bool is_first = false;
   };
 
   struct FrozenConfigurationV1 {
@@ -760,8 +799,9 @@ private:
   RunMode run_mode = RunMode::PAUSED;
   OrganismRunMode organism_run_mode = OrganismRunMode::PAUSED;
   ApplicationMode active_application_mode = ApplicationMode::POPULATION;
-  ColorScale active_color_scale = ColorScale::UNIFORM;
+  ColorScale active_color_scale = ColorScale::CATEGORICAL;
   size_t active_color_mode = 0;
+  emp::String active_color_mode_id{"phenotype"};
   size_t last_grid_redraw_update = 0;
   double play_elapsed_ms = 0.0;
   double organism_play_elapsed_ms = 0.0;
@@ -806,6 +846,10 @@ private:
   bool organism_execution_complete = false;
   TrackedOrganismHead tracked_organism_head = TrackedOrganismHead::IP;
   emp::vector<AnalysisTrait> organism_analysis_traits;
+  emp::vector<size_t> organism_task_counts;
+  emp::vector<size_t> organism_task_totals;
+  emp::vector<size_t> organism_reaction_task_ids;
+  emp::vector<AnalysisTaskExecution> organism_task_executions;
 
   [[nodiscard]] avida_t & Avida() { return *avida; }
   [[nodiscard]] const avida_t & Avida() const { return *avida; }
@@ -1721,6 +1765,8 @@ private:
   }
 
   void DrawPopulation() {
+    if (active_color_scale == ColorScale::BLANK) return;
+
     const size_t width = Grid().GetWidth();
     const size_t height = Grid().GetHeight();
     ResizePopulationDisplay(static_cast<int>(width), static_cast<int>(height));
@@ -1799,7 +1845,7 @@ private:
   void FinishUpdate(bool can_continue,
                     bool redraw_population,
                     bool pause_requested = false) {
-    if (redraw_population) DrawPopulation();
+    if (redraw_population && active_color_scale != ColorScale::BLANK) DrawPopulation();
     RefreshReadouts();
     pause_requested = Avida().ConsumePauseRequest() || pause_requested;
     if (!can_continue || pause_requested) SetRunMode(RunMode::PAUSED);
@@ -2055,6 +2101,12 @@ private:
     }
   }
 
+  [[nodiscard]] bool IsReactionTask(size_t task_id) const {
+    return std::find(
+      organism_reaction_task_ids.cbegin(), organism_reaction_task_ids.cend(), task_id
+    ) != organism_reaction_task_ids.cend();
+  }
+
   void InitializeOrganismAnalysis(
     const avida_t::genome_t & genome,
     const emp::String & name,
@@ -2072,6 +2124,16 @@ private:
     organism_step_notes.clear();
     organism_last_ip = 0;
     Avida().GetPlugIn<DriverBuffered>().ClearAnalysisOffspring();
+
+    organism_task_counts.assign(Avida().GetNumTasks(), 0);
+    organism_task_totals.assign(Avida().GetNumTasks(), 0);
+    organism_reaction_task_ids.clear();
+    organism_task_executions.clear();
+    for (const auto & reaction : reaction_configs) {
+      if (!Avida().HasTask(reaction.task_name)) continue;
+      const size_t task_id = Avida().GetTaskID(reaction.task_name);
+      if (!IsReactionTask(task_id)) organism_reaction_task_ids.push_back(task_id);
+    }
 
     organism_analysis_traits.clear();
     const auto & displayed_organism = trait_source ? *trait_source : *organism_analysis_subject;
@@ -2091,6 +2153,16 @@ private:
       preview_hardware.ProcessStep();
       (void) preview_hardware.TakeAnalysisNotes();
       ++organism_execution_length;
+      for (const size_t task_id : preview_hardware.TakeAnalysisTasks()) {
+        if (task_id >= organism_task_totals.size() || !IsReactionTask(task_id)) continue;
+        const bool is_first = organism_task_totals[task_id] == 0;
+        ++organism_task_totals[task_id];
+        organism_task_executions.push_back({
+          .task_id = task_id,
+          .step = organism_execution_length,
+          .is_first = is_first
+        });
+      }
       auto offspring = driver.TakeAnalysisOffspring();
       if (!offspring) continue;
       organism_analysis_offspring = std::move(*offspring);
@@ -2110,6 +2182,7 @@ private:
     organism_last_description.clear();
     organism_step_notes.clear();
     organism_last_ip = 0;
+    organism_task_counts.assign(Avida().GetNumTasks(), 0);
 
     auto & hardware = *organism_analysis_hardware;
     auto & driver = Avida().GetPlugIn<DriverBuffered>();
@@ -2123,6 +2196,9 @@ private:
       driver.ClearAnalysisOffspring();
       hardware.ProcessStep();
       organism_step_notes = hardware.TakeAnalysisNotes();
+      for (const size_t task_id : hardware.TakeAnalysisTasks()) {
+        if (task_id < organism_task_counts.size()) ++organism_task_counts[task_id];
+      }
       (void) driver.TakeAnalysisOffspring();
     }
     organism_execution_step = target_step;
@@ -2217,6 +2293,10 @@ private:
     organism_analysis_hardware.reset();
     organism_analysis_offspring.reset();
     organism_analysis_traits.clear();
+    organism_task_counts.clear();
+    organism_task_totals.clear();
+    organism_reaction_task_ids.clear();
+    organism_task_executions.clear();
     organism_execution_step = 0;
     organism_execution_length = 0;
     organism_execution_complete = false;
@@ -2250,6 +2330,25 @@ private:
       static_cast<int>(organism_run_mode)
     );
     UpdateOrganismTimelineControl(organism_execution_step, organism_execution_length);
+    emp::String tick_spec;
+    for (const auto & execution : organism_task_executions) {
+      if (tick_spec.size()) tick_spec += ',';
+      tick_spec.Append(
+        execution.step, ':', execution.is_first ? 1 : 0, ':', execution.task_id
+      );
+    }
+    if (BeginOrganismTimelineTaskTicks(tick_spec.c_str(), organism_execution_length)) {
+      for (const auto & execution : organism_task_executions) {
+        if (execution.task_id >= Avida().GetNumTasks()) continue;
+        const auto & task_name = Avida().GetTaskName(execution.task_id);
+        AddOrganismTimelineTaskTick(
+          execution.step,
+          organism_execution_length,
+          execution.is_first,
+          task_name.c_str()
+        );
+      }
+    }
   }
 
   void StepOrganismInstruction() {
@@ -2467,6 +2566,30 @@ private:
       );
     }
     out += "</div></section>";
+
+    out += "<section class='organism-visual-panel tasks-panel'><div class='panel-heading'>";
+    out += "<div><span class='eyebrow'>Life-cycle progress</span><h2>Tasks</h2></div></div>";
+    out += "<dl class='analysis-task-list'>";
+    size_t displayed_task_count = 0;
+    for (const size_t task_id : organism_reaction_task_ids) {
+      if (task_id >= organism_task_totals.size()) continue;
+      const size_t total = organism_task_totals[task_id];
+      if (!total) continue;
+      const size_t current = task_id < organism_task_counts.size()
+        ? organism_task_counts[task_id]
+        : 0;
+      out.Append(
+        "<div class='analysis-task-row'><dt>",
+        emp::MakeWebSafe(Avida().GetTaskName(task_id)), "</dt><dd><strong>", current,
+        "</strong><span>/", total, "</span></dd></div>"
+      );
+      ++displayed_task_count;
+    }
+    if (!displayed_task_count) {
+      out += "<p class='analysis-task-empty'>No configured reaction tasks are performed "
+             "in this life cycle.</p>";
+    }
+    out += "</dl></section>";
 
     out += "<section class='organism-visual-panel traits-panel'><div class='panel-heading'>";
     out += "<div><span class='eyebrow'>Starting phenotype</span><h2>Organism traits</h2></div></div>";
@@ -3339,45 +3462,79 @@ private:
              && !pause_requested
              && emp::GetTime() - frame_start < FAST_FORWARD_FRAME_BUDGET_MS);
 
-    const bool redraw_population = pause_requested
-      || !can_continue
-      || Avida().GetUpdate() - last_grid_redraw_update >= FAST_FORWARD_REDRAW_UPDATES;
+    const bool redraw_population = active_color_scale != ColorScale::BLANK
+      && (pause_requested
+          || !can_continue
+          || Avida().GetUpdate() - last_grid_redraw_update >= FAST_FORWARD_REDRAW_UPDATES);
     FinishUpdate(can_continue, redraw_population, pause_requested);
   }
 
   void SetupColorSelector() {
     color_selector = UI::Selector{"population_color_mode"};
-    active_color_scale = ColorScale::UNIFORM;
+    active_color_scale = ColorScale::BLANK;
     active_color_mode = 0;
-    color_selector.SetOption("Uniform", [this]() {
-      active_color_scale = ColorScale::UNIFORM;
+    size_t selected_option = 0;
+    bool selection_found = active_color_mode_id == "blank";
+    color_selector.SetOption("Blank", [this]() {
+      active_color_scale = ColorScale::BLANK;
       active_color_mode = 0;
-      DrawPopulation();
+      active_color_mode_id = "blank";
+      ClearPopulationDisplay();
     });
 
     const auto & categorical_modes = population_view_options.GetCategoricalColorModes();
     for (size_t mode_id = 0; mode_id < categorical_modes.size(); ++mode_id) {
-      color_selector.SetOption(categorical_modes[mode_id].label, [this, mode_id]() {
+      const auto & mode = categorical_modes[mode_id];
+      color_selector.SetOption(mode.label, [this, mode_id]() {
         active_color_scale = ColorScale::CATEGORICAL;
         active_color_mode = mode_id;
+        active_color_mode_id = population_view_options.GetCategoricalColorModes()[mode_id].id;
         DrawPopulation();
       });
+      if (mode.id == active_color_mode_id) {
+        active_color_scale = ColorScale::CATEGORICAL;
+        active_color_mode = mode_id;
+        selected_option = mode_id + 1;
+        selection_found = true;
+      }
     }
 
     const auto & continuous_modes = population_view_options.GetContinuousColorModes();
     for (size_t mode_id = 0; mode_id < continuous_modes.size(); ++mode_id) {
-      color_selector.SetOption(continuous_modes[mode_id].label, [this, mode_id]() {
+      const auto & mode = continuous_modes[mode_id];
+      color_selector.SetOption(mode.label, [this, mode_id]() {
         active_color_scale = ColorScale::CONTINUOUS;
         active_color_mode = mode_id;
+        active_color_mode_id = population_view_options.GetContinuousColorModes()[mode_id].id;
         DrawPopulation();
       });
+      if (mode.id == active_color_mode_id) {
+        active_color_scale = ColorScale::CONTINUOUS;
+        active_color_mode = mode_id;
+        selected_option = categorical_modes.size() + mode_id + 1;
+        selection_found = true;
+      }
     }
 
-    if (categorical_modes.size()) {
-      active_color_scale = ColorScale::CATEGORICAL;
-      active_color_mode = 0;
-      color_selector.SelectID(1);
+    if (!selection_found) {
+      const auto phenotype = std::find_if(
+        categorical_modes.cbegin(), categorical_modes.cend(),
+        [](const auto & mode){ return mode.id == "phenotype"; }
+      );
+      if (phenotype != categorical_modes.cend()) {
+        active_color_scale = ColorScale::CATEGORICAL;
+        active_color_mode = static_cast<size_t>(phenotype - categorical_modes.cbegin());
+        active_color_mode_id = "phenotype";
+        selected_option = active_color_mode + 1;
+      } else {
+        active_color_scale = ColorScale::BLANK;
+        active_color_mode = 0;
+        active_color_mode_id = "blank";
+        selected_option = 0;
+      }
     }
+    color_selector.SelectID(selected_option);
+    if (active_color_scale == ColorScale::BLANK) ClearPopulationDisplay();
     color_selector.SetAttr("aria-label", "Population color mode");
     color_selector.SetTitle("Color organisms by");
   }
@@ -3481,7 +3638,12 @@ private:
     organism_position_slider.Value(emp::MakeString(organism_execution_step));
     organism_position_slider.AddAttr("class", "organism-position-slider");
     organism_position_slider.SetAttr("aria-label", "Organism execution position");
-    timeline << organism_position_slider;
+    UI::Div slider_wrap{"organism_timeline_slider_wrap"};
+    slider_wrap.AddAttr("class", "organism-timeline-slider-wrap");
+    slider_wrap << organism_position_slider;
+    slider_wrap << "<div id='organism_task_ticks' class='organism-task-ticks' "
+                   "aria-hidden='true'></div>";
+    timeline << slider_wrap;
     timeline << emp::MakeString(
       "<output id='organism_position_readout' for='organism_position_slider'>",
       organism_execution_step, " / ", organism_execution_length, "</output>"
