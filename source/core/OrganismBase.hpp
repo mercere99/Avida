@@ -25,9 +25,11 @@ protected:
   bool is_mutant = false;         // Is this organism different from its parent?
 
   OrganismBase() = default;
-  OrganismBase(OrganismBase && in) : biota_id(in.biota_id), global_id(in.global_id) {
+  OrganismBase(OrganismBase && in)
+    : biota_id(in.biota_id), global_id(in.global_id), is_mutant(in.is_mutant) {
     in.biota_id = NO_BIOTA_ID;
     in.global_id = NO_GLOBAL_ID;
+    in.is_mutant = false;
   }
 
 public:
