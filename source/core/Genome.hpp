@@ -10,6 +10,8 @@
 #include <cstddef>   // for size_t
 #include <cstdint>   // for uint8_t
 #include <iterator>  // for std::input_iterator
+#include <limits>
+#include <type_traits>
 
 #include "emp/base/assert.hpp"
 #include "emp/datastructs/Vector.hpp"
@@ -49,7 +51,14 @@ public:
   ~Genome() = default;
 
   void Serialize(emp::SerialPod & pod) {
-    pod(genome, max_value);
+    // Char-sized ints stream as chars through <<, so encode byte-genomes explicitly as numbers.
+    if constexpr (std::is_integral_v<value_t> && sizeof(value_t) == 1) {
+      pod.UseSizeAccessors(genome); // Save or restore the current genome size.
+      for (value_t & site : genome) pod.SerializeAs<int>(site);
+      pod.SerializeAs<int>(max_value);
+    } else {
+      pod(genome, max_value);
+    }
   }
 
   auto begin() noexcept { return genome.begin(); }
