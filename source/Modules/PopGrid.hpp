@@ -92,6 +92,25 @@ public:
     org_grid.resize(num_cells, EMPTY_CELL);
   }
 
+  void AfterLoad() {
+    num_cells = width * height;
+    avida.GetBiota().Reserve(num_cells + 1);
+  }
+
+  [[nodiscard]] bool LoadedStateOK() const {
+    if (num_cells != width * height || org_grid.size() != num_cells) return false;
+    size_t occupied_cells = 0;
+    for (size_t cell_id = 0; cell_id < org_grid.size(); ++cell_id) {
+      const size_t organism_id = org_grid[cell_id];
+      if (organism_id == EMPTY_CELL) continue;
+      if (!avida.IsOccupied(organism_id)) return false;
+      if (avida.GetOrg(organism_id).GetPhenotype().pop_pos != cell_id) return false;
+      ++occupied_cells;
+    }
+    return occupied_cells == avida.GetNumOrgs()
+      && avida.GetBiota().GetCapacity() >= num_cells + 1;
+  }
+
 
   // When an offspring is ready, need to determine where to place it.
   template <concepts::Organism ORG_T>
