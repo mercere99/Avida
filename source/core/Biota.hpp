@@ -91,6 +91,10 @@ public:
     }
 
     organism_t & reserved_org = orgs[index];
+    // Reused inactive slots may have transient hardware rebuilt without a location (notably after
+    // checkpoint load).  Slot identity is authoritative, so always rebind both organism and
+    // hardware IDs before any injection/offspring callbacks run.
+    reserved_org.SetBiotaID(index);
     reserved_org.SetGlobalID(total_orgs++);
     ++num_orgs;
     ++epoch;
@@ -188,7 +192,10 @@ public:
 
   void Serialize(emp::SerialPod & pod) {
     pod(orgs, active_bits, num_orgs, total_orgs);
-    if (pod.IsLoad()) ++epoch;
+    if (pod.IsLoad()) {
+      for (size_t index = 0; index < orgs.size(); ++index) orgs[index].SetBiotaID(index);
+      ++epoch;
+    }
   }
 
   bool OK() {
