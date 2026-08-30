@@ -9,6 +9,7 @@
 #include <cstddef>  // for size_t
 #include <cstdint>  // for uint64_t and uint32_t
 #include <iostream>
+#include <memory>
 
 #include "emp/base/Ptr.hpp"
 #include "emp/tools/String.hpp"
@@ -18,7 +19,7 @@
 template <typename GENOME_T, typename PHENOTYPE_T>
 class Organism : public OrganismBase {
 private:
-  GENOME_T genome;        // Original genome for this organism.
+  GENOME_T genome;          // Original genome for this organism.
   PHENOTYPE_T phenotype{};  // Current phenotype for this organism.
 
 public:
@@ -74,6 +75,11 @@ public:
     biota_id = id;
     if constexpr (HasHardware()) Hardware().SetBiotaID(id);
     return *this;
+  }
+
+  void ResetPhenotype() {
+    std::destroy_at(std::addressof(phenotype));
+    std::construct_at(std::addressof(phenotype));
   }
 
   void SetGenome(const genome_t & in_genome) {
