@@ -38,6 +38,8 @@
 
 namespace fs = std::filesystem;
 
+class AvidaWebApp;
+
 /// Main Avida-control object.
 ///
 /// Within a single signal, modules are called from left to right in the order they are listed
@@ -93,6 +95,8 @@ public:
   static_assert(concepts::Organism<organism_t>);
 
 private:
+  friend class AvidaWebApp;
+
   TraitManager<this_t> trait_man;
   emp::RobinHoodMap<emp::String, size_t> task_ids;
   emp::vector<emp::String> task_names;  // Task name by ID (index == task ID).
@@ -201,6 +205,7 @@ public:
   [[nodiscard]] bool IsComplete() const {
     return run_state == RunState::COMPLETE || run_state == RunState::ERROR;
   }
+  [[nodiscard]] bool IsPaused() const { return run_state == RunState::PAUSED; }
   [[nodiscard]] bool ConsumePauseRequest() { return std::exchange(pause_requested, false); }
   [[nodiscard]] emp::Random & GetRandom() { return random; }
   [[nodiscard]] emp::Random & GetAnalyzeRandom() { return analyze_random; }
@@ -214,6 +219,10 @@ public:
   [[nodiscard]] size_t GetTotalOrgs() const { return biota.GetTotalOrgs(); }
   [[nodiscard]] emp::vector<size_t> GetActiveIDs() const { return biota.GetActiveIDs(); }
   [[nodiscard]] emp::BitVector GetActiveBits() const { return biota.GetActiveBits(); }
+#ifdef AVIDA_CHECKPOINT_DIAGNOSTICS
+  [[nodiscard]] int CheckpointRunState() const { return static_cast<int>(run_state); }
+  [[nodiscard]] bool CheckpointPauseRequested() const { return pause_requested; }
+#endif
   [[nodiscard]] org_ref_t GetOrgRef(size_t id) const { return org_ref_t{biota, id}; }
   [[nodiscard]] org_set_t GetActiveOrgSet() const { return org_set_t::All(biota); }
 
@@ -682,15 +691,38 @@ public:
   void AddOffspringSet(std::span<PendingOffspring> pending_set) {
     std::vector<emp::Ptr<organism_t>> new_orgs;              // Pointers to track new organisms
     new_orgs.reserve(pending_set.size());
+#ifdef AVIDA_CHECKPOINT_DIAGNOSTICS
+    for (const auto & [parent_id, genome] : pending_set) {
+      emp_always_assert(
+        IsOccupied(parent_id), "Buffered offspring has inactive parent before Biota::Reserve: ",
+        parent_id, " at update ", update
+      );
+    }
+#endif
     biota.Reserve(biota.GetNumOrgs() + pending_set.size());  // Expand biota to fit offspring
 
     // Phase 1: build all offspring before any placements (so parents stay alive).
     for (auto & [parent_id, genome] : pending_set) {
+#ifdef AVIDA_CHECKPOINT_DIAGNOSTICS
+      emp_always_assert(
+        IsOccupied(parent_id), "Building offspring from inactive parent ID ", parent_id,
+        " at update ", update
+      );
+#endif
       new_orgs.push_back(&BuildOffspring(biota[parent_id], std::move(genome)));
     }
 
     // Phase 2: place all offspring (may kill organisms, including other parents).
-    for (emp::Ptr<organism_t> org_ptr : new_orgs) PlaceOffspring(*org_ptr);
+    for (emp::Ptr<organism_t> org_ptr : new_orgs) {
+#ifdef AVIDA_CHECKPOINT_DIAGNOSTICS
+      emp_always_assert(
+        IsOccupied(org_ptr->GetBiotaID()),
+        "Placing inactive buffered offspring ID ", org_ptr->GetBiotaID(),
+        " at update ", update
+      );
+#endif
+      PlaceOffspring(*org_ptr);
+    }
   }
 
   // Delete an organism at a specific position in the biota.
@@ -832,6 +864,20 @@ public:
     return !IsComplete();
   }
 
+private:
+  /// Advance one update without running final teardown. The web worker uses this so the main
+  /// browser thread can capture the final view before Shutdown() clears the population.
+  [[nodiscard]] bool AdvanceUpdateDeferredShutdown() {
+    if (run_state == RunState::INITIALIZING) InitializePaused();
+    if (run_state >= RunState::EXITING) return false;
+    emp_assert(run_state == RunState::PAUSED || run_state == RunState::RUNNING);
+    DoUpdate();
+    return run_state < RunState::EXITING;
+  }
+
+  [[nodiscard]] bool IsExitPending() const { return run_state == RunState::EXITING; }
+
+public:
   void Run() {
     emp_assert(run_state != RunState::COMPLETE, "Run() should not be called on finished run.");
     if (run_state == RunState::INITIALIZING) Initialize();
@@ -874,17 +920,43 @@ public:
     biota.ForEachOrg([&](auto & org){ trait_man.SerializeOrg(pod, org); });
   }
 
-  void SaveState(const emp::String & filename) {
+  [[nodiscard]] bool IsCheckpointSafe() const {
+    if (run_state != RunState::PAUSED) return false;
+    return AVIDA_TEST(IsCheckpointSafe());
+  }
+
+  void AfterLoad() {
+    emp_always_assert(run_state == RunState::PAUSED,
+      "Loaded checkpoints must resume at a paused update boundary.");
+    AVIDA_SIGNAL(AfterLoad());
+  }
+
+  bool LoadedStateOK() {
+    return OK() && AVIDA_TEST(LoadedStateOK());
+  }
+
+  /// Save only at a paused update boundary approved by every installed module.
+  [[nodiscard]] bool SaveState(const emp::String & filename) {
+    if (!IsCheckpointSafe()) return false;
     std::ofstream ofs{filename.str()};
+    if (!ofs) return false;
     emp::SerialPod pod{ofs};
     pod(*this);
+    return static_cast<bool>(ofs);
   }
 
-  void LoadState(const emp::String & filename) {
+  /// Load into a fresh, fully configured Avida object, then let every installed module rebuild
+  /// transient state and validate the result. Checkpoints require the same compatible module pack.
+  [[nodiscard]] bool LoadState(const emp::String & filename) {
+    if (run_state != RunState::INITIALIZING) return false;
     std::ifstream ifs{filename.str()};
+    if (!ifs) return false;
     emp::SerialPod pod{ifs};
     pod(*this);
+    if (ifs.fail() || !IsPaused()) return false;
+    AfterLoad();
+    return LoadedStateOK();
   }
 
-    bool OK() { return biota.OK(); }
+  bool OK() { return biota.OK(); }
 };
