@@ -45,6 +45,7 @@ public:
   static constexpr size_t MEM_SIZE = 64;          // How much physical memory is available?
   static constexpr size_t MAX_INSTS = 64;         // Max number of distinct instructions.
   static constexpr size_t MAX_GENOME_SIZE = 2048; // Max genome length.
+  static constexpr size_t MAX_CALLBACKS = 32;     // Max callbacks supplied by the module pack.
 
   // Configured types.
   using data_t = int32_t;                         // Data type used by this VM
@@ -55,6 +56,10 @@ public:
   using inst_id_t = typename genome_t::value_t;   // Type used for inst IDs in a genome
   using Stack = VMStack<data_t, STACK_DEPTH>;     // Stacks to use in virtual CPU
   using callback_t = void (*)(AvidaVM &);         // Special functions added to inst set
+  using live_callback_t = std::function<void(size_t)>;
+  using analysis_callback_t = std::function<void(AvidaVM &)>;
+  using live_callback_array_t = emp::array<live_callback_t, MAX_CALLBACKS>;
+  using analysis_callback_array_t = emp::array<analysis_callback_t, MAX_CALLBACKS>;
 
   static constexpr size_t ANALYSIS_BIOTA_ID = OrganismBase::ANALYSIS_BIOTA_ID;
   static constexpr size_t NO_BIOTA_ID = OrganismBase::NO_BIOTA_ID;
@@ -96,6 +101,8 @@ private:
   // live set's instruction IDs (so genomes decode identically) but rebinds population-mutating
   // callbacks (e.g. DivideCell) to neutral variants, so analysis never alters the live population.
   emp::Ptr<const inst_set_t> analysis_inst_set_ptr = nullptr;
+  emp::Ptr<const live_callback_array_t> live_callbacks_ptr = nullptr;
+  emp::Ptr<const analysis_callback_array_t> analysis_callbacks_ptr = nullptr;
 
   emp::array<size_t, NUM_NOPS> heads{};
   emp::array<Stack, NUM_NOPS> stacks{};
@@ -116,6 +123,8 @@ private:
     , memory(source.memory)
     , inst_set_ptr(source.analysis_inst_set_ptr)
     , analysis_inst_set_ptr(source.analysis_inst_set_ptr)
+    , live_callbacks_ptr(source.live_callbacks_ptr)
+    , analysis_callbacks_ptr(source.analysis_callbacks_ptr)
     , heads(source.heads)
     , stacks(source.stacks)
     , exe_count(source.exe_count)
@@ -276,6 +285,16 @@ public:
   [[nodiscard]] const mem_t & GetMemory() const { return memory; }
   [[nodiscard]] const auto & GetHeads() const { return heads; }
   [[nodiscard]] const auto & GetStacks() const { return stacks; }
+#ifdef AVIDA_CHECKPOINT_DIAGNOSTICS
+  [[nodiscard]] bool CheckpointHasInstSet() const { return static_cast<bool>(inst_set_ptr); }
+  [[nodiscard]] bool CheckpointHasAnalysisInstSet() const {
+    return static_cast<bool>(analysis_inst_set_ptr);
+  }
+  [[nodiscard]] const emp::String & CheckpointAnalysisNotes() const { return analysis_notes; }
+  [[nodiscard]] const std::vector<size_t> & CheckpointAnalysisTaskIDs() const {
+    return analysis_task_ids;
+  }
+#endif
   
   [[nodiscard]] size_t GetBiotaID() const { return biota_id; }
   [[nodiscard]] bool IsAnalysis() const { return biota_id == ANALYSIS_BIOTA_ID; }
@@ -303,6 +322,31 @@ public:
     analysis_inst_set_ptr = &is;
     if (IsAnalysis()) inst_set_ptr = &is;
     return *this;
+  }
+
+  AvidaVM & SetCallbackTables(
+    const live_callback_array_t & live_callbacks,
+    const analysis_callback_array_t & analysis_callbacks
+  ) {
+    live_callbacks_ptr = &live_callbacks;
+    analysis_callbacks_ptr = &analysis_callbacks;
+    return *this;
+  }
+
+  void DispatchCallback(size_t id) {
+    emp_always_assert(HasLiveBiotaID(), "Live callback invoked by a VM outside the Biota.");
+    emp_always_assert(live_callbacks_ptr && id < live_callbacks_ptr->size());
+    (*live_callbacks_ptr)[id](biota_id);
+  }
+
+  void DispatchAnalysisCallback(size_t id) {
+    emp_always_assert(IsAnalysis(), "Analysis callback invoked by a live VM.");
+    emp_always_assert(analysis_callbacks_ptr && id < analysis_callbacks_ptr->size());
+    (*analysis_callbacks_ptr)[id](*this);
+  }
+
+  [[nodiscard]] bool HasRuntimeBindings() const {
+    return inst_set_ptr && analysis_inst_set_ptr && live_callbacks_ptr && analysis_callbacks_ptr;
   }
 
 
@@ -759,7 +803,8 @@ void AvidaVM::BuildInstSet(inst_set_t & inst_set) {
   inst_set.AddInst("TestLess", Inst::TestLess, "Test whether one popped value is less than another.");
   inst_set.AddInst("TestEqu", Inst::TestEqu, "Test whether two popped stack values are equal.");
   inst_set.AddInst("Nand", Inst::Nand, "Apply bitwise NAND to two popped stack values.");
-  inst_set.AddInst("Xor", Inst::Xor, "Apply bitwise XOR to two popped stack values.");
+  // Xor is available as an implementation, but is not part of the default AvidaVM profile.
+  // inst_set.AddInst("Xor", Inst::Xor, "Apply bitwise XOR to two popped stack values.");
   inst_set.AddInst("If", Inst::If, "Skip the next instruction when the selected value is zero.");
   inst_set.AddInst("IfNot", Inst::IfNot, "Skip the next instruction when the selected value is nonzero.");
   inst_set.AddInst("Scope", Inst::Scope, "Mark a scope boundary identified by following Nops.");
