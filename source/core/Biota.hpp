@@ -80,6 +80,7 @@ public:
     size_t index = active_bits.ToggleZero();  // Find empty position in Biota and set it.
     if (index < orgs.size()) {
       orgs[index].SetGenome(std::forward<GENOME_T>(new_genome));
+      orgs[index].ResetPhenotype();
     }
     else if (index < active_bits.GetSize()) {
       emp_assert(index == orgs.size());
@@ -87,7 +88,7 @@ public:
       orgs.back().SetBiotaID(index);
     }
     else {
-      emp::notify::Error("Trying to reserve more organisms than reserved!");
+      emp::notify::Error("Trying to reserve more organisms than available!");
     }
 
     organism_t & reserved_org = orgs[index];
