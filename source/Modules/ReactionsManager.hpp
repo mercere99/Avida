@@ -18,6 +18,7 @@
  *  had a parent perform it -- a proxy for how many are likely capable of that task.
  */
 
+#include <algorithm>
 #include <cstddef>    // for size_t
 #include <map>
 #include <string>
@@ -164,6 +165,18 @@ public:
     return configs;
   }
 
+#ifdef AVIDA_CHECKPOINT_DIAGNOSTICS
+  [[nodiscard]] const auto & CheckpointTaskReactions() const { return task_reactions; }
+  [[nodiscard]] size_t CheckpointResolvedReactionCount() const {
+    return std::ranges::count_if(reactions, [](const Reaction & reaction) {
+      return static_cast<bool>(reaction.trait_ptr);
+    });
+  }
+  [[nodiscard]] const auto & CheckpointPhenotypeCategories() const {
+    return phenotype_categories;
+  }
+#endif
+
   void SetConfigs(const emp::vector<Config> & configs) {
     emp_always_assert(!avida.IsInitialized(),
       "Reactions can only be configured before a run starts.");
@@ -182,6 +195,19 @@ public:
         .trait_ptr = nullptr
       });
     }
+  }
+
+  void AfterLoad() {
+    ValidateConfig();
+    phenotype_categories.clear();
+  }
+
+  [[nodiscard]] bool LoadedStateOK() const {
+    if (task_reactions.size() != avida.GetNumTasks()) return false;
+    for (const Reaction & reaction : reactions) {
+      if (!reaction.trait_ptr || reaction.task_id >= task_reactions.size()) return false;
+    }
+    return true;
   }
 
   // === Signal Listeners ===
