@@ -8,7 +8,10 @@
  *  Track genotypes that are the same between parents and offspring.
  */
 
+#include <algorithm>
 #include <iostream>
+#include <limits>
+#include <tuple>
 
 #include "emp/base/array.hpp"
 #include "emp/bits/BitSet.hpp"
@@ -42,7 +45,20 @@ public:
   void SetTag(int8_t in)  { tag_id = in; }
 
   void Serialize(emp::SerialPod & pod) {
-    pod(id, total_count, cur_count, rank, tag_id);
+    int rank_value = static_cast<int>(rank);
+    int tag_value = static_cast<int>(tag_id);
+    pod(id, total_count, cur_count, rank_value, tag_value);
+    if (pod.IsLoad()) {
+      emp_always_assert(
+        rank_value >= std::numeric_limits<int8_t>::min()
+          && rank_value <= std::numeric_limits<int8_t>::max()
+          && tag_value >= std::numeric_limits<int8_t>::min()
+          && tag_value <= std::numeric_limits<int8_t>::max(),
+        "Serialized genotype rank or tag is outside its byte range."
+      );
+      rank = static_cast<int8_t>(rank_value);
+      tag_id = static_cast<int8_t>(tag_value);
+    }
   }
 };
 
@@ -152,6 +168,44 @@ public:
     pod(total_genotypes, id_map);
   }
 
+  void AfterLoad() {
+    rank_ids.fill(0);
+    tag_slots_used.Clear();
+    for (const auto & [id, genotype] : id_map) {
+      if (genotype.GetRank() >= 0) {
+        const size_t rank = static_cast<size_t>(genotype.GetRank());
+        if (rank < rank_ids.size() && rank_ids[rank] == 0) rank_ids[rank] = id;
+      }
+      if (genotype.HasTag()) {
+        const size_t tag = static_cast<size_t>(genotype.GetTag());
+        if (tag < NUM_TAG_SLOTS) tag_slots_used.Set(tag);
+      }
+    }
+  }
+
+  [[nodiscard]] bool LoadedStateOK() const {
+    emp::RobinHoodMap<uint64_t, uint32_t, true> active_counts;
+    emp::BitSet<NUM_TAG_SLOTS> seen_tags;
+    avida.GetBiota().ForEachOrg([&active_counts](auto & organism) {
+      ++active_counts[organism.GetPhenotype().genotype_id];
+    });
+    for (const auto & [id, genotype] : id_map) {
+      if (genotype.GetID() != id) return false;
+      if (active_counts.FindValue(id, 0) != genotype.GetCurCount()) return false;
+      if (genotype.GetRank() >= 0) {
+        const size_t rank = static_cast<size_t>(genotype.GetRank());
+        if (rank >= rank_ids.size() || rank_ids[rank] != id) return false;
+        if (!genotype.HasTag()) return false;
+      } else if (genotype.HasTag()) return false;
+      if (genotype.HasTag()) {
+        const size_t tag = static_cast<size_t>(genotype.GetTag());
+        if (tag >= NUM_TAG_SLOTS || seen_tags.Has(tag) || !tag_slots_used.Has(tag)) return false;
+        seen_tags.Set(tag);
+      }
+    }
+    return active_counts.size() == id_map.size() && seen_tags == tag_slots_used;
+  }
+
   // === Phenotypic Traits ===
 
   struct Phenotype {
@@ -165,6 +219,28 @@ public:
   // === Accessors ===
 
   [[nodiscard]] size_t GetNumGenotypes() const { return id_map.size(); }
+
+#ifdef AVIDA_CHECKPOINT_DIAGNOSTICS
+  [[nodiscard]] uint64_t CheckpointTotalGenotypes() const { return total_genotypes; }
+  [[nodiscard]] auto CheckpointGenotypeRecords() const {
+    using record_t = std::tuple<uint64_t, uint64_t, uint32_t, int8_t, int8_t>;
+    emp::vector<record_t> records;
+    records.reserve(id_map.size());
+    for (const auto & [id, genotype] : id_map) {
+      records.emplace_back(
+        id,
+        genotype.GetTotalCount(),
+        genotype.GetCurCount(),
+        genotype.GetRank(),
+        genotype.GetTag()
+      );
+    }
+    std::ranges::sort(records);
+    return records;
+  }
+  [[nodiscard]] const auto & CheckpointRankIDs() const { return rank_ids; }
+  [[nodiscard]] const auto & CheckpointTagSlotsUsed() const { return tag_slots_used; }
+#endif
 
   [[nodiscard]] const Genotype & GetGenotype(uint64_t id) const { return id_map.Get(id); }
 
