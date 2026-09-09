@@ -123,6 +123,17 @@ public:
     // Nothing extra to serialize; everything should be in the SettingsManager
   }
 
+  void AfterLoad() {
+    update_counts.fill(0);
+    analysis_inputs.fill(0);
+  }
+
+#ifdef AVIDA_CHECKPOINT_DIAGNOSTICS
+  [[nodiscard]] const auto & CheckpointTaskIDs() const { return task_id; }
+  [[nodiscard]] const auto & CheckpointUpdateCounts() const { return update_counts; }
+  [[nodiscard]] const auto & CheckpointAnalysisInputs() const { return analysis_inputs; }
+#endif
+
   constexpr static uint32_t PerformOp(LogicOp op, uint32_t valA, uint32_t valB) {
     switch (op) {
     case LogicOp::FALSE:       return 0;
