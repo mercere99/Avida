@@ -23,6 +23,9 @@ private:
 
   AvidaVM::inst_set_t inst_set;           // Live instruction set (used during evolution).
   AvidaVM::inst_set_t analysis_inst_set;  // Parallel set for isolated tracing/analysis.
+  AvidaVM::live_callback_array_t callbacks;
+  AvidaVM::analysis_callback_array_t analysis_callbacks;
+  size_t num_callbacks = 0;
   double offspring_size_range = 2.0;      // Offspring genome must be within this factor of parent size.
   size_t trace_cycles = 200;              // Number of CPU cycles to show in a requested trace.
 
@@ -191,6 +194,13 @@ public:
     // still see which tasks an organism performs without rewarding it or perturbing the population.
     AddCallback("Output",
       [this](size_t biota_id){
+#ifdef AVIDA_CHECKPOINT_DIAGNOSTICS
+        emp_always_assert(
+          avida.IsOccupied(biota_id),
+          "OrgTypeAvidian Output callback received inactive organism ID ", biota_id,
+          " at update ", avida.GetUpdate()
+        );
+#endif
         auto & org = avida.GetOrg(biota_id);
         avida.SignalOutput(org, org.Hardware().GetOutput());
       },
@@ -199,41 +209,21 @@ public:
       });
   }
 
-  static constexpr size_t MAX_CALLBACKS = 32;  // Max number of callback instructions allowed.
+  static constexpr size_t MAX_CALLBACKS = AvidaVM::MAX_CALLBACKS;
 
-  // Number of callback slots assigned so far (shared across all instances).
-  [[nodiscard]] static size_t & GetNumCallbacks() {
-    static size_t num_callbacks = 0;
-    return num_callbacks;
-  }
-
-  // Callback functions stored by slot index (used during evolution).
-  [[nodiscard]] static auto & GetCallbackStorage(size_t id) {
-    static std::array<std::function<void(size_t)>, MAX_CALLBACKS> callbacks;
-    emp_assert(id < GetNumCallbacks());
-    return callbacks[id];
-  }
-
-  // Analysis-variant callbacks, stored by the SAME slot index (used only while tracing/analyzing).
-  // Kept in a parallel array -- rather than a second field per slot -- so the evolutionary hot
-  // path (GetCallbackStorage) is byte-for-byte unchanged and never touches this table.
-  [[nodiscard]] static auto & GetAnalysisCallbackStorage(size_t id) {
-    static std::array<std::function<void(AvidaVM &)>, MAX_CALLBACKS> callbacks;
-    emp_assert(id < GetNumCallbacks());
-    return callbacks[id];
-  }
+#ifdef AVIDA_CHECKPOINT_DIAGNOSTICS
+  [[nodiscard]] size_t CheckpointCallbackCount() const { return num_callbacks; }
+#endif
 
   // Simple template functions that forward to the std::function in the matching storage array.
   // These let a plain function pointer (not a std::function) be stored in the InstSet.
   template <size_t ID>
   static void DoCallback(AvidaVM & vm) {
-    emp_always_assert(vm.HasLiveBiotaID(), "Live callback invoked by a VM outside the Biota.");
-    GetCallbackStorage(ID)(vm.GetBiotaID());
+    vm.DispatchCallback(ID);
   }
   template <size_t ID>
   static void DoAnalysisCallback(AvidaVM & vm) {
-    emp_always_assert(vm.IsAnalysis(), "Analysis callback invoked by a live VM.");
-    GetAnalysisCallbackStorage(ID)(vm);
+    vm.DispatchAnalysisCallback(ID);
   }
 
   // Pre-built tables of all MAX_CALLBACKS possible redirects, one per storage array.  Indexed by
@@ -259,10 +249,10 @@ public:
   void AddCallback(const emp::String & name,
                    const std::function<void(size_t)> & callback,
                    const std::function<void(AvidaVM &)> & analysis_fun = [](AvidaVM &){}) {
-    emp_always_assert(GetNumCallbacks() < MAX_CALLBACKS, "Too many callbacks; failed to add '", name, "'");
-    const size_t id = GetNumCallbacks()++;  // Claim slot and increment before GetCallbackStorage.
-    GetCallbackStorage(id) = callback;
-    GetAnalysisCallbackStorage(id) = analysis_fun;
+    emp_always_assert(num_callbacks < MAX_CALLBACKS, "Too many callbacks; failed to add '", name, "'");
+    const size_t id = num_callbacks++;
+    callbacks[id] = callback;
+    analysis_callbacks[id] = analysis_fun;
     AvidaVM::AddCallback(inst_set, name, GetRedirectTable()[id]);
     AvidaVM::AddCallback(analysis_inst_set, name, GetAnalysisRedirectTable()[id]);
   }
@@ -273,6 +263,19 @@ public:
   void SetupHardware(ORG_T & org) {
     org.GetPhenotype().hardware.SetInstSet(inst_set);
     org.GetPhenotype().hardware.SetAnalysisInstSet(analysis_inst_set);
+    org.GetPhenotype().hardware.SetCallbackTables(callbacks, analysis_callbacks);
+  }
+
+  void AfterLoad() {
+    avida.GetBiota().ForEachOrg([this](auto & organism) { this->SetupHardware(organism); });
+  }
+
+  [[nodiscard]] bool LoadedStateOK() const {
+    bool result = true;
+    avida.GetBiota().ForEachOrg([&result](auto & organism) {
+      result &= organism.Hardware().HasRuntimeBindings();
+    });
+    return result;
   }
 
   template <concepts::Organism ORG_T>
