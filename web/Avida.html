@@ -10,6 +10,41 @@
 <body>
   <noscript>Avida requires JavaScript and WebAssembly.</noscript>
   <main id="emp_base"></main>
-  <script src="Avida.js"></script>
+  <script>
+    const startupRoot = document.getElementById("emp_base");
+    const showStartupError = message => {
+      if (startupRoot.children.length) return;
+      const warning = document.createElement("section");
+      warning.className = "startup-warning";
+      warning.setAttribute("role", "alert");
+      const heading = document.createElement("h1");
+      heading.textContent = "Avida could not start";
+      const details = document.createElement("p");
+      details.textContent = message;
+      warning.append(heading, details);
+      startupRoot.append(warning);
+    };
+    window.addEventListener("error", event => showStartupError(event.message));
+    window.addEventListener("unhandledrejection", event => {
+      showStartupError(String(event.reason || "Avida initialization failed."));
+    });
+    if (!window.crossOriginIsolated || typeof SharedArrayBuffer === "undefined") {
+      startupRoot.innerHTML = `
+        <section class="startup-warning" role="alert">
+          <h1>Avida needs its worker-enabled web server</h1>
+          <p>Avida runs population updates in a background WebAssembly worker. Browsers only
+          enable the worker's shared memory when the server sends the required COOP and COEP
+          security headers; a plain file or <code>python -m http.server</code> cannot do that.</p>
+          <p>From the project root, run <code>make web</code> and then <code>make server</code>.
+          Open <code>http://127.0.0.1:8080/Avida.html</code> exactly as printed—an older
+          <code>localhost:8000</code> tab may be a different, non-worker server.</p>
+        </section>`;
+    } else {
+      const script = document.createElement("script");
+      const population = new URLSearchParams(window.location.search).get("population");
+      script.src = population === "well-mixed" ? "Avida-well-mixed.js" : "Avida.js";
+      document.body.appendChild(script);
+    }
+  </script>
 </body>
 </html>
